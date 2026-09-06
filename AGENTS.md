@@ -208,6 +208,10 @@ rebuild that graph from elements and bond orders: formal charges and explicit H 
 are essential for ammonium, iminium, azide and aromatic N-H chemistry. Keep a separate
 coordinate-free source copy for stereo validation; only the coordinate mol receives
 geometry-derived tags. The mapping rejects duplicate names and element mismatches.
+ESMFold2 and the shared biotite core follow the same rule after source-graph alignment,
+using `mol_with_reference_conformer` to preserve charges, isotopes and H counts in the
+working force-field molecule. `align_stereo_mol` must not sanitize the incomplete target
+graph: it needs only its elements/connectivity, while the complete source is validated.
 
 **AF3 residue names carry a gap-token hazard.** AF3 encodes `aatype` with the vocabulary that
 has a GAP entry right after `UNK` (`… 20:UNK, 21:'-', 22:A, 23:G, 24:C, 25:U, 26:DA …`), while

@@ -20,7 +20,7 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 
 from rgi_utils._biotite_adapter import biotite_get_elements, biotite_ligand_confs
-from rgi_utils._mol_build import _expected_stereo
+from rgi_utils._mol_build import _expected_stereo, _stereo_mismatch_counts
 from rgi_utils._moltype import MOLTYPE_BY_ID
 from rgi_utils.alphafold3.adapter import AF3RestraintAdapter
 from rgi_utils.atom_context import decode_atom_name
@@ -461,6 +461,178 @@ def _stereo_aa():
         res_name=["UNL"] * 4,
         conformer_restraints=[True] * 4,
     )
+
+
+def _chemistry_adapter(tool, source, smiles):
+    """Exercise each real adapter using the same complete ligand graph."""
+    from types import SimpleNamespace
+
+    n_atoms = source.GetNumAtoms()
+    coords = np.asarray(source.GetConformer().GetPositions())
+    elements = np.array([a.GetAtomicNum() for a in source.GetAtoms()])
+    counts = {}
+    names = []
+    for atom in source.GetAtoms():
+        symbol = atom.GetSymbol().upper()
+        counts[symbol] = counts.get(symbol, 0) + 1
+        names.append(f"{symbol}{counts[symbol]}")
+    encoded = np.stack([_enc(name) for name in names])
+    kekule = Chem.Mol(source)
+    Chem.Kekulize(kekule, clearAromaticFlags=True)
+    bonds = [
+        (b.GetBeginAtomIdx(), b.GetEndAtomIdx(), int(b.GetBondTypeAsDouble()))
+        for b in kekule.GetBonds()
+    ]
+    if tool == "boltz":
+        torch = pytest.importorskip("torch")
+        from rgi_utils.boltz.adapter import BoltzFeatsAdapter
+
+        return BoltzFeatsAdapter(
+            {
+                "atom_to_token": torch.eye(n_atoms).unsqueeze(0),
+                "asym_id": torch.ones((1, n_atoms), dtype=torch.long),
+                "atom_pad_mask": torch.ones((1, n_atoms), dtype=torch.bool),
+                "ref_element": torch.tensor(elements[None]),
+                "ref_conformer_restraint": torch.ones((1, n_atoms), dtype=torch.bool),
+                "record": [
+                    SimpleNamespace(
+                        chains=[SimpleNamespace(chain_id=1, chain_name="B")]
+                    )
+                ],
+                "ligand_mols": {1: source},
+            }
+        )
+    if tool == "alphafold3":
+        return AF3RestraintAdapter(
+            {
+                "asym_id": np.ones(n_atoms, dtype=np.int64),
+                "ref_mask": np.ones((n_atoms, 1), dtype=bool),
+                "ref_pos": coords[:, None],
+                "ref_atom_name_chars": encoded[:, None],
+                "ref_element": elements[:, None],
+                "is_protein": np.zeros(n_atoms, dtype=bool),
+                "is_dna": np.zeros(n_atoms, dtype=bool),
+                "is_rna": np.zeros(n_atoms, dtype=bool),
+                "aatype": np.zeros(n_atoms, dtype=np.int64),
+            },
+            {"B": 1},
+            _POLY,
+            ligand_mols=[("B", Chem.Mol(source), True)],
+        )
+    if tool == "chai":
+        from rgi_utils.chai.adapter import ChaiStructureAdapter
+
+        return ChaiStructureAdapter(
+            SimpleNamespace(
+                atom_token_index=np.arange(n_atoms),
+                atom_exists_mask=np.ones(n_atoms, dtype=bool),
+                token_entity_type=np.full(n_atoms, 3),
+                atom_ref_pos=coords,
+                atom_ref_element=elements,
+                atom_ref_name=names,
+                subchain_id=np.tile([ord("B"), 255, 255, 255], (n_atoms, 1)),
+            ),
+            n_atoms,
+            smiles_by_subchain={"B": smiles},
+            conf_restraints_by_subchain={"B": True},
+        )
+    if tool == "esmfold2":
+        from rgi_utils.esmfold2.adapter import ESMFold2Adapter
+
+        token_bonds = np.zeros((n_atoms, n_atoms))
+        for i, j, _ in bonds:
+            token_bonds[i, j] = token_bonds[j, i] = 1
+        return ESMFold2Adapter(
+            {
+                "asym_id": np.ones((1, n_atoms), dtype=np.int64),
+                "mol_type": np.full((1, n_atoms), 3),
+                "atom_to_token": np.arange(n_atoms)[None],
+                "atom_attention_mask": np.ones((1, n_atoms), dtype=bool),
+                "ref_pos": coords[None],
+                "ref_element": elements[None],
+                "ref_atom_name_chars": encoded[None],
+                "token_bonds": token_bonds[None],
+            },
+            [
+                SimpleNamespace(
+                    asym_id=1,
+                    chain_id="B",
+                    source_smiles=smiles,
+                    conformer_restraints=True,
+                    ligand_bond_orders=[(names[i], names[j], o) for i, j, o in bonds],
+                )
+            ],
+        )
+    aa = _FakeAtomArray(
+        element=[a.GetSymbol() for a in source.GetAtoms()],
+        coord=coords,
+        bonds=bonds,
+        annots=["molecule_type_id", "conformer_restraints"],
+        label_asym_id=["B"] * n_atoms,
+        chain_id=["B"] * n_atoms,
+        hetero=[True] * n_atoms,
+        molecule_type_id=[3] * n_atoms,
+        mol_type=["ligand"] * n_atoms,
+        atom_name=names,
+        res_name=["UNL"] * n_atoms,
+        conformer_restraints=[True] * n_atoms,
+    )
+    features = {
+        "atom_array": aa,
+        "atom_to_token_idx": np.arange(n_atoms)[None],
+        "smiles_by_chain": {"B": smiles},
+        "ref_pos": coords[None],
+    }
+    if tool == "protenix":
+        from rgi_utils.protenix.adapter import ProtenixAdapter
+
+        return ProtenixAdapter(features)
+    if tool == "opendde":
+        from rgi_utils.opendde.adapter import OpenDDEAdapter
+
+        return OpenDDEAdapter(features)
+    from rgi_utils.openfold3.adapter import Openfold3Adapter
+
+    assert tool == "openfold3"
+    return Openfold3Adapter(
+        aa, n_atoms, ref_coords=coords, smiles_by_chain={"B": smiles}
+    )
+
+
+@pytest.mark.parametrize(
+    "tool",
+    ["boltz", "alphafold3", "chai", "esmfold2", "protenix", "openfold3", "opendde"],
+)
+@pytest.mark.parametrize(
+    "smiles",
+    [
+        "C[N+](C)(C)[C@@H](F)/C=C/CN=[N+]=[N-]",
+        "C[n+]1ccc(/C=C/Cl)cc1",
+        "F/C=C/c1ncc[nH]1",
+        "[13CH3][C@H](O)/C=C/Cl",
+    ],
+)
+def test_all_adapters_preserve_source_chemistry(tool, smiles):
+    source = Chem.AddHs(Chem.MolFromSmiles(smiles))
+    assert AllChem.EmbedMolecule(source, randomSeed=7) == 0
+    source = Chem.RemoveHs(source)
+    (ligand,) = _chemistry_adapter(tool, source, smiles).iter_ligand_confs()
+    Chem.SanitizeMol(ligand.mol)
+    assert Chem.MolToSmiles(ligand.stereo_mol) == Chem.MolToSmiles(source)
+    for actual, reference in zip(ligand.mol.GetAtoms(), source.GetAtoms()):
+        assert actual.GetAtomicNum() == reference.GetAtomicNum()
+        assert actual.GetFormalCharge() == reference.GetFormalCharge()
+        assert actual.GetIsotope() == reference.GetIsotope()
+        assert actual.GetTotalNumHs() == reference.GetTotalNumHs()
+    np.testing.assert_array_equal(
+        ligand.global_indices, np.arange(source.GetNumAtoms())
+    )
+    np.testing.assert_allclose(
+        ligand.mol.GetConformer().GetPositions(), ligand.conf_coords
+    )
+    expected = _expected_stereo(source, source.GetConformer().GetPositions())
+    assert expected[1]
+    assert _stereo_mismatch_counts(source, ligand.conf_coords, expected) == (0, 0)
 
 
 def test_biotite_get_elements():

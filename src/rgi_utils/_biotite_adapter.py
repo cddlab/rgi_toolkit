@@ -20,6 +20,7 @@ import numpy as np
 
 from rgi_utils._mol_build import atomic_number as _atomic_number
 from rgi_utils._mol_build import build_ligand_mol as _build_ligand_mol
+from rgi_utils._mol_build import mol_with_reference_conformer
 from rgi_utils.atom_context import LigandConf
 
 
@@ -98,6 +99,10 @@ def biotite_ligand_confs(
                 mol, coords = result
             else:
                 mol, coords, stereo_mol = result
+        if stereo_mol is not None:
+            # Source chemistry also belongs to the force-field molecule, not only
+            # to the separate stereo-validation graph.
+            mol = mol_with_reference_conformer(stereo_mol, coords)
         conf_rest = conf_rest_default
         if conf_rest_annot is not None:
             conf_rest = bool(conf_rest_annot[idxs].any())

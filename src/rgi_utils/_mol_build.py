@@ -201,7 +201,10 @@ def align_stereo_mol(source_mol, target_mol, source_to_target=None):
 
     try:
         source = Chem.RemoveAllHs(Chem.Mol(source_mol))
-        target = Chem.RemoveAllHs(Chem.Mol(target_mol))
+        # The target supplies atom order and connectivity only. Rebuilt targets may
+        # lack charges/H metadata, so sanitizing them would reject valid source
+        # graphs (e.g. quaternary nitrogen) before the topology can be aligned.
+        target = Chem.RemoveAllHs(Chem.Mol(target_mol), sanitize=False)
         n_atom = source.GetNumAtoms()
         if n_atom != target.GetNumAtoms():
             return None
@@ -285,6 +288,21 @@ def _coords_from_mol(mol, coords):
     out.RemoveAllConformers()
     out.AddConformer(conf, assignId=True)
     return out
+
+
+def mol_with_reference_conformer(source_mol, coords):
+    """Copy complete source chemistry and attach geometry-derived stereo tags.
+
+    The source must already be in coordinate order. Its graph-defined stereo stays
+    untouched for independent validation against the returned coordinate molecule.
+    """
+    from rdkit import Chem
+
+    mol = _coords_from_mol(source_mol, coords)
+    if mol is None:
+        raise ValueError("source molecule and reference coordinates differ in size")
+    Chem.AssignStereochemistryFrom3D(mol)
+    return mol
 
 
 def _eligible_stereo_sites(mol):

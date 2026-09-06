@@ -37,7 +37,7 @@ from typing import Iterator
 
 import numpy as np
 
-from rgi_utils._mol_build import align_stereo_mol
+from rgi_utils._mol_build import align_stereo_mol, mol_with_reference_conformer
 from rgi_utils._mol_build import build_ligand_mol as _build_ligand_mol
 from rgi_utils._moltype import MOLTYPE_BY_ID
 from rgi_utils.atom_context import AtomRecord, LigandConf, decode_atom_name
@@ -285,6 +285,8 @@ class ESMFold2Adapter:
                         f"ESMFold2 chain {self._asym_to_name.get(asym, asym)}: "
                         "cannot map source SMILES stereochemistry to the model atom order"
                     )
+                if stereo_mol is not None:
+                    mol = mol_with_reference_conformer(stereo_mol, coords)
             yield LigandConf(
                 mol=mol,
                 conf_coords=coords,
