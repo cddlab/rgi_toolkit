@@ -14,9 +14,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 from rdkit import Chem
 
-from rgi_utils._mol_build import _expected_stereo
+from rgi_utils._mol_build import _expected_stereo, _stereo_mismatch_counts
 from rgi_utils.chai.adapter import ChaiStructureAdapter
 
 
@@ -126,3 +127,76 @@ def test_chai_ligand_retains_source_stereo():
         ligand[0].stereo_mol, np.zeros((4, 3), dtype=float)
     )
     assert list(bonds.values()) == ["E"]
+
+
+@pytest.mark.parametrize(
+    "smiles",
+    [
+        "C[N+](C)(C)C[C@@H](F)/C=C/Cl",
+        "C[N+](C)=C/C=C/Cl",
+        "F/C=C/CN=[N+]=[N-]",
+        "C[n+]1ccc(/C=C/Cl)cc1",
+        "F/C=C/c1ncc[nH]1",
+        "[13CH3][C@H](O)/C=C/Cl",
+    ],
+)
+def test_chai_preserves_source_chemistry_in_reordered_atoms(smiles):
+    """Name mapping must preserve charges, H counts, isotopes and source stereo."""
+    source = Chem.MolFromSmiles(smiles)
+    counts = {}
+    names = []
+    for atom in source.GetAtoms():
+        symbol = atom.GetSymbol().upper()
+        counts[symbol] = counts.get(symbol, 0) + 1
+        names.append(f"{symbol}{counts[symbol]}_1")
+    n_atoms = source.GetNumAtoms()
+    order = list(reversed(range(n_atoms)))
+    expected = Chem.RenumberAtoms(source, order)
+    sc = _fake_context(
+        ["L"] * n_atoms,
+        [3] * n_atoms,
+        ["LIG"] * n_atoms,
+        [names[i] for i in order],
+    )
+    sc.atom_ref_element = np.array(
+        [atom.GetAtomicNum() for atom in expected.GetAtoms()]
+    )
+    sc.atom_ref_pos = np.zeros((n_atoms, 3))
+    adapter = ChaiStructureAdapter(
+        sc,
+        num_atoms=n_atoms,
+        smiles_by_subchain={"L": smiles},
+        conf_restraints_by_subchain={"L": True},
+    )
+    (ligand,) = adapter.iter_ligand_confs()
+    Chem.SanitizeMol(ligand.mol)
+    for actual, reference in zip(ligand.mol.GetAtoms(), expected.GetAtoms()):
+        assert actual.GetAtomicNum() == reference.GetAtomicNum()
+        assert actual.GetFormalCharge() == reference.GetFormalCharge()
+        assert actual.GetIsotope() == reference.GetIsotope()
+        assert actual.GetTotalNumHs() == reference.GetTotalNumHs()
+    assert Chem.MolToSmiles(ligand.stereo_mol) == Chem.MolToSmiles(source)
+    assert np.isfinite(ligand.conf_coords).all()
+    np.testing.assert_allclose(
+        ligand.mol.GetConformer().GetPositions(), ligand.conf_coords
+    )
+    stereo = _expected_stereo(expected, sc.atom_ref_pos)
+    assert stereo[1]
+    assert _stereo_mismatch_counts(expected, ligand.conf_coords, stereo) == (0, 0)
+
+
+@pytest.mark.parametrize(
+    "names,elements", [(["C1", "C1"], [6, 6]), (["C1", "C2"], [6, 7])]
+)
+def test_chai_rejects_inconsistent_source_atom_mapping(names, elements):
+    sc = _fake_context(["L", "L"], [3, 3], ["LIG", "LIG"], names)
+    sc.atom_ref_pos = np.zeros((2, 3))
+    sc.atom_ref_element = np.array(elements)
+    adapter = ChaiStructureAdapter(
+        sc,
+        num_atoms=2,
+        smiles_by_subchain={"L": "CC"},
+        conf_restraints_by_subchain={"L": True},
+    )
+    with pytest.raises(ValueError, match="cannot map source SMILES"):
+        list(adapter.iter_ligand_confs())

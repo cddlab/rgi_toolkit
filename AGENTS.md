@@ -106,7 +106,7 @@ chiral/cistrans restraints (global indices, multi-ligand) and the dynamic
 fixed-background `VdwConfig` is assembled. Cis/trans detection keys on
 acyclic, non-aromatic `BondType.DOUBLE` bonds and targets the reference-conformer
 torsion; it needs real bond orders, which every tool supplies — chai via its adapter's
-source-SMILES path (`chai/adapter.py` `_mol_from_smiles`, Kekulized orders), the
+source-SMILES path (`chai/adapter.py` `_mol_from_smiles`, complete graph), the
 geometry-perceived fallback (no SMILES) being all-single so `cistrans=0`.
 
 `_extract_conformer` does NOT measure targets off the tool's cached conformer directly — it first
@@ -202,6 +202,12 @@ data): implement `iter_atoms()` (→
 features arrive as a **biotite `AtomArray`** (protenix / openfold3 / opendde) share
 `_biotite_adapter.py` (`biotite_get_elements` / `biotite_ligand_confs`) rather than each
 re-deriving elements + ligand conformers — extend that module, not the three call sites.
+
+Chai maps source SMILES atoms by name and renumbers the complete source graph. Do not
+rebuild that graph from elements and bond orders: formal charges and explicit H counts
+are essential for ammonium, iminium, azide and aromatic N-H chemistry. Keep a separate
+coordinate-free source copy for stereo validation; only the coordinate mol receives
+geometry-derived tags. The mapping rejects duplicate names and element mismatches.
 
 **AF3 residue names carry a gap-token hazard.** AF3 encodes `aatype` with the vocabulary that
 has a GAP entry right after `UNK` (`… 20:UNK, 21:'-', 22:A, 23:G, 24:C, 25:U, 26:DA …`), while
