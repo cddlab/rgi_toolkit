@@ -30,7 +30,9 @@ from rgi_toolkit._config_util import (
     validate_vdw_config,
 )
 from rgi_toolkit._mol_build import ff_relax, parse_relax_force_field, repair_stereo
+from rgi_toolkit._monlib_spec import append_library_arrays, used_peptides
 from rgi_toolkit.atom_context import LigandConf
+from rgi_toolkit.monlib_geom import LibraryTargets, missing_geometry
 from rgi_toolkit.spec import (
     DIST_TYPE_CODES,
     ActiveVdwConfig,
@@ -865,6 +867,7 @@ def build_spec(
         ligand_confs, force_field=relax_ff
     )
     polymer_atoms = np.empty(0, dtype=np.int64)
+    library = LibraryTargets()
     if polymer_geometry is not None:
         pb, pa, pc, _pd, pp = _extract_conformer(
             polymer_geometry.residue_confs, relax=False
@@ -874,34 +877,46 @@ def build_spec(
         # tuple is intra-residue, so "all its atoms are in a covered residue" identifies
         # exactly the tuples the library re-states -- drop those and keep the rest, so a
         # partially covered structure mixes sources per residue and never doubles up.
-        lib_atoms = polymer_geometry.library_atoms
+        library = polymer_geometry.library
+        lib_atoms = library.atoms
         if lib_atoms:
             pb = [t for t in pb if not lib_atoms.issuperset(t[:2])]
             pa = [t for t in pa if not lib_atoms.issuperset(t[:3])]
             pp = [t for t in pp if not lib_atoms.issuperset(t)]
         bonds.extend(pb)
-        bonds.extend(polymer_geometry.library_bonds)
         bonds.extend(polymer_geometry.link_bonds)
         angles.extend(pa)
-        angles.extend(polymer_geometry.library_angles)
         angles.extend(polymer_geometry.link_angles)
-        # Chirality stays reference-conformer-derived even under a library: only the
-        # SIGN protects stereochemistry, and the library's ChiralityType convention
-        # would have to be reconciled with _chiral_vol's atom ordering first.
+        if cw > 0:
+            uncovered_chirals = {
+                t[0]
+                for t in pc
+                if t[0] in lib_atoms
+                and t[0] not in library.chiral_centers
+                and t[0] not in library.chiral_fallback
+            }
+            if uncovered_chirals:
+                missing_geometry(
+                    f"no chiral definition for atom(s) {sorted(uncovered_chirals)}",
+                    library.on_missing,
+                )
+        pc = [t for t in pc if t[0] not in library.chiral_centers]
         chirals.extend(pc)  # residue-local stereocentres (Calpha) only
         # Polymer planarity: residue-local aromatic rings (His/Phe/Tyr/Trp side chains,
         # nucleic-acid bases) from _extract_conformer -- or the library's named plane
         # groups, which put a whole nucleobase (ring + exocyclic atoms + C1') in ONE
         # group where SSSR perception splits a purine into two fused rings -- plus the
-        # canonical peptide plane (a 5-atom group in global indices; appended directly,
+        # canonical peptide plane (a 4-atom group in global indices; appended directly,
         # bypassing the residue-local coplanarity check like link_bonds/link_angles).
         planes.extend(pp)
-        planes.extend(polymer_geometry.library_planes)
         planes.extend(polymer_geometry.link_planes)
         polymer_atoms = np.asarray(polymer_geometry.atom_indices, dtype=np.int64)
     # VdW covalent exclusions must survive even when bond/angle energy blocks are off.
     exclusion_bonds = list(bonds)
     exclusion_angles = list(angles)
+    # Covalent exclusions survive disabled dictionary energies (including ESD <= 0).
+    exclusion_bonds.extend((*idx, 0.0, None) for idx in library.bond_pairs)
+    exclusion_angles.extend((*idx, 0.0, None) for idx in library.angle_tuples)
     # weight<=0 means "disable": drop the term BEFORE the active_sites union so its
     # atoms do not become optimisable and it is never iterated — uniform across all
     # conformer terms. weight<=0 now also covers an ABSENT sub-block (_conf_weight -> 0),
@@ -929,6 +944,11 @@ def build_spec(
         active.update((g0, g1, g2, g3))
     for grp in planes:
         active.update(grp)
+    for rows in library.terms.values():
+        for row in rows:
+            active.update(row.atoms)
+    for selector in used_peptides(library):
+        active.update(library.peptides[selector].atoms)
     resolved_restraints = itertools.chain(
         distance_restraints,
         rmsd_restraints,
@@ -1004,15 +1024,8 @@ def build_spec(
         bond = BondArrays(
             idx=idx,
             r0=np.array([r for _, _, r, _ in bonds]),
-            # A library-derived restraint carries its own sigma; use it as the
-            # flat-bottom half-width. Refmac/servalcat weight by 1/sigma^2 and let
-            # the experimental data decide where inside that sigma the atom sits;
-            # with no data term a weighted harmonic just converges to the exact
-            # target no matter the weight, so the only way sigma can mean anything
-            # here is as a tolerance. Without it the CG removes the scatter real
-            # structures carry (measured on QBP: N-CA-C spread 1.83 -> 0.88 deg
-            # against 2.90 in the 1GGG crystal) and the strain it can no longer
-            # absorb locally reappears as clashes.
+            # Built-in link tolerances retain their historical flat bottom. Library
+            # ESDs are packed separately as inverse-variance weights below.
             slack=np.array([bsl if e is None else float(e) for *_, e in bonds]),
             weight=np.full(len(bonds), bw),
             half=np.zeros(len(bonds)),
@@ -1251,6 +1264,7 @@ def build_spec(
         conf_stop_step=conf_stop_step,
         custom=custom_specs,
     )
+    append_library_arrays(spec, library, cfg, g2l)
     vdw_parts = []
     if vdw_intra is not None:
         vdw_parts.append(f"{len(vdw_intra.idx)}intra")
@@ -1273,11 +1287,11 @@ def build_spec(
         "group_improper=%d group_plane=%d "
         "vdw=%s custom=%d relax_ff=%s",
         spec.n_active,
-        len(bonds),
-        len(angles),
-        len(chirals),
-        len(plane_groups),
-        len(cistrans),
+        len(spec.bond.idx) if spec.bond is not None else 0,
+        len(spec.angle.idx) if spec.angle is not None else 0,
+        len(spec.chiral.idx) if spec.chiral is not None else 0,
+        len(spec.plane.idx) if spec.plane is not None else 0,
+        len(spec.cistrans.idx) if spec.cistrans is not None else 0,
         len(distance_restraints),
         len(rmsd_restraints),
         len(angle_restraints),

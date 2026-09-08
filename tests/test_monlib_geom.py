@@ -339,6 +339,26 @@ def test_library_planes_replace_conformer_ring_perception(library_dir):
     assert groups == {frozenset({0, 1, 2, 3}), frozenset({5, 6, 7, 8})}
 
 
+def test_library_esd_sets_inverse_variance_weights_independently_of_slack(library_dir):
+    config = _config(library_dir)
+    spec = _setup(_NucleotideAdapter(), config)
+    assert set(np.round(spec.bond.weight, 5)) == {
+        round(1 / 0.010**2, 5),
+        round(1 / 0.011**2, 5),
+    }
+    np.testing.assert_allclose(spec.angle.weight, 1 / math.radians(1.5) ** 2)
+    np.testing.assert_allclose(spec.plane.weight, 4 / 0.020**2)
+    for kind in ("bond", "angle", "plane"):
+        assert (getattr(spec, kind).slack == 0).all()
+        config["conformer_restraints_config"][kind] = {"weight": 2, "slack": 0.03}
+    explicit = _setup(_NucleotideAdapter(), config)
+    for kind in ("bond", "angle", "plane"):
+        np.testing.assert_allclose(
+            getattr(explicit, kind).weight, 2 * getattr(spec, kind).weight
+        )
+        np.testing.assert_allclose(getattr(explicit, kind).slack, 0.03)
+
+
 def test_link_targets_come_from_the_library(library_dir):
     spec = _setup(_NucleotideAdapter(), _config(library_dir))
     bonds, angles = _bond_targets(spec), _angle_targets(spec)
@@ -384,10 +404,12 @@ def test_missing_library_directory_raises(tmp_path):
 @pytest.mark.parametrize(
     "spec,message",
     [
-        ({"path": "/tmp", "on_missing": "sometimes"}, "on_missing"),
-        ({"path": "/tmp", "typo": 1}, "unknown key"),
-        ({"on_missing": "error"}, "'path' is required"),
-        (17, "must be a path string"),
+        ({"path": "monomers", "on_missing": "sometimes"}, "on_missing"),
+        ({"path": "monomers", "typo": 1}, "unknown key"),
+        ({"path": ""}, "nonempty path"),
+        ({"path": None}, "nonempty path"),
+        ("", "nonempty"),
+        (17, "must be a boolean, path string or dict"),
     ],
 )
 def test_config_rejects_a_malformed_monomer_library_spec(spec, message):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from rgi_toolkit.energy._peptide import bind_peptide_states
 from rgi_toolkit.energy._terms import BREAKDOWN_KEYS, term_energies
 
 
@@ -39,6 +40,7 @@ def gates(ops, prepared, positions, sigma, step=None):
 
 def total_energy(ops, leaf_fns, positions, prepared, sigma=None, step=None):
     """Sum every active registered restraint term."""
+    prepared = bind_peptide_states(ops, positions, prepared)
     conformer, per_entry = gates(ops, prepared, positions, sigma, step)
     total = ops.scalar_like(0.0, positions)
     for value in term_energies(
@@ -50,6 +52,7 @@ def total_energy(ops, leaf_fns, positions, prepared, sigma=None, step=None):
 
 def energy_breakdown(ops, leaf_fns, positions, prepared, sigma=None, step=None):
     """Return every registered restraint term as a Python float."""
+    prepared = bind_peptide_states(ops, positions, prepared)
     conformer, per_entry = gates(ops, prepared, positions, sigma, step)
     output = dict.fromkeys(BREAKDOWN_KEYS, 0.0)
     for key, value in term_energies(

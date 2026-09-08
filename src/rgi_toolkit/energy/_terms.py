@@ -15,6 +15,7 @@ class TermDef:
     leaf_fn: str
     args: tuple[str, ...]
     gate: str
+    kwargs: tuple[str, ...] = ()
 
 
 _WINDOW_FIELDS = (
@@ -96,10 +97,12 @@ TERM_DEFS = (
             ("slack", "f"),
             ("weight", "f"),
             ("mask", "f"),
+            ("both", "f"),
         ),
         "chiral_energy",
         ("idx", "vol0", "slack", "weight"),
         "conf",
+        kwargs=("both",),
     ),
     TermDef(
         "plane",
@@ -124,10 +127,12 @@ TERM_DEFS = (
             ("slack", "f"),
             ("weight", "f"),
             ("mask", "f"),
+            ("period", "i"),
         ),
         "cistrans_energy",
         ("idx", "phi0", "slack", "weight"),
         "conf",
+        kwargs=("period",),
     ),
     TermDef(
         "vdw",
@@ -302,6 +307,18 @@ def pack_spec(spec, to_int, to_float):
         prepared[term.key] = {
             name: converters[kind](getattr(array, name)) for name, kind in term.fields
         }
+    states = getattr(spec, "peptide_states", None)
+    if states is not None:
+        prepared["_peptide_states"] = {
+            "idx": to_int(states.idx),
+            "trans": to_float(states.trans),
+            "cis": to_float(states.cis),
+            "conditions": {
+                k: {"idx": to_int(idx), "cis": to_float(cis)}
+                for k, (idx, cis) in states.term_conditions.items()
+                if k in prepared
+            },
+        }
     return prepared
 
 
@@ -324,7 +341,10 @@ def term_energies(leaf_fns, prepared, positions, conformer_gate, entry_gate):
             )
         )
         output[term.key] = leaf_fns[term.leaf_fn](
-            positions, *[params[name] for name in term.args], mask
+            positions,
+            *[params[name] for name in term.args],
+            mask,
+            **{name: params[name] for name in term.kwargs},
         )
     return output
 

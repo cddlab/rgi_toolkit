@@ -28,17 +28,19 @@ def angle_energy(ops, positions, idx, th0, slack, weight, mask):
     return ops.sum(weight * delta * delta * mask)
 
 
-def chiral_energy(ops, positions, idx, vol0, slack, weight, mask):
+def chiral_energy(ops, positions, idx, vol0, slack, weight, mask, both=None):
     center = positions[..., idx[:, 0], :]
     first = positions[..., idx[:, 1], :] - center
     second = positions[..., idx[:, 2], :] - center
     third = positions[..., idx[:, 3], :] - center
     volume = ops.vdot(first, ops.cross(second, third))
+    if both is not None:
+        volume = ops.where(both > 0.5, ops.abs(volume), volume)
     delta = G.symmetric_flat_bottom_delta(ops, volume - vol0, slack)
     return ops.sum(weight * delta * delta * mask)
 
 
-def cistrans_energy(ops, positions, idx, phi0, slack, weight, mask):
+def cistrans_energy(ops, positions, idx, phi0, slack, weight, mask, period=None):
     phi = G.dihedral_points(
         ops,
         positions[..., idx[:, 0], :],
@@ -46,7 +48,9 @@ def cistrans_energy(ops, positions, idx, phi0, slack, weight, mask):
         positions[..., idx[:, 2], :],
         positions[..., idx[:, 3], :],
     )
-    delta = G.symmetric_flat_bottom_delta(ops, G.wrap(ops, phi - phi0), slack)
+    period = 1 if period is None else ops.maximum(period, 1)
+    deviation = G.wrap(ops, period * (phi - phi0)) / period
+    delta = G.symmetric_flat_bottom_delta(ops, deviation, slack)
     return ops.sum(weight * delta * delta * mask)
 
 

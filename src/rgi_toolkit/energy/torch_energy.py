@@ -14,6 +14,7 @@ from rgi_toolkit.energy import _runtime
 from rgi_toolkit.energy._terms import pack_spec
 
 _OPS = get_ops("torch")
+bind_peptide_states = partial(_runtime.bind_peptide_states, _OPS)
 
 bond_energy = partial(K.bond_energy, _OPS)
 angle_energy = partial(K.angle_energy, _OPS)

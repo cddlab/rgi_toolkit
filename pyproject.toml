@@ -12,6 +12,8 @@ dependencies = [
     # lower bounds: the host tool venvs pin gemmi 0.6.5-0.7.5 and biopython 1.84-1.87.
     "gemmi>=0.6.5",
     "biopython>=1.84",
+    # Process-safe publication of the optional monomer-library cache.
+    "filelock>=3",
 ]
 
 [project.optional-dependencies]

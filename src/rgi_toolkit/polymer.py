@@ -9,9 +9,9 @@ therefore supplied explicitly below.
 
 Those reference conformers are approximate chemistry, not refinement geometry (AF3
 ETKDG-embeds the free CCD component). Set
-``conformer_restraints_config.monomer_library`` to take the bond / angle / plane /
-link targets from the CCP4 monomer library instead -- the same values Refmac and
-servalcat refine against; see ``monlib_geom``.
+``conformer_restraints_config.monomer_library`` to take geometry targets and ESDs
+from the CCP4 monomer library instead; see ``monlib_geom`` for chiral propagation,
+the omega/sp2 torsion subset, and cis/trans link alternatives.
 """
 
 from __future__ import annotations
@@ -41,16 +41,10 @@ class PolymerGeometry:
     # Canonical inter-residue planar groups (e.g. the peptide plane): each a tuple of
     # global atom indices scored by the `plane` term (best-fit-plane flatness).
     link_planes: list[tuple[int, ...]]
-    # Monomer-library targets, empty unless `monomer_library` is configured. These
-    # REPLACE (never supplement) the reference-conformer bond/angle/plane targets for
-    # the residues the library covered: `featurizer` drops every conformer-derived
-    # tuple whose atoms all lie in `library_atoms`, so no residue is restrained twice.
-    library_bonds: list[tuple[int, int, float, float]] = field(default_factory=list)
-    library_angles: list[tuple[int, int, int, float, float]] = field(
-        default_factory=list
+    # Dictionary geometry stays separate from built-in fallback tolerances.
+    library: monlib_geom.LibraryTargets = field(
+        default_factory=monlib_geom.LibraryTargets
     )
-    library_planes: list[tuple[int, ...]] = field(default_factory=list)
-    library_atoms: frozenset[int] = frozenset()
 
 
 # Side selectors: each link atom names its residue explicitly (previous / current)
@@ -135,55 +129,30 @@ def _is_enabled_polymer(record) -> bool:
     )
 
 
-def _link_geometry(previous, current, mol_type: str, library=None):
-    """Return canonical link bond/angles/planes for two adjacent residue atom maps.
-
-    With a monomer ``library`` every target — bonds, angles AND planes — comes from its
-    link entry (``TRANS`` / ``p``); without one the built-in table mirrors the same
-    Refmac/servalcat definitions. (The planes used to stay built-in and merged into a
-    single 5-atom omega group; see ``_PROTEIN_LINK`` for why that was wrong.)
-    """
-
-    names = (previous["names"], current["names"])  # index by _PREV / _CURR
+def _link_geometry(previous, current, mol_type: str):
+    """Built-in fallback geometry; its historical ESD-as-slack behavior is retained."""
+    names = (previous["names"], current["names"])
     link = _PROTEIN_LINK if mol_type == "protein" else _NUCLEIC_LINK
 
     def resolve(atom):
         name, side = atom
         return names[side].get(name)
 
-    from_library = (
-        None
-        if library is None
-        else library.link_restraints(
-            mol_type, previous["names"], current["names"], current["resname"]
-        )
-    )
-    if from_library is not None:
-        bonds, angles, planes = from_library
-    else:
-        b0, b1, bond_target = link.bond
-        g0, g1 = resolve(b0), resolve(b1)
-        bonds = (
-            [] if g0 is None or g1 is None else [(g0, g1, bond_target, link.bond_esd)]
-        )
-
-        angles = []
-        for a0, a1, a2, degrees in link.angles:
-            idx = tuple(resolve(a) for a in (a0, a1, a2))
-            if all(i is not None for i in idx):
-                angles.append(
-                    (
-                        *idx,
-                        float(np.deg2rad(degrees)),
-                        float(np.deg2rad(_LINK_ANGLE_ESD)),
-                    )
-                )
-
-        planes = []
-        for group in link.planes:
-            idx = tuple(resolve(a) for a in group)
-            if all(i is not None for i in idx):
-                planes.append(idx)
+    b0, b1, bond_target = link.bond
+    g0, g1 = resolve(b0), resolve(b1)
+    bonds = [] if g0 is None or g1 is None else [(g0, g1, bond_target, link.bond_esd)]
+    angles = []
+    for a0, a1, a2, degrees in link.angles:
+        idx = tuple(resolve(a) for a in (a0, a1, a2))
+        if all(i is not None for i in idx):
+            angles.append(
+                (*idx, float(np.deg2rad(degrees)), float(np.deg2rad(_LINK_ANGLE_ESD)))
+            )
+    planes = []
+    for group in link.planes:
+        idx = tuple(resolve(a) for a in group)
+        if all(i is not None for i in idx):
+            planes.append(idx)
     return bonds, angles, planes
 
 
@@ -320,54 +289,28 @@ def build_polymer_geometry(
     by_chain: dict[str, list[dict]] = {}
     for meta in residue_meta:
         by_chain.setdefault(meta["chain"], []).append(meta)
-    # Which side(s) of a polymer link each residue sits on, resolved BEFORE the library is
-    # read because the library targets depend on it. A monomer entry describes the FREE
-    # residue -- for an amino acid that is the zwitterion, N as -NH3+ and C as -COO- -- and
-    # the link carries `_chem_mod` records that rewrite those targets when the residue is
-    # actually peptide-bonded (CCP4's TRANS applies DEL-OXT to the first side and DEL-HN1
-    # to the second). Reading the unmodified entry restrains a whole chain to free-amino-
-    # acid geometry: N-CA 1.483 instead of 1.453, C-O 1.251 instead of 1.229, CA-C-O 117.2
-    # instead of 120.6 deg. The position dependence falls out for free -- the N-terminus is
-    # nobody's side 2 so it keeps its -NH3+, the C-terminus is nobody's side 1 so it keeps
-    # its -COO-, which is chemically what those termini are.
+    # Resolve adjacency once, before applying link-specific residue modifications.
+    # Keeping actual edges also distinguishes a residue's incoming/outgoing proline
+    # links: one shared "second residue" marker cannot represent both neighbours.
+    connections = []
     for residues in by_chain.values():
-        # Global atom order is the reliable component order. Modified residues are
-        # atom-tokenized in some adapters, so their AtomRecord.resid values differ even
-        # though ref_space_uid correctly groups them into one residue.
         residues.sort(key=lambda x: (x["order"], x["uid"]))
         for previous, current in zip(residues, residues[1:]):
             if (
-                current["mol_type"] != previous["mol_type"]
-                or (previous["uid"], current["uid"]) not in adjacent
+                current["mol_type"] == previous["mol_type"]
+                and (previous["uid"], current["uid"]) in adjacent
             ):
-                continue
-            previous["link_side1"] = current["mol_type"]
-            current["link_side2"] = current["mol_type"]
-            # The peptide link id depends on the SECOND residue (PTRANS for proline),
-            # so BOTH sides must remember which residue closed the link -- side 1's
-            # own DEL-OXT is the same either way, but the lookup has to resolve the
-            # same link entry from either end.
-            previous["link_resname2"] = current["resname"]
-            current["link_resname2"] = current["resname"]
+                connections.append((previous, current))
 
-    library, targets = _load_library(conformer_config, residue_meta)
-
-    link_bonds = []
-    link_angles = []
-    link_planes = []
-    for residues in by_chain.values():
-        for previous, current in zip(residues, residues[1:]):
-            if (
-                current["mol_type"] != previous["mol_type"]
-                or (previous["uid"], current["uid"]) not in adjacent
-            ):
-                continue
-            bonds, angles, planes = _link_geometry(
-                previous, current, current["mol_type"], library
-            )
-            link_bonds.extend(bonds)
-            link_angles.extend(angles)
-            link_planes.extend(planes)
+    targets = _load_library(conformer_config, residue_meta, connections)
+    link_bonds, link_angles, link_planes = [], [], []
+    for previous, current in connections:
+        if (previous["uid"], current["uid"]) in targets.covered_links:
+            continue
+        bonds, angles, planes = _link_geometry(previous, current, current["mol_type"])
+        link_bonds.extend(bonds)
+        link_angles.extend(angles)
+        link_planes.extend(planes)
 
     return PolymerGeometry(
         residue_confs=residue_confs,
@@ -375,38 +318,38 @@ def build_polymer_geometry(
         link_bonds=link_bonds,
         link_angles=link_angles,
         link_planes=link_planes,
-        library_bonds=targets.bonds,
-        library_angles=targets.angles,
-        library_planes=targets.planes,
-        library_atoms=targets.atoms,
+        library=targets,
     )
 
 
-def _load_library(conformer_config: dict | None, residue_meta: list[dict]):
-    """``(MonomerLibrary | None, LibraryTargets)`` for the configured library.
-
-    Logs a SEPARATE coverage line (the base_pair macro's convention) rather than
-    folding into the setup summary: "the library loaded but covered nothing" and "no
-    library configured" produce identical restraint counts, so the distinction has to
-    be visible.
-    """
+def _load_library(conformer_config, residue_meta, connections):
+    """Load dictionary targets only when an enabled geometry term needs them."""
     spec = monlib_geom.parse_config(conformer_config)
-    if spec is None:
-        return None, monlib_geom.LibraryTargets()
+    cfg = conformer_config or {}
+    enabled = {
+        k
+        for k in monlib_geom.KINDS
+        if k in cfg and ((cfg.get(k) or {}).get("weight", 1.0) or 0) > 0
+    }
+    if spec is None or not enabled:
+        return monlib_geom.LibraryTargets()
     path, on_missing = spec
     library = monlib_geom.MonomerLibrary.load(
         path, {m["resname"] for m in residue_meta if m["resname"]}
     )
-    targets = monlib_geom.collect(library, residue_meta, on_missing)
-    n_covered = len(residue_meta) - sum(
-        1 for m in residue_meta if not library.covers(m["resname"])
+    targets = monlib_geom.collect(
+        library, residue_meta, on_missing, connections, enabled
     )
-    msg = (
-        f"[rgi_toolkit] monomer library: {n_covered}/{len(residue_meta)} residues from "
-        f"{path} (components {list(targets.covered)}; bonds={len(targets.bonds)} "
-        f"angles={len(targets.angles)} planes={len(targets.planes)})"
+    n_covered = sum(library.covers(m["resname"]) for m in residue_meta)
+    counts = ", ".join(f"{k}={len(rows)}" for k, rows in targets.terms.items())
+    logger.info(
+        "[rgi_toolkit] monomer library: %d/%d residues; components=%s; %s; "
+        "peptide choices=%d (state-dependent rows are alternatives); fallback=%s",
+        n_covered,
+        len(residue_meta),
+        list(targets.covered),
+        counts,
+        len(targets.peptides),
+        list(targets.missing),
     )
-    if targets.missing:
-        msg += f"; NOT in library, kept reference conformer: {list(targets.missing)}"
-    logger.info(msg)
-    return library, targets
+    return targets

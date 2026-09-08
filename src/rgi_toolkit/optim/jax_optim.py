@@ -581,6 +581,7 @@ def make_minimizer(
 
     def _descend(coords, sigma, step):
         active = coords[..., active_idx, :]
+        prepared_step = jax_energy.bind_peptide_states(active, prepared)
         # Distance + conformer + RMSD + group restraints all minimise ONE objective via the
         # CG (total_energy sums every active term; distance is now an autodiff CG term whose
         # reduced-mass-rescaled centroid gradient translates each group rigidly — no
@@ -683,7 +684,7 @@ def make_minimizer(
                 active_neighbours,
                 active_factor,
             ):
-                e = jax_energy.total_energy(a, prepared, sigma, step)
+                e = jax_energy.total_energy(a, prepared_step, sigma, step)
                 if has_vdw:
                     e = e + _vdw_pair_energy(
                         a,

@@ -720,7 +720,8 @@ sub-block): residue-local aromatic rings — His/Phe/Tyr/Trp side chains and nuc
 the protein **peptide plane**, the canonical inter-residue four-atom group `{C, CA, O}` (previous
 residue) `+ {N}` (current), scored by the best-fit-plane `plane` term (this replaces the old
 peptide-plane zero-volume impropers that rode the `chiral` term — so a `chiral`-only config no longer
-flattens the peptide plane; add a `plane` sub-block). Polymer `cistrans` remains a ligand-only term.
+flattens the peptide plane; add a `plane` sub-block). Polymer `cistrans` requires a monomer
+library and selects dictionary omega/sp2 torsions.
 
 Top-level (shared by all terms): `start_sigma` (`+inf`), `stop_sigma` (`-1`) — or the step-window
 alternative `start_step` (`-inf`) / `stop_step` (`+inf`) (mutually exclusive with the sigma window).
@@ -735,15 +736,17 @@ not configured" rule the other restraint types follow.
 |---|---|---|
 | `bond` | `weight` (1.0), `slack` (0.0 Å) | bond lengths toward ideal; flat-bottomed by `slack` |
 | `angle` | `weight` (1.0), `slack` (0.0 rad) | bond angles toward ideal |
-| `chiral` | `weight` (1.0), `slack` (0.05) | chiral volume (stereochemistry) — holds each stereocentre's handedness |
+| `chiral` | `weight` (1.0), `slack` (0.05 Å³ reference / 0.0 Å³ library) | signed chiral volume; the library may also allow either sign |
 | `plane` | `weight` (1.0), `slack` (0.0 Å) | **best-fit-plane** flatness of whole planar atom groups ([servalcat](https://github.com/keitaroyam/servalcat)-style) — penalises each group's out-of-plane RMS deviation toward 0. Fires on (a) aromatic/conjugated rings (whole ring) and (b) non-ring sp2 groups (an acyclic double-bond centre + its heavy neighbors: carbonyl / amide / ester / carboxyl / trisubstituted alkene). Group membership is confirmed by the reference conformer being coplanar (not the RDKit aromaticity flag). Add a `plane:` block to activate |
-| `cistrans` | `weight` (1.0), `slack` (0.0 rad) | **cis/trans (E/Z)** of acyclic, non-aromatic double bonds (needs real bond orders; detects 0 for ligands with none, e.g. ATP/NAD/GLN) |
+| `cistrans` | `weight` (1.0), `slack` (0.0 rad) | reference **cis/trans (E/Z)** of acyclic, non-aromatic double bonds (requires bond orders), or library `omega` / `sp2_sp2*` torsions with their periodicity |
 | `vdw` | `weight` (1.0), `mode` (`"both"`), `scale` (0.75), `dmax` (5.0 Å), `max_neighbors` (32), `max_atom_step` (0.1 Å), `neighbor_rebuild_interval` (10), `neighbor_skin` (2.0 Å) | non-bonded clash avoidance with bounded CG steps and displacement-triggered Verlet neighbor rebuilds |
 
 ### `monomer_library` — refinement targets for polymers (not a term)
 
 `monomer_library` sits alongside the term blocks but builds nothing of its own: it changes
-where the **polymer** `bond` / `angle` / `plane` and inter-residue link TARGETS come from.
+where the **polymer** `bond` / `angle` / `chiral` / `plane` / `cistrans` and inter-residue
+link targets and uncertainties come from. Each desired term and polymer entity still needs
+its normal opt-in.
 
 By default they are **measured from the predictor's per-residue reference conformer**, which is
 not refinement geometry — AF3 fills `ref_pos` by RDKit **ETKDG-embedding the free CCD component**.
@@ -762,45 +765,72 @@ phosphate as P-OH because the free component is a monophosphate. The embed also 
 seed**, so those targets move ±0.02–0.03 Å between runs. Switching `bond`/`angle` on therefore
 drags a nucleotide *away* from crystallographic geometry.
 
-Point this at a **CCP4 monomer library** and the targets become the values Refmac/servalcat refine
-against, read through gemmi (already a dependency — no new install, just the library data, e.g.
-`git clone https://github.com/MonomerLibrary/monomers`, or an existing `$CLIBD_MON`).
+Enable a **CCP4 monomer library** to use dictionary targets and ESDs, read through Gemmi.
+`true` acquires the public [MonomerLibrary/monomers](https://github.com/MonomerLibrary/monomers)
+repository automatically at the first setup that needs polymer geometry:
 
 ```yaml
 conformer_restraints_config:
-  monomer_library: "$CLIBD_MON"        # shorthand; or the full form:
-  # monomer_library: {path: "$CLIBD_MON", on_missing: "fallback"}
+  monomer_library: true
   bond: {}
   angle: {}
+  chiral: {}
   plane: {}
-  vdw: {}
+  cistrans: {}
 ```
 
 | key | type | default | meaning |
 |---|---|---|---|
-| `path` | str | — (required) | monomer-library directory (the one holding `list/mon_lib_list.cif` and the `a/ b/ c/ …` component subdirectories). `$VAR` and `~` are expanded |
-| `on_missing` | `"fallback"` / `"error"` | `"fallback"` | what to do about a residue the library has no entry for: keep its reference-conformer targets, or raise |
+| `path` | str | automatic cache | existing monomer-library directory holding `list/mon_lib_list.cif`, `ener_lib.cif`, and component subdirectories. `$VAR` and `~` are expanded; an explicit empty or null path is invalid |
+| `on_missing` | `"fallback"` / `"error"` | `"fallback"` | use and log reference/built-in fallback for missing residues, links or chiral inputs, or raise |
 
-Behaviour worth knowing:
+The mapping form may omit `path`: `monomer_library: {on_missing: error}` also uses the
+automatic cache. A path string (`monomer_library: "$CLIBD_MON"`) or a mapping with `path`
+uses that directory without downloading. Omission, `null` and `false` disable the library.
 
-- **Per residue, replace not add.** Every conformer-derived bond/angle/plane whose atoms all lie in
-  a covered residue is dropped, so a partly covered structure (modified bases, ligands) mixes the
-  two sources residue by residue and never restrains anything twice.
-- **Plane groups get better, not just different.** The library names a whole nucleobase — ring,
-  exocyclic atoms and `C1'` — as ONE plane group, where conformer perception splits a purine into
-  its two fused SSSR rings and leaves the exocyclic atoms unrestrained: one group per residue
-  instead of ~1.5.
-- **Links too**: the `TRANS` (peptide) and `p` (phosphodiester) link entries supply the
-  inter-residue bond, angle and plane targets. The built-in fallback follows the same
-  definitions; its peptide plane is the four-atom `{CA, C, O}(previous) + {N}(current)`
-  group, which leaves omega free.
-- **`chiral` is unchanged** — still reference-conformer volumes. Only the sign protects
-  stereochemistry, and the library's `ChiralityType` convention would have to be reconciled with
-  the internal atom ordering first.
-- Ligand conformers are untouched (they keep the force-field-relaxed reference-conformer path —
-  see [`relax_force_field`](#relax_force_field--which-force-field-idealises-the-ligand-reference-not-a-term)).
-- A bad path raises rather than silently restraining nothing; setup logs a separate
-  `monomer library: N/M residues from <path> …` line with the components it matched.
+The first acquisition needs Git and network access. It makes a shallow clone into
+`$XDG_CONFIG_HOME/rgi_toolkit/monomers`, or `~/.config/rgi_toolkit/monomers` when
+`XDG_CONFIG_HOME` is unset. A process lock and validated staging directory prevent concurrent
+setups from seeing an incomplete clone. Completed snapshots are reused offline and never
+automatically updated. Setup logs the source Git SHA; use an explicitly managed local path
+when runs must share a particular revision. Parsing a config does not access the network.
+Invalid paths and failed downloads raise at setup.
+
+Dictionary ESD and user `slack` are separate:
+
+- **Inverse-variance weighting:** bond, angle, torsion and chiral use
+  `weight * (max(abs(deviation) - slack, 0) / ESD)**2`. Dictionary-derived `slack` defaults
+  to zero for every term, including chiral. Explicit slack keeps its usual units: Å for bond
+  and plane, radians for angle and cistrans, Å³ for chiral. Angular dictionary targets and
+  ESDs are both converted from degrees to radians.
+- **Plane:** with zero slack, the energy is `weight * sum(atom_plane_distance**2) / ESD**2`,
+  using Gemmi's group ESD. Internally this scales the existing best-fit-plane RMS squared by
+  the number of modeled atoms. Explicit plane slack still applies to the group's RMS.
+  Named nucleobase planes and local peptide planes stay separate; the usual peptide group
+  is `{CA, C, O}(previous) + {N}(current)`, without the next Cα.
+- **Torsion:** only `omega` and labels beginning `sp2_sp2` are used. Side-chain χ and
+  backbone φ/ψ are not enabled by this setting. The residual is
+  `wrap(period * (angle - target)) / period`, with `period <= 0` treated as 1.
+- **Peptide state:** each sample chooses the nearer cis/trans omega target from its coordinates
+  at the start of each `minimize` call. Ties and degenerate geometry choose trans. That state
+  stays fixed through line searches and neighbor-list rebuilds, and selects the entire link's
+  targets, ESDs and modifications (`TRANS/CIS`, `PTRANS/PCIS`, `NMTRANS/NMCIS`). The next call
+  chooses again. An incomplete backbone uses trans geometry for the atoms present. If a
+  modeled omega lacks a cis dictionary counterpart, fallback omits omega and logs that fact;
+  `on_missing: error` rejects it.
+- **Chiral:** signed ideal volume and its ESD are derived by first-order propagation of the
+  dictionary's three bonds and three angles around the center, after link modifications.
+  Positive, negative and either-sign definitions are supported. Missing inputs obey
+  `on_missing`, with no simultaneous reference and dictionary restraint at the same center.
+- **Coverage:** dictionary targets replace covered reference tuples; link additions, changes
+  and deletions are applied to private copies. ESDs <= 0 disable the corresponding energy
+  term without discarding covalent exclusions. Nonfinite active targets or ESDs raise.
+  Setup logs component coverage and candidate row counts; cis/trans rows are alternatives.
+
+ESD determines relative strength between competing restraints. It does not create a free
+interval: an isolated harmonic term can still converge to its exact target. Dictionary-free
+ligands, uncovered reference geometry, built-in link tolerances, standalone restraints and
+custom energies retain their existing behavior.
 
 ### `relax_force_field` — which force field idealises the ligand reference (not a term)
 

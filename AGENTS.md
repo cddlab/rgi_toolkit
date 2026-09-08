@@ -124,23 +124,46 @@ separate structural switch and is never affected.
 
 #### `monlib_geom.py`
 
-Polymer bond/angle/plane/link TARGETS from a **CCP4 monomer library** (gemmi, lazy-imported)
-instead of the predictor's reference conformer — opt in with
-`conformer_restraints_config.monomer_library` (`"<path>"` or `{path, on_missing}`). Motivation:
+Polymer bond/angle/chiral/plane/omega/sp2-torsion targets and ESDs from a **CCP4 monomer
+library** (gemmi, lazy-imported) instead of the predictor's reference conformer — opt in with
+`conformer_restraints_config.monomer_library: true`, a local `"<path>"`, or
+`{path, on_missing}`. A mapping without `path` also requests the automatic cache; omission,
+null and false disable it. Parsing does no I/O. First needed setup shallow-clones
+`MonomerLibrary/monomers` to `$XDG_CONFIG_HOME/rgi_toolkit/monomers` (else
+`~/.config/rgi_toolkit/monomers`), using filelock and validated atomic publication. Completed
+snapshots are reused offline, never auto-updated; source SHA is logged. Explicit paths never
+download. `_monlib_cache.py` owns acquisition. Motivation:
 the reference conformer is NOT refinement geometry — AF3 fills `ref_pos` by ETKDG-embedding the
 free CCD component, giving an unconjugated exocyclic C-N (1.42 Å vs 1.33) and a P-OH phosphate
 (P-OP2 1.69 Å vs 1.52), and the embed's random seed moves those targets ±0.02-0.03 Å per run, so
 `bond`/`angle` measurably degrade nucleotide geometry. `polymer.py` loads the library and collects targets;
 `featurizer.py` DROPS every conformer-derived tuple whose atoms all lie in a covered residue
-(`PolymerGeometry.library_atoms`), so the two sources replace rather than stack, per residue.
+(`PolymerGeometry.library.atoms`), so the two sources replace rather than stack, per residue.
 Library planes are named groups — a whole nucleobase (ring + exocyclic + `C1'`) in ONE group where
-SSSR perception splits a purine in two. Link bonds, angles and planes come from the
-`TRANS` / `p` entries; the built-in peptide fallback uses the same four-atom
-`{CA, C, O}(previous) + {N}(current)` plane. `chiral` stays
-conformer-derived — only the sign matters, and the library's `ChiralityType` convention would have
-to be reconciled with `_chiral_vol`'s atom ordering first. Uncovered residues fall back
-(`on_missing: error` to refuse instead); a bad path raises. Tests: `tests/test_monlib_geom.py`
-(self-contained fixture library in tmp_path — no CCP4 install needed).
+SSSR perception splits a purine in two. Keep actual local peptide planes, typically
+`{CA, C, O}(previous) + {N}(current)`, separate from omega. Dictionary ESD means inverse-variance
+weight, **not slack**: `_monlib_spec.py` packs `weight / ESD**2`, and plane additionally
+multiplies by group size so its existing RMS-squared kernel equals the per-atom squared sum.
+Explicit user slack remains separate; dictionary slack defaults to 0 for all terms (reference
+chiral keeps 0.05). Nonpositive ESD disables energy, retaining topology exclusions; nonfinite
+active targets/ESDs raise. Dictionary-free paths retain their behavior.
+
+`_monlib_records.py` applies link add/change/delete operations to private records before deriving
+chiral scalar-triple-product magnitude and propagated ESD from three bonds/three angles. Keep
+positive/negative/both signs and remove replaced reference centers. Gemmi AtomMod.func may be an
+integer character code: missing an atom deletion can leave a phantom phosphate chiral. Missing
+inputs follow `on_missing` and are logged; strict mode raises. Each residue's incoming and outgoing
+modifications belong to separate links, including at an X-Pro boundary.
+
+Only dictionary torsions labeled `omega` or `sp2_sp2*` enter `cistrans` (no chi/phi/psi). Preserve
+periodicity (`<=0` becomes 1); convert angular values/ESDs to radians and **negate dictionary torsion
+targets** because RGI and Gemmi use opposite signs. `TRANS/CIS`, `PTRANS/PCIS`, `NMTRANS/NMCIS`
+are local alternatives for all link geometry/modifications. `energy/_peptide.py` chooses per-sample
+state from the START of each minimize, with ties/degenerate geometry trans. Bound masks stay fixed
+through CG/L-BFGS trials and VdW blocks; never write them into device/dtype or gate caches. The next
+invocation reselects. Local condition tables avoid exponential whole-chain enumeration.
+Tests: `tests/test_monlib_{geom,dictionary,esd,cache}.py` use self-contained fixtures; no installed
+CCP4 library or external download is needed by the suite.
 
 **Don't add a REFERENCE-CONFORMER polymer restraint as a default "keep the backbone sane"
 layer under an RMSD restraint.** Measured 2×2 ablation (boltz2, QBP, 3 seeds, MolProbity

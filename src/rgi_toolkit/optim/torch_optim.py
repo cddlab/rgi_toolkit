@@ -150,7 +150,16 @@ class TorchRestraintOptimizer:
         return self._custom_cvg[key]
 
     def _minimize_custom_gpu(
-        self, active, sigma, step, mi, vdw, active_vdw, max_atom_step=None, state=None
+        self,
+        active,
+        sigma,
+        step,
+        mi,
+        vdw,
+        active_vdw,
+        max_atom_step=None,
+        state=None,
+        prepared_g=None,
     ):
         """GPU CG with the torch.compile'd custom-inclusive energy. ``vdw`` /
         ``active_vdw`` are the same optional argument tuples ``gpu_cg`` takes; they select
@@ -170,7 +179,10 @@ class TorchRestraintOptimizer:
         from rgi_toolkit.optim._torch_cg_gpu import _cg_minimize_torch
 
         vdw_args = (vdw or ()) + (active_vdw or ())
-        prepared_g = self._gated_prepared(sigma, step)
+        if prepared_g is None:
+            prepared_g = torch_energy.bind_peptide_states(
+                active, self._gated_prepared(sigma, step)
+            )
         try:
             opt, out_state = _cg_minimize_torch(
                 lambda x: cvg(x, prepared_g, *vdw_args),
@@ -453,6 +465,16 @@ class TorchRestraintOptimizer:
                 device=coords.device,
             )
             active.copy_(coords[..., self._active_idx, :])  # casts bf16/fp16 -> fp32
+            # Bind before line searches and retain the same objective across VdW
+            # blocks. Never write these sample-dependent masks into either cache.
+            prepared = torch_energy.bind_peptide_states(active, prepared)
+            prepared_g = (
+                torch_energy.bind_peptide_states(
+                    active, self._gated_prepared(sigma, step)
+                )
+                if active.is_cuda
+                else None
+            )
 
             # Distance + conformer (bond/angle/chiral/cistrans/vdw) + RMSD + group-centroid
             # angle/dihedral restraints all minimise ONE objective in the gradient solver
@@ -589,6 +611,7 @@ class TorchRestraintOptimizer:
                             active_args,
                             max_atom_step,
                             state=state,
+                            prepared_g=prepared_g,
                         )
                         if ok:
                             return out_state
@@ -603,7 +626,7 @@ class TorchRestraintOptimizer:
                         from rgi_toolkit.optim._torch_cg_gpu import gpu_cg
 
                         opt, out_state = gpu_cg(
-                            self._gated_prepared(sigma, step),
+                            prepared_g,
                             active.detach(),
                             block_iters,
                             vdw=vdw,

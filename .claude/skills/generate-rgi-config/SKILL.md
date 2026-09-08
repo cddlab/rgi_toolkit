@@ -107,6 +107,13 @@ silent failures:
 - **Weight**: default `1.0` is right for almost everything. For a single distance restraint
   `weight` is a *no-op* (it reaches the target exactly regardless) — don't present it as a
   strength knob there. See `doc/config.md` for the exact semantics.
+- **Polymer dictionary geometry**: `conformer_restraints_config.monomer_library: true`
+  acquires and caches the public CCP4 library when setup needs it. Use a path for an existing
+  snapshot; `{on_missing: error}` requests the automatic cache with strict coverage. Keep
+  each requested term and entity opt-in explicit. Dictionary bond/angle/chiral/plane and
+  omega/sp2 torsions use ESD-based inverse-variance weights automatically, with default
+  slack zero. ESD is relative strength, not a tolerance band. Do not copy ESD into `slack`;
+  consult `doc/config.md` for units, peptide state selection and offline cache behavior.
 
 ### 5. Write the config in the right place
 

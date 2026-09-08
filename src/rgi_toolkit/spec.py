@@ -88,6 +88,11 @@ class ChiralArrays:
     slack: np.ndarray  # (n_chiral,)
     weight: np.ndarray  # (n_chiral,)
     mask: np.ndarray  # (n_chiral,)
+    both: np.ndarray | None = None  # accept either sign of the target volume
+
+    def __post_init__(self):
+        if self.both is None:
+            self.both = np.zeros_like(self.mask)
 
 
 @dataclass
@@ -122,6 +127,9 @@ class CisTransArrays:
     ``phi0`` is the reference-conformer torsion, so the bond keeps its input
     cis/trans configuration. The energy is periodicity-safe (the deviation from
     ``phi0`` is wrapped to [-pi, pi] before the flat-bottomed square penalty).
+    Dictionary omega/sp2 torsions additionally retain their number of equivalent
+    wells in ``period``; the wrapped deviation is divided back by that period so
+    its ESD remains an angular uncertainty.
     """
 
     idx: np.ndarray  # (n_cistrans, 4) int
@@ -129,6 +137,26 @@ class CisTransArrays:
     slack: np.ndarray  # (n_cistrans,) radians
     weight: np.ndarray  # (n_cistrans,)
     mask: np.ndarray  # (n_cistrans,)
+    period: np.ndarray | None = None  # number of equivalent wells per full turn
+
+    def __post_init__(self):
+        if self.period is None:
+            self.period = np.ones_like(self.mask, dtype=np.int64)
+
+
+@dataclass
+class PeptideStateArrays:
+    """Local omega selectors and per-term conjunctions of required peptide states.
+
+    term_conditions maps each term to (selector indices, required cis flags), both
+    padded to (n_term_rows, max_local_conditions). A selector of -1 is unconditional.
+    State is bound separately for each batch member at each minimizer invocation.
+    """
+
+    idx: np.ndarray
+    trans: np.ndarray
+    cis: np.ndarray
+    term_conditions: dict[str, tuple[np.ndarray, np.ndarray]]
 
 
 @dataclass
@@ -479,6 +507,7 @@ class RestraintSpec:
     # arrays (Python AST/fn live here), so this is a separate field, not part of the
     # array-based terms above. Empty when no custom restraint is configured.
     custom: list = field(default_factory=list)
+    peptide_states: PeptideStateArrays | None = None
 
     def has_array_term(self, key: str) -> bool:
         """Return whether one registered array-backed term is active."""

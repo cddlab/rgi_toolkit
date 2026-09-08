@@ -38,12 +38,13 @@ per-tool prerequisites.
 Eight **built-in** restraint types, all minimized during the denoising loop to guide coordinate optimization:
 
 - **conformer** — ligand and polymer-local bond / angle / chiral-volume / VdW;
-  ligand-only cistrans (E/Z) / plane
+  ligand cistrans (E/Z), polymer dictionary omega/sp2 torsions, and plane
   ([servalcat](https://github.com/keitaroyam/servalcat)-style best-fit-plane flatness of aromatic rings + sp2 groups, opt-in)
   toward an ideal RDKit geometry, plus **VdW**
   non-bonded clash avoidance (intramolecular and/or intermolecular; `mode`
   defaults to `both`). For polymers the targets can instead come from a **CCP4 monomer
-  library** (`monomer_library`) — the values Refmac/servalcat refine against. Prefer that
+  library** (`monomer_library: true` downloads and caches it) — targets and ESD-based
+  inverse-variance weights, with a local-path option for an existing snapshot. Prefer that
   for nucleic acids: the predictor's own reference conformer is an ETKDG embedding of the
   free CCD component, so restraining toward it *worsens* base geometry.
 - **RMSD** — Kabsch-superposed RMSD of a group toward a reference PDB.
