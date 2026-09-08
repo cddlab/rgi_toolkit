@@ -3,7 +3,7 @@
 
 What this checks (everything resolvable without a real structure):
 
-  1. **Schema** — runs ``rgi_utils.config.RestraintsConfig.from_dict`` on every
+  1. **Schema** — runs ``rgi_toolkit.config.RestraintsConfig.from_dict`` on every
      ``restraints_config`` found in the file. That raises on the silent-no-op traps:
      an unknown / misspelled top-level section (would drop the whole block), a
      top-level ``start_sigma``, a leftover ``backend`` key (now inferred, not
@@ -27,15 +27,15 @@ What this CANNOT check (needs the real predicted structure):
     ``built spec: ... distances=N ...`` counts — a count of 0 means it selected nothing.
 
 Usage:
-    uv run --project <rgi-utils-dir> --frozen --with pyyaml \\
+    uv run --project <rgi-toolkit-dir> --frozen --with pyyaml \\
         python validate_config.py <input-file ...>  # .yaml / .yml / .json
 
 Handles every tool's layout: boltz YAML (``restraints_config:`` nested), protenix/OpenDDE
 JSON (a list of jobs), AF3 fold-input JSON, openfold ``queries.<name>.restraints_config``,
 the chai top-level sidecar, or a bare ``restraints_config`` dict.
 
-Needs only numpy and pyyaml. Run it through the rgi_utils uv project as shown above. If
-rgi_utils is not installed, this script adds the repo ``src/`` to ``sys.path``
+Needs only numpy and pyyaml. Run it through the rgi_toolkit uv project as shown above. If
+rgi_toolkit is not installed, this script adds the repo ``src/`` to ``sys.path``
 automatically.
 """
 
@@ -45,27 +45,27 @@ import json
 import sys
 from pathlib import Path
 
-# --- locate rgi_utils (installed, or the repo src/ found by walking up) --------------
-# Prefer an installed rgi_utils; otherwise search ancestor dirs for a `src/rgi_utils`
+# --- locate rgi_toolkit (installed, or the repo src/ found by walking up) --------------
+# Prefer an installed rgi_toolkit; otherwise search ancestor dirs for a `src/rgi_toolkit`
 # package. Walking up (rather than a fixed parents[N]) keeps this working no matter how
 # deep the skill is placed (e.g. skills/... vs .claude/skills/...).
 try:
-    import rgi_utils  # noqa: F401
+    import rgi_toolkit  # noqa: F401
 except ImportError:
     for _p in Path(__file__).resolve().parents:
-        if (_p / "src" / "rgi_utils").is_dir():
+        if (_p / "src" / "rgi_toolkit").is_dir():
             sys.path.insert(0, str(_p / "src"))
             break
 
 try:
-    from rgi_utils._config_util import coerce_bool
-    from rgi_utils.config import RESTRAINT_SECTIONS, RestraintsConfig
-    from rgi_utils.ref_config import split_ref_selection
-    from rgi_utils.selection import AtomSelector
+    from rgi_toolkit._config_util import coerce_bool
+    from rgi_toolkit.config import RESTRAINT_SECTIONS, RestraintsConfig
+    from rgi_toolkit.ref_config import split_ref_selection
+    from rgi_toolkit.selection import AtomSelector
 except ImportError as exc:  # pragma: no cover
     sys.exit(
-        f"cannot import rgi_utils ({exc}). Run with a Python that has rgi_utils on its "
-        f"path, e.g. uv run --project <rgi-utils-dir> --frozen --with pyyaml "
+        f"cannot import rgi_toolkit ({exc}). Run with a Python that has rgi_toolkit on its "
+        f"path, e.g. uv run --project <rgi-toolkit-dir> --frozen --with pyyaml "
         f"python validate_config.py <file>."
     )
 

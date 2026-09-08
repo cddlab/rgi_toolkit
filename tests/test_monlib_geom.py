@@ -17,10 +17,10 @@ import math
 import numpy as np
 import pytest
 
-from rgi_utils import monlib_geom
-from rgi_utils.atom_context import AtomRecord
-from rgi_utils.combined import CombinedRestraints
-from rgi_utils.config import RestraintsConfig
+from rgi_toolkit import monlib_geom
+from rgi_toolkit.atom_context import AtomRecord
+from rgi_toolkit.combined import CombinedRestraints
+from rgi_toolkit.config import RestraintsConfig
 
 # Library values, all far from the conformer distances/angles below.
 _LIB_BOND_P_O5 = 1.777

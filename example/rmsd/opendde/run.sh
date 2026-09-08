@@ -2,10 +2,10 @@
 # OpenDDE RGI example -- dual-ref RMSD morph -> midpoint of 1GGG(open)/1WDN(closed), target 3.0 A
 # External feature searches are disabled; the OpenDDE checkpoint and common runtime
 # files must already be installed. Run on a GPU compute node, not a login node.
-# Requires the OpenDDE_restr checkout to exist as a sibling of rgi_utils/.
+# Requires the OpenDDE_restr checkout to exist as a sibling of rgi_toolkit/.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-WS="$HERE"; while [ "$WS" != / ] && [ ! -d "$WS/rgi_utils" ]; do WS="$(dirname "$WS")"; done
+WS="$HERE"; while [ "$WS" != / ] && [ ! -d "$WS/RGI-toolkit" ]; do WS="$(dirname "$WS")"; done
 # Reference structures are downloaded from RCSB at run time and are not stored here.
 ( cd "$HERE" && for pdb in 1GGG 1WDN; do
     [ -f "$pdb.cif" ] || wget -q "https://files.rcsb.org/download/$pdb.cif"

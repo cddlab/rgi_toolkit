@@ -14,9 +14,9 @@ import pytest
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
-import rgi_utils._mol_build as mol_build
-from rgi_utils import CombinedRestraints
-from rgi_utils._mol_build import (
+import rgi_toolkit._mol_build as mol_build
+from rgi_toolkit import CombinedRestraints
+from rgi_toolkit._mol_build import (
     RelaxError,
     StereoGenerationError,
     _embedded_heavy_coords,
@@ -28,9 +28,9 @@ from rgi_utils._mol_build import (
     parse_relax_force_field,
     repair_stereo,
 )
-from rgi_utils.atom_context import AtomRecord, LigandConf
-from rgi_utils.config import RestraintsConfig
-from rgi_utils.featurizer import _extract_conformer, build_spec
+from rgi_toolkit.atom_context import AtomRecord, LigandConf
+from rgi_toolkit.config import RestraintsConfig
+from rgi_toolkit.featurizer import _extract_conformer, build_spec
 
 
 def _embed(smiles, seed=7):

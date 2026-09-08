@@ -1,6 +1,6 @@
-# rgi-utils
+# RGI-toolkit
 
-Restraint-Guided Inference (RGI) utilities for diffusion-based structure predictors
+Restraint-Guided Inference (RGI) toolkit for diffusion-based structure predictors
 (PyTorch and JAX).
 
 **Implemented and available in the following 9 models** (across 7 predictor integrations):
@@ -25,7 +25,7 @@ and troubleshooting guidance, see the [`FAQ`](doc/FAQ.md).
 `angle/`, `rmsd/`, `custom/dist-diff/`) × 7 predictors, each a real system with a `run.sh`
 that finds the matching fork's env and folds. Start there rather than from the snippets
 below: `bash example/distance/boltz-2/run.sh`. It needs the matching fork checked out as a
-sibling of `rgi_utils/` and a GPU node; see [`example/README.md`](example/README.md) for the
+sibling of `RGI-toolkit/` and a GPU node; see [`example/README.md`](example/README.md) for the
 per-tool prerequisites.
 
 > **Stuck writing a config?** Run the `generate-rgi-config` skill in Claude Code
@@ -73,7 +73,7 @@ target). Each restraint is gated by an optional `start_sigma` (active once
 
 ## Installation
 
-`rgi_utils` is the shared engine; each integrated tool **declares it as a dependency**, so installing
+RGI-toolkit is the shared engine; each integrated tool **declares it as a dependency**, so installing
 a tool (`uv pip install -e .` / `pixi install`) pulls it automatically — see the tool's guide in
 [`doc/`](doc/). To hack on the engine itself, in this checkout:
 
@@ -81,10 +81,39 @@ a tool (`uv pip install -e .` / `pixi install`) pulls it automatically — see t
 uv sync          # dev environment for this repo
 ```
 
+### Migrating from rgi-utils
+
+The project is now RGI-toolkit, hosted at
+[`cddlab/rgi_toolkit`](https://github.com/cddlab/rgi_toolkit). The distribution is
+`rgi-toolkit`, and the Python namespace is `rgi_toolkit`. Update imports from
+`rgi_utils` to `rgi_toolkit` and use the updated `rgi-integration` branches of the
+predictor forks. Existing restraint configurations and API signatures carry over.
+The old import namespace is no longer provided.
+
+The workspace examples use `RGI-toolkit` as the local checkout directory:
+
+```bash
+git clone https://github.com/cddlab/rgi_toolkit.git RGI-toolkit
+```
+
+For an existing environment, replace the old distribution with the new checkout:
+
+```bash
+uv pip uninstall rgi-utils
+uv pip install -e ../RGI-toolkit
+```
+
+Run these commands from the predictor checkout in its active environment. Recreate
+the engine's development environment with `uv venv --clear` followed by `uv sync`
+after moving its checkout; virtual-environment entry points retain their original
+paths. Remove any generated `src/rgi_utils.egg-info` left by an old editable install.
+Refresh dependency locks against the new repository URL instead of retaining a
+pre-rename commit.
+
 ## Usage
 
 ```python
-from rgi_utils.combined import CombinedRestraints
+from rgi_toolkit.combined import CombinedRestraints
 
 restraints_config = {
     "gpu": True,                 # device: True=GPU, False=CPU. backend: torch (default) / jax
@@ -275,7 +304,7 @@ custom_restraints_config:
 **Code** — write `energy(ctx) -> scalar` and pass it directly (or register it for config reuse):
 
 ```python
-from rgi_utils import CombinedRestraints, custom_restraint
+from rgi_toolkit import CombinedRestraints, custom_restraint
 
 restr = CombinedRestraints()
 restr.add_custom(                         # throwaway: a callable, no registration
@@ -303,7 +332,7 @@ selection A and reference-backed selection B. Full reference:
 ### Implementing a framework adapter
 
 ```python
-from rgi_utils.atom_context import AtomRecord, LigandConf
+from rgi_toolkit.atom_context import AtomRecord, LigandConf
 from typing import Iterator
 
 class MyAdapter:
@@ -333,7 +362,7 @@ For a SMILES ligand, pass its source-graph molecule as `stereo_mol` after renumb
 to `mol`/`global_indices` order. This keeps the input `@`/`@@` and E/Z labels available
 when the framework's reference conformer has already inverted them.
 
-Tool-side adapters are tiny — see `src/rgi_utils/{boltz,protenix,chai,openfold3,opendde}/adapter.py`
+Tool-side adapters are tiny — see `src/rgi_toolkit/{boltz,protenix,chai,openfold3,opendde}/adapter.py`
 for worked examples, and the shared `implement-rgi` skill under `.claude/skills/` and
 `.agents/skills/` for the full integration recipe.
 

@@ -4,7 +4,7 @@ description: >-
   Safely create and push SemVer Git tags such as v1.0.0, then publish matching
   GitHub Releases with curated notes using gh. Use when the user asks to tag a
   version, cut or publish a release, or create a GitHub Release, including a
-  coordinated rgi_utils and sibling *_restr release. Discover eligible *_restr
+  coordinated rgi_toolkit and sibling *_restr release. Discover eligible *_restr
   repositories and explicitly ask which to include. Always inspect and report
   each repository's current version, proposed tag, and target commit, then
   obtain the user's explicit final approval before creating any tag or Release.
@@ -79,7 +79,7 @@ Keep this phase read-only with respect to tags and Releases.
 
 ## 2. Choose companion `*_restr` repositories
 
-When releasing `rgi_utils`, inspect its immediate sibling directories whose
+When releasing `rgi_toolkit`, inspect its immediate sibling directories whose
 names end in `_restr`. Do not use `find`. Retain only directories that resolve
 to distinct Git worktrees, and resolve each repository's exact GitHub
 `owner/name` from its remote.

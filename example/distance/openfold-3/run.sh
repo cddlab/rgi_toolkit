@@ -3,10 +3,10 @@
 # Restraint config = bench-rgi minimal; MSA is fetched from a server so the example is
 # self-contained. (AlphaFold3 is the exception -- it needs external model params + DBs.)
 # GPU only: run on a GPU compute node (not a shared login node).
-# Requires the openfold-3_restr checkout to exist as a sibling of rgi_utils/.
+# Requires the openfold-3_restr checkout to exist as a sibling of rgi_toolkit/.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-WS="$HERE"; while [ "$WS" != / ] && [ ! -d "$WS/rgi_utils" ]; do WS="$(dirname "$WS")"; done
+WS="$HERE"; while [ "$WS" != / ] && [ ! -d "$WS/RGI-toolkit" ]; do WS="$(dirname "$WS")"; done
 export OPENFOLD_CACHE="${OPENFOLD_CACHE:-$HOME/.openfold3}"
 PIXI="$WS/openfold-3_restr/.pixi-bin/pixi"; [ -x "$PIXI" ] || PIXI=pixi
 cd "$HERE"

@@ -1,6 +1,6 @@
-"""Unit tests for the residue-sequence aligner (rgi_utils._align)."""
+"""Unit tests for the residue-sequence aligner (rgi_toolkit._align)."""
 
-from rgi_utils._align import (
+from rgi_toolkit._align import (
     THREE_TO_ONE,
     pair_residues,
 )

@@ -4,12 +4,12 @@
 
 - **autograd under `inference_mode`**: predict loops often run inside
   `torch.inference_mode()`, where autograd backward fails with "element does not
-  require grad / no grad_fn". rgi_utils' torch optimizer handles this for you: it
+  require grad / no grad_fn". rgi_toolkit' torch optimizer handles this for you: it
   wraps the minimization in `torch.inference_mode(False) + torch.enable_grad()`
   and clones the active coords into a normal leaf (`empty_like + copy_`) so
   backward works. You don't write this — but know it's why passing an
   inference-mode coordinate tensor to `minimize` is fine.
-- **adapter placement**: `rgi_utils/<tool>/adapter.py` (receives a plain
+- **adapter placement**: `rgi_toolkit/<tool>/adapter.py` (receives a plain
   dict/array, imports no framework code — EXCEPT boltz, whose feats are native torch
   tensors, so its adapter imports torch, read at batch 0).
 - **VdW flavours**: the conformer `vdw` term has two flavours — static
@@ -19,11 +19,11 @@
 
 ## JAX (JIT / `lax.scan`) — AlphaFold3
 
-- **adapter placement**: the framework-free adapter lives in rgi_utils
-  (`rgi_utils/alphafold3/adapter.py`), like the torch tools; only a thin in-tool shim
+- **adapter placement**: the framework-free adapter lives in rgi_toolkit
+  (`rgi_toolkit/alphafold3/adapter.py`), like the torch tools; only a thin in-tool shim
   (`alphafold3_restr/.../restraints/adapter.py` `build_af3_adapter`) does the one
   alphafold3-coupled step — CCD/SMILES mol resolution + `fold_input` read — and feeds
-  the rgi_utils adapter plain data.
+  the rgi_toolkit adapter plain data.
 - **no Python callbacks in the scan**: build the spec outside the scan (numpy, at
   build time) and inject `get_minimizer()`'s pure closure inside. Never call the
   Python `minimize` per step in a compiled loop.
@@ -45,7 +45,7 @@
 The original AF3 restraint code minimized with `jaxopt.ScipyMinimize` (scipy,
 *outside* JIT, with O(n) finite-difference gradients) called via
 `jax.pure_callback` — a CPU round-trip on every denoise step, which was
-extremely slow. Replacing it with rgi_utils' in-JIT `make_minimizer` (analytic
+extremely slow. Replacing it with rgi_toolkit' in-JIT `make_minimizer` (analytic
 `jax.grad`, running entirely on the accelerator) is the "slow → fast" fix. When
 you integrate a JAX tool, use `get_minimizer()`; do not reach for scipy or
 `pure_callback`.

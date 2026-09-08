@@ -54,7 +54,7 @@ VdW with default scale/dmax gives 34 pairs.
 
 ## 7. Don't add flags — route the one config dict
 The entire config (distance + conformer + start_sigma + gpu/method/max_iter) is a
-single dict parsed by `rgi_utils.config`. The tool only surfaces that dict from
+single dict parsed by `rgi_toolkit.config`. The tool only surfaces that dict from
 its input (YAML/JSON) and passes it to `setup(config=...)`. Per-feature CLI flags
 duplicate parsing and drift the tool out of parity — the dict is the single
 source of truth. (start_sigma is optional per-distance + one for all conformer terms
@@ -72,7 +72,7 @@ each reaches its own target (e.g. centroid 25 Å and 45 Å, not both the same).
 
 ## 9. Don't re-port features that are already shared
 If a tool needs a feature another tool already has (e.g. intramolecular VdW), add
-it to `rgi_utils` (gated/opt-in so other tools are unaffected) rather than in the
+it to `rgi_toolkit` (gated/opt-in so other tools are unaffected) rather than in the
 tool. That keeps one implementation and brings the feature to every tool at once.
 Example: AF3's intramolecular VdW became `featurizer._build_intramolecular_vdw`,
 opt-in via `vdw: {mode: intramolecular}`, leaving boltz/protenix's dynamic

@@ -12,10 +12,10 @@ import pytest
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
-from rgi_utils.atom_context import LigandConf
-from rgi_utils.featurizer import build_spec
-from rgi_utils.group_geom_restr_data import AngleRestraintData, DihedralRestraintData
-from rgi_utils.plane_restr_data import PlaneRestraintData
+from rgi_toolkit.atom_context import LigandConf
+from rgi_toolkit.featurizer import build_spec
+from rgi_toolkit.group_geom_restr_data import AngleRestraintData, DihedralRestraintData
+from rgi_toolkit.plane_restr_data import PlaneRestraintData
 
 
 def _require_python_dev_headers():
@@ -29,8 +29,8 @@ def _require_python_dev_headers():
 
 def _distance_objective(custom=None):
     """One moving atom, one anchor, and two initially distant background atoms."""
-    from rgi_utils.atom_context import AtomRecord
-    from rgi_utils.combined import CombinedRestraints
+    from rgi_toolkit.atom_context import AtomRecord
+    from rgi_toolkit.combined import CombinedRestraints
 
     atoms = [AtomRecord("A", i + 1, i) for i in range(4)]
     config = {
@@ -63,7 +63,7 @@ def _distance_objective(custom=None):
 @pytest.mark.parametrize("dynamic", [False, "fixed", "active"])
 def test_solver_objective_tracks_new_contacts(backend, method, dynamic):
     """A line search must score contacts absent from its initial neighbour list."""
-    from rgi_utils.spec import ActiveVdwConfig, VdwConfig
+    from rgi_toolkit.spec import ActiveVdwConfig, VdwConfig
 
     spec = _distance_objective()
     spec.vdw_neighbor_skin = 0.0
@@ -92,7 +92,7 @@ def test_solver_objective_tracks_new_contacts(backend, method, dynamic):
         )
     if backend.startswith("torch"):
         torch = pytest.importorskip("torch")
-        from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+        from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
         device = "cuda" if backend == "torch_cuda" else "cpu"
         if device == "cuda" and not torch.cuda.is_available():
@@ -111,7 +111,7 @@ def test_solver_objective_tracks_new_contacts(backend, method, dynamic):
         jax.config.update("jax_enable_x64", True)
         import jax.numpy as jnp
 
-        from rgi_utils.optim.jax_optim import dynamic_vdw_energy, make_minimizer
+        from rgi_toolkit.optim.jax_optim import dynamic_vdw_energy, make_minimizer
 
         out = np.asarray(
             jax.jit(make_minimizer(spec, method=method, max_iter=200))(
@@ -156,7 +156,7 @@ def test_disabled_undefined_custom_does_not_block_distance(backend, disabled):
     coords[1, 0] = 3
     if backend.startswith("torch"):
         torch = pytest.importorskip("torch")
-        from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+        from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
         opt = TorchRestraintOptimizer(spec, max_iter=50)
         out = torch.tensor(coords, dtype=torch.float64)
@@ -175,7 +175,7 @@ def test_disabled_undefined_custom_does_not_block_distance(backend, disabled):
         jax.config.update("jax_enable_x64", True)
         import jax.numpy as jnp
 
-        from rgi_utils.optim.jax_optim import make_minimizer
+        from rgi_toolkit.optim.jax_optim import make_minimizer
 
         out = np.asarray(
             jax.jit(make_minimizer(spec, max_iter=50))(jnp.asarray(coords), 1.0, 0)
@@ -189,7 +189,7 @@ def test_gpu_custom_nan_gate_and_dtype_cache():
     torch = pytest.importorskip("torch")
     if not torch.cuda.is_available():
         pytest.skip("no cuda device")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     spec = _distance_objective({"start_sigma": 0})
     optimizer = TorchRestraintOptimizer(spec, max_iter=50)
@@ -211,8 +211,8 @@ def test_gpu_custom_nan_gate_and_dtype_cache():
 
 def test_torch_scatter_accepts_autograd_leaf_and_fixed_background():
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
-    from rgi_utils.spec import VdwConfig
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.spec import VdwConfig
 
     spec = _distance_objective()
     spec.vdw_config = VdwConfig(
@@ -238,10 +238,10 @@ def test_total_diagnostics_include_custom_and_both_dynamic_halves():
     torch = pytest.importorskip("torch")
     jax = pytest.importorskip("jax")
     jax.config.update("jax_enable_x64", True)
-    from rgi_utils.custom.closure import build_terms
-    from rgi_utils.energy import numpy_energy
-    from rgi_utils.optim.jax_optim import dynamic_vdw_energy, energy_of
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.custom.closure import build_terms
+    from rgi_toolkit.energy import numpy_energy
+    from rgi_toolkit.optim.jax_optim import dynamic_vdw_energy, energy_of
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     spec, coords = _vdw_and_custom_spec()
     active = coords[..., spec.active_sites, :]
@@ -284,7 +284,7 @@ def _distorted_ethane():
 
 def test_torch_minimize_reduces_energy():
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     spec, coords_np = _distorted_ethane()
     coords = torch.tensor(coords_np, dtype=torch.float64)
@@ -298,8 +298,8 @@ def test_torch_minimize_reduces_energy():
 def test_torch_optimizer_rebuilds_prepared_arrays_on_dtype_change():
     """Reusing one optimizer on one device must not retain the first coordinate dtype."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
-    from rgi_utils.spec import BondArrays, RestraintSpec
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.spec import BondArrays, RestraintSpec
 
     spec = RestraintSpec(
         n_active=2,
@@ -333,7 +333,7 @@ def test_jax_minimize_reduces_energy():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim.jax_optim import energy_of, make_minimizer
+    from rgi_toolkit.optim.jax_optim import energy_of, make_minimizer
 
     spec, coords_np = _distorted_ethane()
     coords = jnp.asarray(coords_np)
@@ -356,8 +356,8 @@ def test_jax_minimizer_step_window_traced_under_jit():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim.jax_optim import make_minimizer
-    from rgi_utils.spec import DistanceArrays, RestraintSpec
+    from rgi_toolkit.optim.jax_optim import make_minimizer
+    from rgi_toolkit.spec import DistanceArrays, RestraintSpec
 
     # distance restraint with a STEP window [5, 10]; sigma window stays always-on so only
     # the step axis gates (start_sigma=+inf -> max_start_sigma=+inf -> lax.cond never skips).
@@ -412,8 +412,8 @@ def test_jax_minimizer_move_mode_end_to_end():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.distance_restr_data import DistanceData
-    from rgi_utils.optim.jax_optim import make_minimizer
+    from rgi_toolkit.distance_restr_data import DistanceData
+    from rgi_toolkit.optim.jax_optim import make_minimizer
 
     dd = DistanceData()
     dd.target_sites1 = [0, 1]
@@ -458,9 +458,9 @@ def test_distance_minimal_displacement_split_torch_jax():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim.jax_optim import make_minimizer
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
-    from rgi_utils.spec import DistanceArrays, RestraintSpec
+    from rgi_toolkit.optim.jax_optim import make_minimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.spec import DistanceArrays, RestraintSpec
 
     spec = RestraintSpec(
         n_active=4,
@@ -517,9 +517,9 @@ def test_distance_move_mode1_pins_group2_torch_jax():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.distance_restr_data import DistanceData
-    from rgi_utils.optim.jax_optim import make_minimizer
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.distance_restr_data import DistanceData
+    from rgi_toolkit.optim.jax_optim import make_minimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     dd = DistanceData()
     dd.target_sites1, dd.target_sites2 = [0, 1], [2, 3]
@@ -562,9 +562,9 @@ def test_distance_coupled_weight_balance_torch_jax():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim.jax_optim import make_minimizer
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
-    from rgi_utils.spec import DistanceArrays, RestraintSpec
+    from rgi_toolkit.optim.jax_optim import make_minimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.spec import DistanceArrays, RestraintSpec
 
     t1, t2, w1, w2 = 4.0, 10.0, 1.0, 3.0
     expected = (t1 * w1 + t2 * w2) / (w1 + w2)  # 8.5 (weighted toward t2)
@@ -685,7 +685,7 @@ def test_torch_group_angle_converges():
     """The torch CG bends the centroid1-centroid2-centroid3 angle from 90 deg onto a 120 deg target,
     moving each group rigidly (the centroid-only energy gives a group's atoms equal grad)."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     spec = _group_angle_spec(120.0)
     coords = torch.tensor(_group_angle_coords(), dtype=torch.float64)
@@ -702,7 +702,7 @@ def test_jax_group_angle_converges():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim.jax_optim import make_minimizer
+    from rgi_toolkit.optim.jax_optim import make_minimizer
 
     spec = _group_angle_spec(120.0)
     coords = make_minimizer(spec, max_iter=500)(jnp.asarray(_group_angle_coords()), 0.0)
@@ -714,7 +714,7 @@ def test_torch_group_dihedral_converges():
     """The torch CG drives the centroid dihedral from 0 deg onto a 90 deg target (90 deg is
     mid-range, away from the +-180 wrap boundary, so convergence is unambiguous)."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     spec = _group_dihedral_spec(90.0)
     coords = torch.tensor(_group_dihedral_coords(), dtype=torch.float64)
@@ -729,7 +729,7 @@ def test_torch_group_angle_gating_noop_above_start_sigma():
     """A step at sigma above the restraint's start_sigma leaves coords unchanged
     (the per-restraint gate); below it the restraint activates and converges."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     spec = _group_angle_spec(120.0, start_sigma=1.0)
     coords = torch.tensor(_group_angle_coords(), dtype=torch.float64)
@@ -745,7 +745,7 @@ def test_torch_group_angle_move_pins_other_groups():
     """move:1 moves ONLY group 1; groups 2 and 3 stay EXACTLY fixed (atol=1e-9) while
     the angle still reaches target — the group analogue of the distance move E2E."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     spec = _group_angle_spec(120.0, move_free=(True, False, False))  # only group 1 free
     coords = torch.tensor(_group_angle_coords(), dtype=torch.float64)  # initial 90 deg
@@ -760,7 +760,7 @@ def test_torch_group_angle_default_move_converges():
     """The DEFAULT angle move (groups 1+3 free, vertex group 2 pinned — what a bare
     angle_restraints_config entry gets) reaches target while the vertex stays put."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     spec = _group_angle_spec(120.0, move_free=(True, False, True))  # the default
     coords = torch.tensor(_group_angle_coords(), dtype=torch.float64)  # initial 90 deg
@@ -784,8 +784,8 @@ def test_group_angle_step_gated_off_is_noop_torch_jax():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim.jax_optim import make_minimizer
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.jax_optim import make_minimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     ad = AngleRestraintData()
     ad.target_sites1, ad.target_sites2, ad.target_sites3 = [0, 1], [2, 3], [4, 5]
@@ -826,7 +826,7 @@ def test_group_move_grad_parity_torch_jax():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.energy import jax_energy, torch_energy
+    from rgi_toolkit.energy import jax_energy, torch_energy
 
     spec = _group_angle_spec(120.0, move_free=(False, True, False))  # only group 2 free
     pos = np.random.default_rng(0).standard_normal((spec.n_active, 3)) * 3.0
@@ -851,7 +851,7 @@ def test_torch_group_dihedral_multi_move():
     groups 1+4 free and 2+3 pinned. The two pinned axis atoms stay EXACTLY put
     (atol=1e-9) while the dihedral still reaches target."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     # single-atom groups 0,1,2,3; free groups 1 and 4 -> atoms 0 and 3 move
     spec = _group_dihedral_spec(90.0, move_free=(True, False, False, True))
@@ -870,7 +870,7 @@ def test_gated_prepared_folds_group_gate_cpu():
     dihedral) silently going UNGATED on the compiled path (the `else: pg[k]=v` branch),
     which the eager CPU CG cannot reveal because it gates live via sigma."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     spec = _group_angle_spec(120.0, start_sigma=1.0)  # stop_sigma defaults -1 (never)
     opt = TorchRestraintOptimizer(spec, max_iter=10)
@@ -893,8 +893,8 @@ def test_gated_prepared_folds_group_plane_gate_cpu():
     ``TERM_DEFS`` with an entry gate is what makes this work — a ``"conf"`` gate would
     silently tie it to the conformer window instead."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.energy._terms import CONF_KEYS, PER_ENTRY_KEYS
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.energy._terms import CONF_KEYS, PER_ENTRY_KEYS
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     assert "group_plane" in PER_ENTRY_KEYS and "group_plane" not in CONF_KEYS
 
@@ -912,7 +912,7 @@ def test_torch_vdw_pushes_ligand_off_fixed_protein():
     """Dynamic fixed-background VdW: a ligand atom clashing with a fixed protein
     atom is pushed away, while the protein atom (not in active_sites) stays put."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     m = Chem.MolFromSmiles("CC")
     m = Chem.AddHs(m)
@@ -963,7 +963,7 @@ def test_jax_vdw_pushes_ligand_off_fixed_protein():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim.jax_optim import make_minimizer
+    from rgi_toolkit.optim.jax_optim import make_minimizer
 
     m = Chem.MolFromSmiles("CC")
     m = Chem.AddHs(m)
@@ -1021,7 +1021,7 @@ def test_torch_interligand_vdw_separates_two_ligands():
     pushed apart, and — unlike the fixed-background term where the protein is fixed — BOTH
     ligands move (neither is a fixed background)."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     m, c = _heavy_ethane()
     n = m.GetNumAtoms()  # 2 heavy atoms
@@ -1064,7 +1064,7 @@ def test_jax_interligand_vdw_separates_two_ligands():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim.jax_optim import make_minimizer
+    from rgi_toolkit.optim.jax_optim import make_minimizer
 
     m, c = _heavy_ethane()
     n = m.GetNumAtoms()
@@ -1104,7 +1104,7 @@ def test_jax_interligand_vdw_separates_two_ligands():
 def _rmsd_spec(n=6, seed=3):
     """A RestraintSpec with one RMSD restraint (ref) + a rotated/translated/noised
     distorted starting pose, for the sync-free CG tests."""
-    from rgi_utils.spec import RestraintSpec, RmsdArrays
+    from rgi_toolkit.spec import RestraintSpec, RmsdArrays
 
     rng = np.random.default_rng(seed)
     ref = rng.standard_normal((n, 3)) * 3.0
@@ -1143,7 +1143,7 @@ def test_func_grad_matches_backward_conformer():
     """torch.func.grad_and_value (the GPU CG's gradient source) must equal the
     .backward() gradient for the conformer energy — guards the grad-source switch."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.energy import torch_energy
+    from rgi_toolkit.energy import torch_energy
 
     spec, coords_np = _distorted_ethane()
     prepared = torch_energy.prepare_spec(spec, dtype=torch.float64)
@@ -1163,7 +1163,7 @@ def test_func_grad_matches_backward_rmsd():
     the gradient identically under torch.func (the no_grad context is a functorch no-op;
     the .detach() is what must hold)."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.energy import torch_energy
+    from rgi_toolkit.energy import torch_energy
 
     _spec, pos = _rmsd_spec()
     n = pos.shape[1]
@@ -1200,8 +1200,8 @@ def test_sync_free_cg_reduces_conformer_energy():
     conformer energy on CPU (the GPU path runs the identical code, checked E2E via
     sbatch)."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.energy import torch_energy
-    from rgi_utils.optim._torch_cg_gpu import gpu_cg
+    from rgi_toolkit.energy import torch_energy
+    from rgi_toolkit.optim._torch_cg_gpu import gpu_cg
 
     spec, coords_np = _distorted_ethane()
     prepared = torch_energy.prepare_spec(spec, dtype=torch.float64)
@@ -1219,8 +1219,8 @@ def test_sync_free_cg_reduces_rmsd_energy():
     """The sync-free CG drives the Kabsch RMSD energy down (the detached-rotation
     gradient that stalls jaxopt NonlinearCG; this CG converges it like the jax port)."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.energy import torch_energy
-    from rgi_utils.optim._torch_cg_gpu import gpu_cg
+    from rgi_toolkit.energy import torch_energy
+    from rgi_toolkit.optim._torch_cg_gpu import gpu_cg
 
     spec, pos = _rmsd_spec()
     prepared = torch_energy.prepare_spec(spec, dtype=torch.float64)
@@ -1240,8 +1240,8 @@ def test_gpu_cg_converges_stiff_chiral():
     chiral needs and silently let it diverge; the sequential early-exit line search does.
     Runs on CPU (eager functional CG, same algorithm as the CUDA path)."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.energy import torch_energy
-    from rgi_utils.optim._torch_cg_gpu import gpu_cg
+    from rgi_toolkit.energy import torch_energy
+    from rgi_toolkit.optim._torch_cg_gpu import gpu_cg
 
     m = Chem.MolFromSmiles("C[C@H](N)O")  # one tetrahedral stereocentre
     m = Chem.AddHs(m)
@@ -1325,8 +1325,8 @@ def test_gpu_cg_flattens_plane_group():
     hand-rolled CG converges it). Pucker a benzene ring ~0.6 A out of plane, run the CG,
     assert its out-of-plane RMS deviation collapses. CPU (same algorithm as the CUDA path)."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.energy import torch_energy
-    from rgi_utils.optim._torch_cg_gpu import gpu_cg
+    from rgi_toolkit.energy import torch_energy
+    from rgi_toolkit.optim._torch_cg_gpu import gpu_cg
 
     spec, c = _benzene_plane_spec()
     prepared = torch_energy.prepare_spec(spec, dtype=torch.float64)
@@ -1345,8 +1345,8 @@ def test_jax_cg_flattens_plane_group():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.energy import jax_energy
-    from rgi_utils.optim.jax_optim import _cg_minimize
+    from rgi_toolkit.energy import jax_energy
+    from rgi_toolkit.optim.jax_optim import _cg_minimize
 
     spec, c = _benzene_plane_spec()
     prep_j = jax_energy.prepare_spec(spec)
@@ -1381,7 +1381,7 @@ def test_torch_cg_flattens_standalone_plane():
     exactly like the conformer one — its gate is per-entry, so this also confirms the
     restraint is actually reached by the solver-run condition (``has_group_plane``)."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     spec = _group_plane_spec()
     pos = _standalone_plane_coords()
@@ -1398,7 +1398,7 @@ def test_jax_cg_flattens_standalone_plane():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim.jax_optim import make_minimizer
+    from rgi_toolkit.optim.jax_optim import make_minimizer
 
     spec = _group_plane_spec()
     pos = _standalone_plane_coords()
@@ -1414,7 +1414,7 @@ def test_jax_cg_flattens_standalone_plane():
 def test_standalone_plane_gated_off_above_start_sigma():
     """Above ``start_sigma`` the whole step is a no-op — the coords come back untouched."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     spec = _group_plane_spec(start_sigma=1.0)
     pos = _standalone_plane_coords()
@@ -1431,7 +1431,7 @@ def test_standalone_plane_move_pins_the_other_group():
     """``move`` frees one pooled group and pins the other: the pinned group's atoms must not
     move, while the plane still flattens by moving the free group onto it."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     # group 1 = atoms 0..2 (lifted out of plane), group 2 = atoms 3..5 (in z=0)
     pos = np.array(
@@ -1459,10 +1459,10 @@ def test_gated_prepared_matches_energy_gate():
     energy layer's own sigma gating for conf-on/off and rmsd-on/off, so the compiled GPU
     minimum can't silently diverge from the CPU/jax one."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.energy import torch_energy
-    from rgi_utils.optim._torch_cg_gpu import _energy
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
-    from rgi_utils.spec import BondArrays, RestraintSpec, RmsdArrays
+    from rgi_toolkit.energy import torch_energy
+    from rgi_toolkit.optim._torch_cg_gpu import _energy
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.spec import BondArrays, RestraintSpec, RmsdArrays
 
     rng = np.random.default_rng(2)
     n = 6
@@ -1520,8 +1520,8 @@ def test_gated_prepared_matches_energy_gate():
 def test_gated_prepared_reads_host_spec_gate_arrays():
     """GPU pre-gating must not copy prepared device gate tensors back to the host."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
-    from rgi_utils.spec import DistanceArrays, RestraintSpec
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.spec import DistanceArrays, RestraintSpec
 
     spec = RestraintSpec(
         n_active=2,
@@ -1566,9 +1566,9 @@ def test_compiled_energy_matches_eager():
     otherwise the compiled group energy is only ever exercised by an sbatch GPU run."""
     torch = pytest.importorskip("torch")
     _require_python_dev_headers()
-    from rgi_utils.energy import torch_energy
-    from rgi_utils.optim import _torch_cg_gpu as g
-    from rgi_utils.spec import GroupAngleArrays, GroupDihedralArrays
+    from rgi_toolkit.energy import torch_energy
+    from rgi_toolkit.optim import _torch_cg_gpu as g
+    from rgi_toolkit.spec import GroupAngleArrays, GroupDihedralArrays
 
     spec, pos_np = _rmsd_spec()  # active_sites = arange(6); add group terms over those
     # a pinned group on the angle (move_free col 0) exercises the detach-select
@@ -1627,8 +1627,8 @@ def test_dynamic_vdw_pair_energy_matches_optimizer():
     optimizer's _vdw_energy method (used on the CPU/eager path) — so compiling the
     dynamic fixed-background VdW conformer path doesn't change the energy."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim._torch_cg_gpu import _vdw_pair_energy
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim._torch_cg_gpu import _vdw_pair_energy
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     m = Chem.MolFromSmiles("CC")
     m = Chem.AddHs(m)
@@ -1680,8 +1680,8 @@ def test_dynamic_vdw_diagnostics_cover_contacts_beyond_dmax(active_half):
     torch = pytest.importorskip("torch")
     jax = pytest.importorskip("jax")
     jax.config.update("jax_enable_x64", True)
-    from rgi_utils.optim.jax_optim import dynamic_vdw_energy
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.jax_optim import dynamic_vdw_energy
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     spec = _dynamic_vdw_diagnostic_spec(active_half)
     config = spec.active_vdw_config if active_half else spec.vdw_config
@@ -1699,7 +1699,7 @@ def test_dynamic_vdw_diagnostics_cover_contacts_beyond_dmax(active_half):
 
 
 def _dynamic_vdw_diagnostic_spec(active_half=False):
-    from rgi_utils.spec import ActiveVdwConfig, RestraintSpec, VdwConfig
+    from rgi_toolkit.spec import ActiveVdwConfig, RestraintSpec, VdwConfig
 
     if active_half:
         return RestraintSpec(
@@ -1740,8 +1740,8 @@ def test_dynamic_vdw_energy_matches_across_backends(active_half):
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim.jax_optim import dynamic_vdw_energy
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.jax_optim import dynamic_vdw_energy
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     spec = _dynamic_vdw_diagnostic_spec(active_half)
     coords_np = (
@@ -1762,7 +1762,7 @@ def test_dynamic_vdw_energy_matches_across_backends(active_half):
 
 @pytest.mark.parametrize("backend", ["torch", "numpy", "jax"])
 def test_finalize_reports_dynamic_vdw_before_minimize(backend, capsys):
-    from rgi_utils import CombinedRestraints
+    from rgi_toolkit import CombinedRestraints
 
     spec = _dynamic_vdw_diagnostic_spec(active_half=True)
     coords_np = np.array([[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 0.0, 0.0]]])
@@ -1798,8 +1798,8 @@ def test_jax_skips_dynamic_pair_build_outside_conformer_window(
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim import jax_optim
-    from rgi_utils.spec import DistanceArrays
+    from rgi_toolkit.optim import jax_optim
+    from rgi_toolkit.spec import DistanceArrays
 
     spec = _dynamic_vdw_diagnostic_spec(active_half=active_half)
     spec.conf_start_sigma = 1.0
@@ -1848,8 +1848,8 @@ def _vdw_and_custom_spec(n_bg: int = 1):
     """A spec carrying, at once: conformer terms, the dynamic fixed-background VdW
     (``vdw_config``), the active-active polymer VdW (``active_vdw_config``) and a custom
     restraint — i.e. every ingredient of the compiled custom-inclusive energy."""
-    from rgi_utils.config import RestraintsConfig
-    from rgi_utils.spec import ActiveVdwConfig
+    from rgi_toolkit.config import RestraintsConfig
+    from rgi_toolkit.spec import ActiveVdwConfig
 
     m = Chem.MolFromSmiles("CC")
     m = Chem.AddHs(m)
@@ -1922,7 +1922,7 @@ def _vdw_and_custom_spec(n_bg: int = 1):
 def _mode_args(opt, coords):
     """``{mode: extra-args tuple}`` for ``_ENERGY_BY_MODE``, built from an ``_ensure``d
     optimizer the same way ``minimize`` builds them."""
-    from rgi_utils.optim._torch_cg_gpu import build_active_vdw_pairs
+    from rgi_toolkit.optim._torch_cg_gpu import build_active_vdw_pairs
 
     active = coords[0, opt._active_idx, :]
     bg_pos = coords[0, opt._vdw["bg_global"], :]
@@ -1967,8 +1967,8 @@ def test_compiled_vdw_energy_matches_eager(mode):
     otherwise never runs through inductor at all. Skips where no compile toolchain."""
     torch = pytest.importorskip("torch")
     _require_python_dev_headers()
-    from rgi_utils.optim import _torch_cg_gpu as g
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim import _torch_cg_gpu as g
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     spec, coords_np = _vdw_and_custom_spec()
     coords = torch.tensor(coords_np, dtype=torch.float64)
@@ -1996,9 +1996,9 @@ def test_custom_compiled_energy_includes_vdw(mode):
     fix is a mis-assembled argument tuple, which this cross-check catches."""
     torch = pytest.importorskip("torch")
     _require_python_dev_headers()
-    from rgi_utils.energy import torch_energy
-    from rgi_utils.optim._torch_cg_gpu import active_vdw_pair_energy
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.energy import torch_energy
+    from rgi_toolkit.optim._torch_cg_gpu import active_vdw_pair_energy
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     spec, coords_np = _vdw_and_custom_spec()
     coords = torch.tensor(coords_np, dtype=torch.float64)
@@ -2027,7 +2027,7 @@ def test_sync_free_cg_nonfinite_guard():
     """A non-finite gradient/energy returns the input coords unchanged (on-device
     guard, mirroring the jax backend) — no NaN written into the structure."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim._torch_cg_gpu import _cg_minimize_torch
+    from rgi_toolkit.optim._torch_cg_gpu import _cg_minimize_torch
 
     x0 = torch.zeros((4, 3), dtype=torch.float64)
 
@@ -2044,7 +2044,7 @@ def test_gpu_cg_matches_cpu_minimum():
     torch = pytest.importorskip("torch")
     if not torch.cuda.is_available():
         pytest.skip("no cuda device")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     spec, coords_np = _distorted_ethane()
     cc = torch.tensor(coords_np, dtype=torch.float64)
@@ -2066,8 +2066,8 @@ def test_gpu_cg_matches_cpu_minimum():
 @pytest.mark.parametrize("weight", [1.0, 32.0])
 def test_torch_vdw_cg_step_cap_prevents_overshoot(weight):
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
-    from rgi_utils.spec import RestraintSpec, VdwArrays
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.spec import RestraintSpec, VdwArrays
 
     spec = RestraintSpec(
         n_active=2,
@@ -2095,8 +2095,8 @@ def test_jax_vdw_cg_step_cap_prevents_overshoot(weight):
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim.jax_optim import make_minimizer
-    from rgi_utils.spec import RestraintSpec, VdwArrays
+    from rgi_toolkit.optim.jax_optim import make_minimizer
+    from rgi_toolkit.spec import RestraintSpec, VdwArrays
 
     spec = RestraintSpec(
         n_active=2,
@@ -2120,8 +2120,8 @@ def test_jax_vdw_cg_step_cap_prevents_overshoot(weight):
 
 def test_torch_dynamic_vdw_rebuilds_before_new_contact():
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
-    from rgi_utils.spec import DistanceArrays, RestraintSpec, VdwConfig
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.spec import DistanceArrays, RestraintSpec, VdwConfig
 
     spec = RestraintSpec(
         n_active=2,
@@ -2176,8 +2176,8 @@ def test_jax_dynamic_vdw_rebuilds_before_new_contact():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim.jax_optim import make_minimizer
-    from rgi_utils.spec import DistanceArrays, RestraintSpec, VdwConfig
+    from rgi_toolkit.optim.jax_optim import make_minimizer
+    from rgi_toolkit.spec import DistanceArrays, RestraintSpec, VdwConfig
 
     spec = RestraintSpec(
         n_active=2,
@@ -2227,9 +2227,9 @@ def test_jax_dynamic_vdw_rebuilds_before_new_contact():
 
 def test_torch_dynamic_vdw_stops_rebuilding_after_convergence(monkeypatch):
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim import _torch_cg_gpu
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
-    from rgi_utils.spec import RestraintSpec, VdwConfig
+    from rgi_toolkit.optim import _torch_cg_gpu
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.spec import RestraintSpec, VdwConfig
 
     calls = 0
     original = _torch_cg_gpu.build_fixed_vdw_pairs
@@ -2280,7 +2280,7 @@ def test_cg_warm_start_cuts_line_search_evals():
     energy assertion below untestable.
     """
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim._torch_cg_gpu import _cg_minimize_torch
+    from rgi_toolkit.optim._torch_cg_gpu import _cg_minimize_torch
 
     k = torch.tensor([16.0, 1.0, 1.0], dtype=torch.float64)
 
@@ -2310,7 +2310,7 @@ def test_cg_warm_start_recovers_after_shrinking():
     growth the step would stay at 2**-6 forever and this would not converge.
     """
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim._torch_cg_gpu import _cg_minimize_torch
+    from rgi_toolkit.optim._torch_cg_gpu import _cg_minimize_torch
 
     def easy(x):
         return 0.5 * torch.sum(x * x)
@@ -2342,9 +2342,9 @@ def test_torch_dynamic_vdw_rebuild_follows_measured_displacement(
     stalls from satisfying the ``calls == 1`` case for the wrong reason.
     """
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim import _torch_cg_gpu
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
-    from rgi_utils.spec import DistanceArrays, RestraintSpec, VdwConfig
+    from rgi_toolkit.optim import _torch_cg_gpu
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.spec import DistanceArrays, RestraintSpec, VdwConfig
 
     calls = 0
     original = _torch_cg_gpu.build_fixed_vdw_pairs
@@ -2413,7 +2413,7 @@ def test_vdw_skin_does_not_change_the_listed_energy():
     ever displaced a contacting pair, the two energies would differ.
     """
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim._torch_cg_gpu import _vdw_pair_energy, build_fixed_vdw_pairs
+    from rgi_toolkit.optim._torch_cg_gpu import _vdw_pair_energy, build_fixed_vdw_pairs
 
     rng = np.random.default_rng(0)
     lig = torch.tensor(rng.uniform(-4, 4, (12, 3)), dtype=torch.float64)

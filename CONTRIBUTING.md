@@ -1,6 +1,6 @@
-# Contributing to rgi-utils
+# Contributing to RGI-toolkit
 
-`rgi_utils` is the shared **Restraint-Guided Inference (RGI)** engine — it injects
+`rgi_toolkit` is the shared **Restraint-Guided Inference (RGI)** engine — it injects
 differentiable distance / angle / dihedral / ligand-conformer / RMSD / custom restraints into
 the denoising loop of diffusion structure predictors, on both the **torch** and **jax**
 backends. One engine is integrated into eight models across six predictors (boltz, protenix,
@@ -27,7 +27,7 @@ uv sync          # creates .venv with the dev dependencies (pytest, ruff)
 
 The optional `torch` / `jax` extras (see [`pyproject.toml`](pyproject.toml)) pull the backend
 you want to exercise; `uv sync` installs the CPU-only torch by default to keep the environment
-small. `import rgi_utils` on its own needs **only numpy** (see the invariants below).
+small. `import rgi_toolkit` on its own needs **only numpy** (see the invariants below).
 
 ## Running tests and lint
 
@@ -61,10 +61,10 @@ These are the properties a change can silently violate. A divergence here means 
 `restraints_config` selects different atoms or fires at a different noise level in different
 tools. The full list is in [`AGENTS.md`](AGENTS.md) ("Key design points"); the essentials:
 
-- **`import rgi_utils` stays numpy-only.** torch and jax are imported **lazily** inside the
+- **`import rgi_toolkit` stays numpy-only.** torch and jax are imported **lazily** inside the
   backend modules — never at the top level.
 - **Three-backend parity.** Any energy change lands in **all three** of
-  `src/rgi_utils/energy/{numpy,torch,jax}_energy.py`. `numpy_energy` is the reference; the torch
+  `src/rgi_toolkit/energy/{numpy,torch,jax}_energy.py`. `numpy_energy` is the reference; the torch
   and jax versions must match it in **energy and gradient** — guarded by
   `tests/test_backend_parity.py`. There is **no numpy optimizer** (numpy is the energy reference
   only); optimization requires torch or jax.
@@ -82,15 +82,15 @@ tools. The full list is in [`AGENTS.md`](AGENTS.md) ("Key design points"); the e
 
 The data flow is three layers plus autodiff (details in [`AGENTS.md`](AGENTS.md)):
 
-- `src/rgi_utils/spec.py` — `RestraintSpec`, padded NumPy arrays, local indices into
+- `src/rgi_toolkit/spec.py` — `RestraintSpec`, padded NumPy arrays, local indices into
   `active_sites`.
-- `src/rgi_utils/energy/*` — the differentiable maths, one file per backend.
-- `src/rgi_utils/optim/{torch,jax}_optim.py` — the CG solver that minimises the active coords.
-- `src/rgi_utils/featurizer.py` — turns RDKit mols into bond/angle/chiral/cistrans/plane/VdW
+- `src/rgi_toolkit/energy/*` — the differentiable maths, one file per backend.
+- `src/rgi_toolkit/optim/{torch,jax}_optim.py` — the CG solver that minimises the active coords.
+- `src/rgi_toolkit/featurizer.py` — turns RDKit mols into bond/angle/chiral/cistrans/plane/VdW
   restraints.
-- `src/rgi_utils/config.py` — parses the shared `restraints_config`.
-- `src/rgi_utils/selection.py` — the atom-selection DSL.
-- `src/rgi_utils/custom/` — the extension point for user-defined (formula/`ctx`-fn) restraints.
+- `src/rgi_toolkit/config.py` — parses the shared `restraints_config`.
+- `src/rgi_toolkit/selection.py` — the atom-selection DSL.
+- `src/rgi_toolkit/custom/` — the extension point for user-defined (formula/`ctx`-fn) restraints.
 
 The rule: a **new energy term** ⇒ implement it in all three backends **and** add a
 `tests/test_backend_parity.py` case. A new **per-entry gated** term additionally needs its gate
@@ -103,7 +103,7 @@ term that silently goes ungated on the compiled GPU path. Then:
 ## Adding a new predictor
 
 Use the `implement-rgi` skill. A tool adds only three small things — a framework **adapter**
-(`src/rgi_utils/<tool>/adapter.py`, thin: `iter_atoms()` and optionally `iter_ligand_confs()`),
+(`src/rgi_toolkit/<tool>/adapter.py`, thin: `iter_atoms()` and optionally `iter_ligand_confs()`),
 the **loop hooks** around `minimize`, and one `restraints_config` pass-through. **Never**
 reimplement restraint maths, config parsing, or atom selection inside a tool — that is how tools
 drift out of parity.

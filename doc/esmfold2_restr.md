@@ -2,7 +2,7 @@
 
 [Documentation index](README.md) · [Configuration reference](config.md)
 
-ESMFold2 + [`rgi_utils`](https://github.com/cddlab/rgi_utils) restraint-guided inference. Full
+ESMFold2 + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided inference. Full
 `restraints_config` schema & atom-selection DSL: [`config.md`](config.md).
 
 > **Or generate it automatically:** the `generate-rgi-config` skill in Claude Code
@@ -24,14 +24,14 @@ ESMFold2 spans **two** repos — install both on `rgi-integration`:
 
 ESMFold2 uses a **pixi** environment. Both engines are declared as dependencies in `esm_restr`'s
 `pyproject.toml`: the **`transformers_restr`** fork (installed as the `transformers` package — it
-carries the per-step `restraints.minimize` hook) and the `rgi_utils` engine. So `pixi install` pulls
+carries the per-step `restraints.minimize` hook) and the `rgi_toolkit` engine. So `pixi install` pulls
 both, with no extra steps. Run on a CUDA GPU (RTX 4090 / sm_89; this pixi env's torch is cu124, no
 Blackwell sm_120 kernels).
 
 ```bash
 git clone https://github.com/cddlab/esm_restr.git
 cd esm_restr
-pixi install                                     # pulls transformers_restr (hooked) + rgi_utils
+pixi install                                     # pulls transformers_restr (hooked) + rgi_toolkit
 ```
 
 To use Blackwell (sm_120): add a cu128 `[tool.pixi.pypi-options]` extra-index + `pixi update torch`
@@ -39,8 +39,8 @@ and remove the cu124-pinned `cuequivariance` (esmfold2 falls back to pure torch)
 
 ### Co-development
 
-Clone `transformers_restr` / `rgi_utils` as siblings and override the git deps AFTER `pixi install`
-(e.g. `pixi run python -m pip install -e ../rgi_utils`). Editing the **esmfold2 hook** is the one
+Clone `transformers_restr` / `rgi_toolkit` as siblings and override the git deps AFTER `pixi install`
+(e.g. `pixi run python -m pip install -e ../RGI-toolkit`). Editing the **esmfold2 hook** is the one
 catch: `pip install -e ../transformers_restr` does **not** win over the installed `transformers`
 (same package name → no editable finder), so copy the model dir over and assert the hook:
 
@@ -83,7 +83,7 @@ Because ESMFold2's API is already Python, the custom **code path**
 (`CombinedRestraints.add_custom(fn=...)`) is equally available — see config.md.
 
 ```python
-"""ESMFold2 RGI (restraint-guided inference) example via rgi_utils."""
+"""ESMFold2 RGI (restraint-guided inference) example via rgi_toolkit."""
 
 from __future__ import annotations
 
@@ -256,7 +256,7 @@ build-env + fold:
 # env's torch is cu124 (no Blackwell sm_120 kernels).
 set -e
 
-pixi install                     # pulls transformers_restr (hooked) + rgi_utils
+pixi install                     # pulls transformers_restr (hooked) + rgi_toolkit
 pixi run python restr_example.py
 ```
 

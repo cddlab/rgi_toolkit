@@ -3,10 +3,10 @@
 # Restraint config = bench-rgi minimal; MSA is fetched from a server so the example is
 # self-contained. (AlphaFold3 is the exception -- it needs external model params + DBs.)
 # GPU only: run on a GPU compute node (not a shared login node).
-# Requires the chai-lab_restr checkout to exist as a sibling of rgi_utils/.
+# Requires the chai-lab_restr checkout to exist as a sibling of rgi_toolkit/.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-WS="$HERE"; while [ "$WS" != / ] && [ ! -d "$WS/rgi_utils" ]; do WS="$(dirname "$WS")"; done
+WS="$HERE"; while [ "$WS" != / ] && [ ! -d "$WS/RGI-toolkit" ]; do WS="$(dirname "$WS")"; done
 # Reference structures (1GGG open / 1WDN closed) are downloaded from RCSB at run time
 # instead of being stored in the repo. The config's ref_cif uses the bare filename.
 ( cd "$HERE" && for pdb in 1GGG 1WDN; do

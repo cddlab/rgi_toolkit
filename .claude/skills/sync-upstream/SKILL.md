@@ -17,7 +17,7 @@ Every RGI tool (`boltz_restr`, `protenix_restr`, `chai-lab_restr`, `alphafold3_r
 repo with two branches that carry a deliberate contract:
 
 - **`main`** = a pristine mirror of the predictor's *real upstream*. No RGI code.
-- **`rgi-integration`** = `main` + the `rgi_utils` integration. The canonical RGI branch.
+- **`rgi-integration`** = `main` + the `rgi_toolkit` integration. The canonical RGI branch.
 
 That split is what makes `git diff main..rgi-integration` *exactly* the RGI patch, and it
 is what keeps upstream syncs near-conflict-free. Every step below exists to preserve it.
@@ -91,7 +91,7 @@ git checkout rgi-integration
 ```
 
 `rgi_probe.sh` inventories where the RGI wiring currently lives: per file, how many lines
-carry an RGI marker (`rgi_utils`, `CombinedRestraints`, `restraints_config`,
+carry an RGI marker (`rgi_toolkit`, `CombinedRestraints`, `restraints_config`,
 `restraints.minimize`, the `conformer_restraint` opt-in, and the `restraints=` pass-through
 kwarg), plus the RGI patch's file list. Take the snapshot *before* the merge — afterwards
 the pre-merge counts are gone, and they are what Step 7 compares against.
@@ -187,7 +187,7 @@ something got merged in the wrong direction.
 Then, if the tool's environment is available, run the cheap engine check (it needs no GPU):
 
 ```bash
-uv run --project <rgi-utils-dir> --frozen \
+uv run --project <rgi-toolkit-dir> --frozen \
   python -m pytest -m "not gpu" tests/test_backend_parity.py -q
 ```
 
@@ -201,7 +201,7 @@ The cheapest fixture that proves the hook actually fires is the **fumarate plane
 
 ```
 built spec: n_active=8 bonds=7 angles=8 chirals=0 plane=2 cistrans=1 ...
-[rgi_utils] finalize (step N): ... plane=0.00000 ... total=0.00000
+[rgi_toolkit] finalize (step N): ... plane=0.00000 ... total=0.00000
 ```
 
 `n_active=8` / `plane=2` / `cistrans=1` is the documented fumarate expectation, and it is

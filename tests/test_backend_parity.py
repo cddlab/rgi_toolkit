@@ -10,8 +10,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from rgi_utils.energy import numpy_energy
-from rgi_utils.spec import (
+from rgi_toolkit.energy import numpy_energy
+from rgi_toolkit.spec import (
     DIST_TYPE_CODES,
     AngleArrays,
     BondArrays,
@@ -267,7 +267,7 @@ def test_energy_parity():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.energy import jax_energy, torch_energy
+    from rgi_toolkit.energy import jax_energy, torch_energy
 
     spec = _make_spec()
     pos = _positions()
@@ -294,7 +294,7 @@ def test_grad_parity():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.energy import jax_energy, torch_energy
+    from rgi_toolkit.energy import jax_energy, torch_energy
 
     # group, distance AND plane terms excluded: group/distance have an intentionally
     # N x-rescaled centroid gradient (centroid_eff — distance uses reduced-mass scale
@@ -344,9 +344,9 @@ def test_interligand_vdw_energy_parity():
     from rdkit import Chem
     from rdkit.Chem import AllChem
 
-    from rgi_utils.atom_context import LigandConf
-    from rgi_utils.energy import jax_energy, torch_energy
-    from rgi_utils.featurizer import build_spec
+    from rgi_toolkit.atom_context import LigandConf
+    from rgi_toolkit.energy import jax_energy, torch_energy
+    from rgi_toolkit.featurizer import build_spec
 
     m = Chem.MolFromSmiles("CC")
     m = Chem.AddHs(m)
@@ -391,7 +391,7 @@ def test_sigma_gating_parity():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.energy import jax_energy, torch_energy
+    from rgi_toolkit.energy import jax_energy, torch_energy
 
     spec = _make_spec()  # conf_start_sigma=10; distance start_sigma=[100, 5]
     pos = _positions()
@@ -432,7 +432,7 @@ def test_cistrans_degenerate_gradient_parity():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.energy import jax_energy, torch_energy
+    from rgi_toolkit.energy import jax_energy, torch_energy
 
     # one cistrans, nonzero target so a degenerate phi still yields a nonzero delta
     spec = RestraintSpec(
@@ -496,7 +496,7 @@ def test_distance_grad_parity_torch_jax():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.energy import jax_energy, torch_energy
+    from rgi_toolkit.energy import jax_energy, torch_energy
 
     # group1 = 3 atoms, group2 = 1 atom (mu = 3*1/(3+1) = 0.75), harmonic, off target so
     # energy + gradient are non-zero.
@@ -556,7 +556,7 @@ def test_plane_grad_parity_torch_jax():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.energy import jax_energy, torch_energy
+    from rgi_toolkit.energy import jax_energy, torch_energy
 
     # two nearly-planar groups (mostly z=0 with small out-of-plane lifts) so each group's
     # smallest-eigenvalue normal is well-separated (stable) yet the energy is non-zero: a
@@ -624,7 +624,7 @@ def test_group_plane_grad_parity_torch_jax():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.energy import jax_energy, torch_energy
+    from rgi_toolkit.energy import jax_energy, torch_energy
 
     spec = _make_spec(include_groups=False, include_distance=False)
     # keep ONLY group_plane so the comparison isolates this term
@@ -695,7 +695,7 @@ def test_rmsd_kabsch_backend_parity():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.energy import jax_energy, torch_energy
+    from rgi_toolkit.energy import jax_energy, torch_energy
 
     ref, pos, args = _rmsd_case()
 
@@ -751,7 +751,7 @@ def test_rmsd_flat_bottom_backend_parity():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.energy import jax_energy, torch_energy
+    from rgi_toolkit.energy import jax_energy, torch_energy
 
     ref, pos, base = _rmsd_case()  # base is harmonic (geom_type 0, target1 0)
     rmsd0 = float(np.sqrt(numpy_energy.rmsd_energy(pos, **base)))  # weight 1 -> sqrt(E)
@@ -814,7 +814,7 @@ def test_energy_breakdown_sums_to_total():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.energy import _terms, jax_energy, torch_energy
+    from rgi_toolkit.energy import _terms, jax_energy, torch_energy
 
     spec = _make_spec()
     pos = _positions()
@@ -849,9 +849,9 @@ def test_jax_torch_cg_same_minimum_at_default_iters():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.energy import jax_energy, torch_energy
-    from rgi_utils.optim._torch_cg_gpu import _cg_minimize_torch
-    from rgi_utils.optim.jax_optim import _cg_minimize
+    from rgi_toolkit.energy import jax_energy, torch_energy
+    from rgi_toolkit.optim._torch_cg_gpu import _cg_minimize_torch
+    from rgi_toolkit.optim.jax_optim import _cg_minimize
 
     # conformer + vdw only (no rmsd, group, plane, OR distance); the CG handles conf
     # here. This test originally excluded distance via include_distance=False (distance was
@@ -917,8 +917,8 @@ def test_rmsd_stop_sigma_release_window():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.energy import jax_energy, torch_energy
-    from rgi_utils.spec import RestraintSpec, RmsdArrays
+    from rgi_toolkit.energy import jax_energy, torch_energy
+    from rgi_toolkit.spec import RestraintSpec, RmsdArrays
 
     n = 4
     rng = np.random.default_rng(1)
@@ -975,8 +975,8 @@ def test_conformer_distance_stop_sigma_window():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.energy import jax_energy, torch_energy
-    from rgi_utils.spec import BondArrays, DistanceArrays, RestraintSpec
+    from rgi_toolkit.energy import jax_energy, torch_energy
+    from rgi_toolkit.spec import BondArrays, DistanceArrays, RestraintSpec
 
     # bond 0-1 stretched (3 vs r0 1.5) and dist groups off target (centroid gap 8 vs 2)
     pos = np.array([[0.0, 0, 0], [3.0, 0, 0], [0, 5.0, 0], [0, 8.0, 0]])
@@ -1040,8 +1040,8 @@ def test_step_window_gating_parity():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.energy import jax_energy, torch_energy
-    from rgi_utils.spec import BondArrays, DistanceArrays, RestraintSpec
+    from rgi_toolkit.energy import jax_energy, torch_energy
+    from rgi_toolkit.spec import BondArrays, DistanceArrays, RestraintSpec
 
     # bond 0-1 stretched (3 vs r0 1.5) and dist groups off target (centroid gap ~6.7 vs 2)
     pos = np.array([[0.0, 0, 0], [3.0, 0, 0], [0, 5.0, 0], [0, 8.0, 0]])
@@ -1110,7 +1110,7 @@ def test_chiral_flat_bottom_zero_at_reference():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.energy import jax_energy, torch_energy
+    from rgi_toolkit.energy import jax_energy, torch_energy
 
     # atom 0 is the chiral center; vol0 = the reference scalar triple product
     pos = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=np.float64)
@@ -1158,7 +1158,7 @@ def test_plane_zero_at_planar_reference():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.energy import jax_energy, torch_energy
+    from rgi_toolkit.energy import jax_energy, torch_energy
 
     # a flat 5-atom group in the z=0 plane -> out-of-plane deviation 0 (like an aromatic
     # ring / carboxyl group in its ideal geometry)
@@ -1240,16 +1240,16 @@ def test_vdw_fixed_background_torch_jax_parity():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim._torch_cg_gpu import (
+    from rgi_toolkit.optim._torch_cg_gpu import (
         _vdw_pair_energy as t_vdw,
     )
-    from rgi_utils.optim._torch_cg_gpu import (
+    from rgi_toolkit.optim._torch_cg_gpu import (
         build_fixed_vdw_pairs as t_build,
     )
-    from rgi_utils.optim.jax_optim import (
+    from rgi_toolkit.optim.jax_optim import (
         _build_fixed_vdw_pairs as j_build,
     )
-    from rgi_utils.optim.jax_optim import (
+    from rgi_toolkit.optim.jax_optim import (
         _vdw_pair_energy as j_vdw,
     )
 
@@ -1344,8 +1344,8 @@ def test_fixed_background_cell_list_matches_dense_reference():
     jax = pytest.importorskip("jax")
     import jax.numpy as jnp
 
-    from rgi_utils.optim._torch_cg_gpu import build_fixed_vdw_pairs as t_build
-    from rgi_utils.optim.jax_optim import _build_fixed_vdw_pairs as j_build
+    from rgi_toolkit.optim._torch_cg_gpu import build_fixed_vdw_pairs as t_build
+    from rgi_toolkit.optim.jax_optim import _build_fixed_vdw_pairs as j_build
 
     rng = np.random.default_rng(11)
     n_active, n_bg = 8, 70
@@ -1434,8 +1434,8 @@ def test_active_vdw_filters_exclusions_before_knn():
     pytest.importorskip("jax")
     import jax.numpy as jnp
 
-    from rgi_utils.optim._torch_cg_gpu import build_active_vdw_pairs
-    from rgi_utils.optim.jax_optim import _build_active_vdw_pairs
+    from rgi_toolkit.optim._torch_cg_gpu import build_active_vdw_pairs
+    from rgi_toolkit.optim.jax_optim import _build_active_vdw_pairs
 
     n_atom = 34
     positions = np.zeros((1, n_atom, 3), dtype=np.float32)
@@ -1477,7 +1477,7 @@ def test_exact_overlap_vdw_gradient_torch_jax_parity():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.energy import jax_energy, numpy_energy, torch_energy
+    from rgi_toolkit.energy import jax_energy, numpy_energy, torch_energy
 
     spec = RestraintSpec(
         n_active=2,
@@ -1518,16 +1518,16 @@ def test_dynamic_exact_overlap_vdw_gradient_torch_jax_parity():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim._torch_cg_gpu import (
+    from rgi_toolkit.optim._torch_cg_gpu import (
         _vdw_pair_energy as torch_fixed_energy,
     )
-    from rgi_utils.optim._torch_cg_gpu import (
+    from rgi_toolkit.optim._torch_cg_gpu import (
         active_vdw_pair_energy as torch_active_energy,
     )
-    from rgi_utils.optim.jax_optim import (
+    from rgi_toolkit.optim.jax_optim import (
         _active_vdw_pair_energy as jax_active_energy,
     )
-    from rgi_utils.optim.jax_optim import _vdw_pair_energy as jax_fixed_energy
+    from rgi_toolkit.optim.jax_optim import _vdw_pair_energy as jax_fixed_energy
 
     lig_local_t = torch.tensor([0])
     fixed_neighbours_t = torch.zeros((1, 1, 1), dtype=torch.long)
@@ -1603,8 +1603,8 @@ def test_jax_torch_cg_same_trajectory_on_stiff_quadratic():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim._torch_cg_gpu import _cg_minimize_torch
-    from rgi_utils.optim.jax_optim import _cg_minimize
+    from rgi_toolkit.optim._torch_cg_gpu import _cg_minimize_torch
+    from rgi_toolkit.optim.jax_optim import _cg_minimize
 
     k = [64.0, 1.0, 1.0]  # ill-conditioned: the accepted step sits well below 1
     kt = torch.tensor(k, dtype=torch.float64)

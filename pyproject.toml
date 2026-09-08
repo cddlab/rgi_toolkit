@@ -1,14 +1,14 @@
 [project]
-name = "rgi-utils"
+name = "rgi-toolkit"
 version = "0.1.0"
-description = "Restraint-Guided Inference utilities for PyTorch/JAX-based structure prediction models"
+description = "Restraint-Guided Inference toolkit for PyTorch/JAX-based structure prediction models"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "numpy",
     "rdkit>=2024.3.2",
     # RMSD-reference structure I/O (pdb_ref.py) + sequence alignment (_align.py). Both are
-    # imported lazily inside their modules so `import rgi_utils` stays numpy-only. Loose
+    # imported lazily inside their modules so `import rgi_toolkit` stays numpy-only. Loose
     # lower bounds: the host tool venvs pin gemmi 0.6.5-0.7.5 and biopython 1.84-1.87.
     "gemmi>=0.6.5",
     "biopython>=1.84",

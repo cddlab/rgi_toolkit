@@ -17,9 +17,9 @@ with the plane-specific differences that are easy to regress:
 import numpy as np
 import pytest
 
-from rgi_utils.atom_context import AtomRecord
-from rgi_utils.config import RestraintsConfig
-from rgi_utils.plane_restr_data import PlaneRestraintData
+from rgi_toolkit.atom_context import AtomRecord
+from rgi_toolkit.config import RestraintsConfig
+from rgi_toolkit.plane_restr_data import PlaneRestraintData
 
 
 class MockAdapter:
@@ -243,7 +243,7 @@ class TestConfigWiring:
 
 class TestSpecArrays:
     def _spec(self, config):
-        from rgi_utils.combined import CombinedRestraints
+        from rgi_toolkit.combined import CombinedRestraints
 
         cr = CombinedRestraints()
         cr.setup(_adapter(("A", 4), ("B", 3)), 1, {"gpu": False, **config})
@@ -302,7 +302,7 @@ class TestSpecArrays:
                 ]
             }
         )
-        from rgi_utils.spec import DIST_TYPE_CODES
+        from rgi_toolkit.spec import DIST_TYPE_CODES
 
         assert int(spec.group_plane.geom_type[0]) == DIST_TYPE_CODES["flat-bottomed2"]
         assert float(spec.group_plane.target2[0]) == pytest.approx(0.1)
@@ -329,7 +329,7 @@ class TestEnergyWiring:
         return pos
 
     def _spec(self, **extra):
-        from rgi_utils.combined import CombinedRestraints
+        from rgi_toolkit.combined import CombinedRestraints
 
         cr = CombinedRestraints()
         cr.setup(
@@ -342,9 +342,9 @@ class TestEnergyWiring:
     def test_three_backend_value_parity(self):
         torch = pytest.importorskip("torch")
         jnp = pytest.importorskip("jax.numpy")
-        from rgi_utils.energy import jax_energy as je
-        from rgi_utils.energy import numpy_energy as ne
-        from rgi_utils.energy import torch_energy as te
+        from rgi_toolkit.energy import jax_energy as je
+        from rgi_toolkit.energy import numpy_energy as ne
+        from rgi_toolkit.energy import torch_energy as te
 
         spec, pos = self._spec(), self._pucker()
         want = 0.2**2  # harmonic toward 0, weight 1
@@ -359,7 +359,7 @@ class TestEnergyWiring:
         ) == pytest.approx(want, abs=1e-5)
 
     def test_breakdown_key_is_separate_from_the_conformer_plane(self):
-        from rgi_utils.energy import numpy_energy as ne
+        from rgi_toolkit.energy import numpy_energy as ne
 
         spec = self._spec()
         bd = ne.energy_breakdown(self._pucker(), ne.prepare_spec(spec), sigma=1.0)
@@ -367,7 +367,7 @@ class TestEnergyWiring:
         assert bd["plane"] == 0.0
 
     def test_gate_above_start_sigma_is_a_noop(self):
-        from rgi_utils.energy import numpy_energy as ne
+        from rgi_toolkit.energy import numpy_energy as ne
 
         spec = self._spec(start_sigma=2.0)
         prepared = ne.prepare_spec(spec)
@@ -375,7 +375,7 @@ class TestEnergyWiring:
         assert float(ne.total_energy(self._pucker(), prepared, sigma=1.0)) > 0.0
 
     def test_step_window_gate(self):
-        from rgi_utils.energy import numpy_energy as ne
+        from rgi_toolkit.energy import numpy_energy as ne
 
         spec = self._spec(start_step=3, stop_step=6)
         prepared = ne.prepare_spec(spec)
@@ -386,7 +386,7 @@ class TestEnergyWiring:
 
     def test_torch_cg_flattens_the_group(self):
         torch = pytest.importorskip("torch")
-        from rgi_utils.combined import CombinedRestraints
+        from rgi_toolkit.combined import CombinedRestraints
 
         pos = self._pucker()
         cr = CombinedRestraints()
@@ -407,7 +407,7 @@ class TestEnergyWiring:
 
     def test_pinned_atoms_get_no_gradient(self):
         torch = pytest.importorskip("torch")
-        from rgi_utils.energy import torch_energy as te
+        from rgi_toolkit.energy import torch_energy as te
 
         spec = self._spec()
         spec.group_plane.free[0, 1::2] = 0.0  # pin every other atom

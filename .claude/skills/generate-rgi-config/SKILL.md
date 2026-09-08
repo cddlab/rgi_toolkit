@@ -18,7 +18,7 @@ description: >-
 Every RGI tool is driven by **one `restraints_config` dict** (YAML for boltz/chai, JSON
 for protenix/OpenDDE/AF3/openfold, a Python dict for esmfold2). Your job is to turn a user's
 plain-language goal into that dict, place it where the tool reads it, and **validate it
-before they spend a GPU run on it**. The engine (`rgi_utils`) does all the maths — you
+before they spend a GPU run on it**. The engine (`rgi_toolkit`) does all the maths — you
 only write config.
 
 RGI nudges the atoms during diffusion sampling so the final structure satisfies the
@@ -141,7 +141,7 @@ Resolve `SKILL_DIR` to the directory containing this `SKILL.md`, then run the
 bundled validator on the file you produced:
 
 ```bash
-uv run --project <rgi-utils-dir> --frozen --with pyyaml \
+uv run --project <rgi-toolkit-dir> --frozen --with pyyaml \
   python "$SKILL_DIR/scripts/validate_config.py" <file>
 ```
 

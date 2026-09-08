@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from rgi_utils.config import RestraintsConfig
+from rgi_toolkit.config import RestraintsConfig
 
 ROOT = Path(__file__).resolve().parents[1]
 

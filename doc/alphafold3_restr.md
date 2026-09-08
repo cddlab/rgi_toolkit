@@ -2,7 +2,7 @@
 
 [Documentation index](README.md) · [Configuration reference](config.md)
 
-AlphaFold 3 + [`rgi_utils`](https://github.com/cddlab/rgi_utils) restraint-guided inference. Full
+AlphaFold 3 + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided inference. Full
 `restraints_config` schema & atom-selection DSL: [`config.md`](config.md).
 
 > **Or generate it automatically:** the `generate-rgi-config` skill in Claude Code
@@ -18,17 +18,17 @@ JIT-able minimizer closure (`get_minimizer()`) runs inside the compiled loop on 
 The RGI code lives in the `cddlab/alphafold3_restr` fork. The base AF3 env is involved (it compiles
 C++ components via scikit-build-core, and the model parameters must be obtained from Google) —
 follow the upstream `docs/installation.md` for the full setup; the RGI delta is just the editable
-fork install (the rgi_utils engine is declared in pyproject and comes with it):
+fork install (the rgi_toolkit engine is declared in pyproject and comes with it):
 
 ```bash
 git clone https://github.com/cddlab/alphafold3_restr.git
 cd alphafold3_restr
 uv venv && source .venv/bin/activate           # Python 3.12+
-uv pip install -e .                            # compiles the C++ chem components (cmake/ninja) + pulls the rgi_utils engine
+uv pip install -e .                            # compiles the C++ chem components (cmake/ninja) + pulls the rgi_toolkit engine
 ```
 
 > For co-development of the engine, override the pinned dependency with a local editable
-> checkout in a SEPARATE step: `uv pip install -e ../rgi_utils` (sibling clone).
+> checkout in a SEPARATE step: `uv pip install -e ../RGI-toolkit` (sibling clone).
 
 - **Model parameters** are not redistributable: request them via Google's form (see the repo's
   `WEIGHTS_TERMS_OF_USE.md`) and point `--model_dir` at them.

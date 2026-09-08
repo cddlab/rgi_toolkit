@@ -2,7 +2,7 @@
 name: implement-rgi
 description: >-
   Integrate Restraint-Guided Inference (RGI) into a diffusion-based structure
-  predictor using rgi_utils. Use when adding or porting guided sampling,
+  predictor using rgi_toolkit. Use when adding or porting guided sampling,
   distance, group-angle, group-dihedral, ligand-conformer, VdW, RMSD, or custom
   restraints to boltz, protenix, OpenDDE, chai-lab, openfold-3, esmfold2, AlphaFold3, or
   a similar sampler. Implement only the framework adapter, sampling-loop hooks,
@@ -44,9 +44,9 @@ angle / dihedral / custom group can be **reference-anchored** to an external PDB
 through the same `restraints_config` + `CombinedRestraints`).
 See `references/lifecycle-and-hooks.md` and `doc/config.md`.
 
-## Core principle: rgi_utils does the heavy lifting
+## Core principle: rgi_toolkit does the heavy lifting
 
-**Everything reusable already lives in `rgi_utils`** — the restraint spec
+**Everything reusable already lives in `rgi_toolkit`** — the restraint spec
 (`spec.py`), the differentiable energies (`energy/{numpy,torch,jax}_energy.py`),
 the GPU optimizers (`optim/*`), the config parser (`config.py`), the atom
 selection DSL (`selection.py`), and the RDKit→restraint featurizer
@@ -55,26 +55,26 @@ selection DSL (`selection.py`), and the RDKit→restraint featurizer
 So adding RGI to a new tool means writing **only** three small things on the
 tool side:
 
-1. an **adapter** that exposes the tool's data through the rgi_utils protocols,
+1. an **adapter** that exposes the tool's data through the rgi_toolkit protocols,
 2. a few **hook lines** in the sampling loop (`setup → minimize → finalize`),
-3. **passing one `restraints_config` dict** through to rgi_utils.
+3. **passing one `restraints_config` dict** through to rgi_toolkit.
 
 This is what makes every tool reach the *same* feature set with the *same*
 YAML/JSON. Resist the urge to re-implement restraint maths, re-parse config, or
 add tool-specific flags — that work is already done and duplicating it is how
 tools drift out of parity. If you find yourself writing a restraint dataclass,
 an energy term, or an atom-selection parser in the tool, stop and use the
-rgi_utils one instead.
+rgi_toolkit one instead.
 
 ## Implementation — 3 steps
 
 ### Step 1 — Install (the backend is inferred, not configured)
 
-Declare `rgi_utils` as a dependency of the tool so its normal install pulls the engine —
-add `rgi-utils @ git+https://github.com/cddlab/rgi_utils.git` to the tool's
+Declare `rgi_toolkit` as a dependency of the tool so its normal install pulls the engine —
+add `rgi-toolkit @ git+https://github.com/cddlab/rgi_toolkit.git` to the tool's
 `[project.dependencies]` (or its requirements file / pixi `pypi-dependencies`), with **no
 extra** since the tool supplies its own torch/jax. To co-develop the engine, override with a
-local editable checkout: `uv pip install -e <path>/rgi_utils`. You do **not** choose the
+local editable checkout: `uv pip install -e <path>/RGI-toolkit`. You do **not** choose the
 backend — it is **inferred from how you invoke the engine**: a JAX tool grabs the pure minimizer via
 `get_minimizer()` → jax; a PyTorch tool calls `minimize(coords)`, where a torch/numpy
 array → torch. `gpu` in the restraints_config still selects the torch *device*
@@ -86,23 +86,23 @@ numpy survives only as the energy reference for backend-parity tests. (A leftove
 
 **First, ask the user where the adapter should live.** Use the client's structured input
 mechanism when available. It is a deliberate placement choice, and both options work
-identically at runtime because the rgi_utils adapter protocol is duck-typed (no base
+identically at runtime because the rgi_toolkit adapter protocol is duck-typed (no base
 class, no registration):
 
-- **In rgi_utils** (`rgi_utils/<tool>/adapter.py`) — the convention all seven existing tools
+- **In rgi_toolkit** (`rgi_toolkit/<tool>/adapter.py`) — the convention all seven existing tools
   follow; centralizes parity-critical code in one repo (one place to review the `resid`
   convention / a protocol tweak). Needs the adapter to be framework-free (plain dict/array
   in), so any irreducibly framework-coupled step (CCD/SMILES mol resolution, atom-name
   decode) goes in a thin in-tool shim that feeds it plain data — the AF3 pattern.
-- **In the tool's own codebase** — keeps rgi_utils unedited; the tool fully owns its adapter
-  and may import its framework freely. Cost: the adapter can drift silently if the rgi_utils
+- **In the tool's own codebase** — keeps rgi_toolkit unedited; the tool fully owns its adapter
+  and may import its framework freely. Cost: the adapter can drift silently if the rgi_toolkit
   protocol changes (you take on keeping it in sync).
 
 Present both with this trade-off and let the user pick before writing any adapter code.
 
 The adapter is the *only* place the tool's internal data structures meet
-rgi_utils. Implement up to four methods (distance-only needs just `iter_atoms`;
-add the rest for conformer/VdW). They yield rgi_utils' framework-agnostic
+rgi_toolkit. Implement up to four methods (distance-only needs just `iter_atoms`;
+add the rest for conformer/VdW). They yield rgi_toolkit' framework-agnostic
 records:
 
 - `iter_atoms() -> Iterator[AtomRecord(chain, resid, index)]` — for distance
@@ -127,7 +127,7 @@ Use the **instance-scoped lifecycle** — construct one `CombinedRestraints` per
 structure so batch runs never share state:
 
 ```python
-from rgi_utils.combined import CombinedRestraints
+from rgi_toolkit.combined import CombinedRestraints
 
 restr = CombinedRestraints()
 restr.setup(YourAdapter(feats), nbatch=multiplicity, config=restraints_config)
@@ -151,14 +151,14 @@ The tool's input (YAML/JSON) already carries a `restraints_config` dict; route
 it unchanged into `setup(config=...)`. Its schema (distance / angle / dihedral /
 conformer / RMSD / base_pair / custom restraints + start_sigma/stop_sigma +
 gpu/method/max_iter) is parsed by
-`rgi_utils.config.RestraintsConfig.from_dict`, shared across all tools. **Do not
+`rgi_toolkit.config.RestraintsConfig.from_dict`, shared across all tools. **Do not
 define restraint types, parse the config, resolve atoms, or add a new CLI flag
 in the tool** — one dict is enough, and it keeps the tool at parity.
 
 ## Minimality check (do this before you finish)
 
 The tool side should contain **none** of these (if it does, move it to
-rgi_utils): a restraint dataclass/type, distance/conformer construction logic, an
+rgi_toolkit): a restraint dataclass/type, distance/conformer construction logic, an
 energy term, an atom-selection parser, a new restraint CLI flag. What *may*
 legitimately stay on the tool side: the adapter (framework-specific data
 extraction), the loop hooks, passing the config dict, and exposing a
@@ -169,7 +169,7 @@ reference for "how small this should be."
 ## Framework selection
 
 - **PyTorch (eager loop)** — boltz, protenix, OpenDDE, chai-lab, openfold-3, esmfold2. The
-  adapter lives in `rgi_utils/<tool>/adapter.py` (it receives a plain dict/array and
+  adapter lives in `rgi_toolkit/<tool>/adapter.py` (it receives a plain dict/array and
   imports no framework code — **except boltz**, whose feats arrive as native torch
   tensors so its adapter imports torch, read at batch 0). Call `minimize` each step.
   Watch the autograd-under-inference_mode gotcha. **What the tool exposes for the
@@ -178,10 +178,10 @@ reference for "how small this should be."
   but no bonds (chai → perceive connectivity), or an over-broad ligand flag (use the
   entity type, not biotite `hetero`). See pitfalls 10–12.
 - **JAX (JIT / lax.scan)** — alphafold3. The framework-free adapter ALSO lives in
-  rgi_utils (`rgi_utils/alphafold3/adapter.py`), like the torch tools; only a thin
+  rgi_toolkit (`rgi_toolkit/alphafold3/adapter.py`), like the torch tools; only a thin
   **in-tool shim** (`alphafold3_restr/.../restraints/adapter.py` `build_af3_adapter`)
   does the one alphafold3-coupled step — resolve each ligand's CCD/SMILES RDKit mol +
-  read `fold_input` — then constructs the rgi_utils adapter from plain data. Build the
+  read `fold_input` — then constructs the rgi_toolkit adapter from plain data. Build the
   spec outside the scan; inject the pure `get_minimizer()` closure inside.
 
 Details, code, and the non-obvious traps (torch `inference_mode`, jax line
@@ -204,7 +204,7 @@ the setup spec counts (13); undeclared deps / CPU torch builds (14).
 
 ## Verify
 
-- **CPU**: run rgi_utils' `tests/test_backend_parity.py` — confirms numpy/torch/
+- **CPU**: run rgi_toolkit' `tests/test_backend_parity.py` — confirms numpy/torch/
   jax agree on energy and gradient, so whichever backend the tool uses is sound.
 - **GPU (real device, usually via the tool's batch/sbatch harness)**:
   - **first, read the `setup` spec counts** (`built spec: bonds=.. angles=..

@@ -45,7 +45,7 @@ compile and leave a merge that looks clean**. The resolution is to keep everythi
 ```
 
 Most conflicts in this sync look exactly like this. Notice also what the RGI side is here:
-just a kwarg being threaded down a call chain. There is no `rgi_utils` import, no
+just a kwarg being threaded down a call chain. There is no `rgi_toolkit` import, no
 `CombinedRestraints` — so if you resolved this by taking `--theirs`, every obvious RGI
 marker in the repo would still grep clean while the hook downstream silently never fires.
 That is what `rgi_probe.sh` is watching for.
@@ -97,7 +97,7 @@ the chain yields `n_active=0`, which is a silent no-op, not an error.
 
 ### Dependency declarations (`pyproject.toml`, `requirements.in/txt`, `pixi.toml`)
 
-One added line declaring `rgi_utils`. Keep both sides. Then check the corresponding lockfile.
+One added line declaring `rgi_toolkit`. Keep both sides. Then check the corresponding lockfile.
 
 ### Lockfiles (`pixi.lock`, `uv.lock`)
 

@@ -2,7 +2,7 @@
 
 [Documentation index](README.md) · [Configuration reference](config.md)
 
-Protenix + [`rgi_utils`](https://github.com/cddlab/rgi_utils) restraint-guided inference. Full
+Protenix + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided inference. Full
 `restraints_config` schema & atom-selection DSL: [`config.md`](config.md).
 
 > **Or generate it automatically:** the `generate-rgi-config` skill in Claude Code
@@ -19,11 +19,11 @@ PyPI `protenix`, which has no RGI hooks.
 git clone https://github.com/cddlab/protenix_restr.git
 cd protenix_restr
 uv venv && source .venv/bin/activate           # Python 3.11+
-uv pip install -e .                             # also pulls the rgi_utils engine (declared in requirements.txt)
+uv pip install -e .                             # also pulls the rgi_toolkit engine (declared in requirements.txt)
 ```
 
 > For co-development of the engine, override the pinned dependency with a local editable
-> checkout in a SEPARATE step: `uv pip install -e ../rgi_utils` (sibling clone).
+> checkout in a SEPARATE step: `uv pip install -e ../RGI-toolkit` (sibling clone).
 
 > **Run protenix on sm_89 (e.g. RTX 4090), NOT on Blackwell (sm_120).** On Blackwell its
 > cuequivariance fused kernels **silently** emit all-NaN coordinates (no crash, exit 0) even for a

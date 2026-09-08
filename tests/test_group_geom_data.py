@@ -9,9 +9,9 @@ import math
 
 import pytest
 
-from rgi_utils.atom_context import AtomRecord
-from rgi_utils.config import RestraintsConfig
-from rgi_utils.group_geom_restr_data import AngleRestraintData, DihedralRestraintData
+from rgi_toolkit.atom_context import AtomRecord
+from rgi_toolkit.config import RestraintsConfig
+from rgi_toolkit.group_geom_restr_data import AngleRestraintData, DihedralRestraintData
 
 
 class MockAdapter:

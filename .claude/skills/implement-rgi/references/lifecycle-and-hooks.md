@@ -3,7 +3,7 @@
 ## Instance-scoped lifecycle (the supported pattern)
 
 ```python
-from rgi_utils.combined import CombinedRestraints
+from rgi_toolkit.combined import CombinedRestraints
 
 restr = CombinedRestraints()                        # ONE per structure
 restr.setup(adapter, nbatch=N, config=cfg_dict)     # build spec (auto-resets state)
@@ -77,7 +77,7 @@ flat = positions_denoised.reshape(-1, 3)
 positions_denoised = minimizer(flat, sigma).reshape(shape)  # <-- the hook
 ```
 The `(num_tokens, max_atoms, 3) <-> (-1, 3)` reshape is the only tool-specific
-glue; the minimizer itself is rgi_utils.
+glue; the minimizer itself is rgi_toolkit.
 
 ## Config dict schema (shared across all tools)
 
@@ -147,7 +147,7 @@ restraints_config:
     - ref_pdb: "ref.pdb"            # required, OR ref_cif: "ref.cif" (mmCIF, mutually exclusive);
       #                               coords parsed via gemmi (read_pdb_atoms / read_cif_atoms); the
       #                               pairing:align path uses biopython (Bio.Align, BLOSUM62). Both
-      #                               lazy-imported, so `import rgi_utils` stays numpy-only.
+      #                               lazy-imported, so `import rgi_toolkit` stays numpy-only.
       harmonic: {target_rmsd: 0.0}  # required: a restraint-type block on the RMSD value (Å);
       #                               also flat-bottomed{target_rmsd1,target_rmsd2} /
       #                               flat-bottomed1 / flat-bottomed2 (stay within X Å) -- the

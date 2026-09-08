@@ -10,7 +10,7 @@ from __future__ import annotations
 from rdkit import Chem
 from rdkit.Chem import rdMolTransforms
 
-from rgi_utils._mol_build import generate_ideal_conformer
+from rgi_toolkit._mol_build import generate_ideal_conformer
 
 
 def _cc_torsion(mol, coords):
@@ -82,7 +82,7 @@ def test_reorder_to_target_keeps_stereo():
     orders, atom order == atom_array order). The reordered coords must keep the correct E/Z."""
     import numpy as np
 
-    from rgi_utils._mol_build import build_ligand_mol
+    from rgi_toolkit._mol_build import build_ligand_mol
 
     smol = Chem.MolFromSmiles("OC(=O)/C=C/C(=O)O")  # fumarate (trans)
     canon = generate_ideal_conformer(smol)

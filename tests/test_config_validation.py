@@ -16,9 +16,9 @@ import logging
 import numpy as np
 import pytest
 
-from rgi_utils._config_util import coerce_bool
-from rgi_utils.config import RestraintsConfig
-from rgi_utils.rmsd_restr_data import RmsdData
+from rgi_toolkit._config_util import coerce_bool
+from rgi_toolkit.config import RestraintsConfig
+from rgi_toolkit.rmsd_restr_data import RmsdData
 
 
 # --- top-level section whitelist (F1) ---------------------------------------------
@@ -196,7 +196,7 @@ def _min_esm_features(asym_ids):
 
 def test_esmfold2_resid_resets_per_chain():
     """resid is a per-chain 1-based ordinal that resets at each chain boundary."""
-    from rgi_utils.esmfold2.adapter import ESMFold2Adapter
+    from rgi_toolkit.esmfold2.adapter import ESMFold2Adapter
 
     ad = ESMFold2Adapter(_min_esm_features([0, 0, 0, 1, 1]))
     assert ad._tok_ordinal == {0: 1, 1: 2, 2: 3, 3: 1, 4: 2}
@@ -204,7 +204,7 @@ def test_esmfold2_resid_resets_per_chain():
 
 def test_esmfold2_token_padding_guard_raises():
     """A padded token mask would shift the resid ordinals -> the guard must raise."""
-    from rgi_utils.esmfold2.adapter import ESMFold2Adapter
+    from rgi_toolkit.esmfold2.adapter import ESMFold2Adapter
 
     feats = _min_esm_features([0, 0, 1])
     feats["token_attention_mask"] = np.array([[1, 1, 0]], dtype=np.int64)  # a pad token

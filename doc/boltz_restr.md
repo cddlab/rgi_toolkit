@@ -2,7 +2,7 @@
 
 [Documentation index](README.md) · [Configuration reference](config.md)
 
-Boltz-1/2 + [`rgi_utils`](https://github.com/cddlab/rgi_utils) restraint-guided inference. Full
+Boltz-1/2 + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided inference. Full
 `restraints_config` schema & atom-selection DSL: [`config.md`](config.md).
 
 > **Or generate it automatically:** the `generate-rgi-config` skill in Claude Code
@@ -19,11 +19,11 @@ The RGI code lives in the `cddlab/boltz_restr` fork — install **that fork**, n
 git clone https://github.com/cddlab/boltz_restr.git
 cd boltz_restr
 uv venv && source .venv/bin/activate           # Python 3.11+
-uv pip install -e ".[cuda]"                     # also pulls the rgi_utils engine (declared in pyproject)
+uv pip install -e ".[cuda]"                     # also pulls the rgi_toolkit engine (declared in pyproject)
 ```
 
 > For co-development of the engine, override the pinned dependency with a local editable
-> checkout in a SEPARATE step: `uv pip install -e ../rgi_utils` (sibling clone).
+> checkout in a SEPARATE step: `uv pip install -e ../RGI-toolkit` (sibling clone).
 
 ## Configuration
 

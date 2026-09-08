@@ -2,7 +2,7 @@
 
 [Documentation index](README.md) · [Configuration reference](config.md)
 
-Chai-1 + [`rgi_utils`](https://github.com/cddlab/rgi_utils) restraint-guided inference. Full
+Chai-1 + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided inference. Full
 `restraints_config` schema & atom-selection DSL: [`config.md`](config.md).
 
 > **Or generate it automatically:** the `generate-rgi-config` skill in Claude Code
@@ -20,13 +20,13 @@ works).
 git clone https://github.com/cddlab/chai-lab_restr.git
 cd chai-lab_restr
 uv venv --python 3.12 .venv && source .venv/bin/activate
-uv pip install -e .                                                                   # also pulls the rgi_utils engine (declared in requirements.in)
+uv pip install -e .                                                                   # also pulls the rgi_toolkit engine (declared in requirements.in)
 uv pip install --reinstall torch --index-url https://download.pytorch.org/whl/cu124  # PyPI default is +cpu!
 uv pip install pyyaml                                                                 # chai1.py imports yaml, not a chai dep
 ```
 
 > For co-development of the engine, override the pinned dependency with a local editable
-> checkout in a SEPARATE step: `uv pip install -e ../rgi_utils` (sibling clone).
+> checkout in a SEPARATE step: `uv pip install -e ../RGI-toolkit` (sibling clone).
 
 ## Configuration
 

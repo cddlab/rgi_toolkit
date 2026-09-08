@@ -17,8 +17,8 @@ import numpy as np
 import pytest
 from rdkit import Chem
 
-from rgi_utils._mol_build import _expected_stereo, _stereo_mismatch_counts
-from rgi_utils.chai.adapter import ChaiStructureAdapter
+from rgi_toolkit._mol_build import _expected_stereo, _stereo_mismatch_counts
+from rgi_toolkit.chai.adapter import ChaiStructureAdapter
 
 
 def _tensorcode(chain: str, width: int = 4) -> list[int]:

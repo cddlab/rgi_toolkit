@@ -7,10 +7,10 @@ import pytest
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
-from rgi_utils.atom_context import LigandConf
-from rgi_utils.distance_restr_data import DistanceData
-from rgi_utils.featurizer import build_spec
-from rgi_utils.group_geom_restr_data import AngleRestraintData, DihedralRestraintData
+from rgi_toolkit.atom_context import LigandConf
+from rgi_toolkit.distance_restr_data import DistanceData
+from rgi_toolkit.featurizer import build_spec
+from rgi_toolkit.group_geom_restr_data import AngleRestraintData, DihedralRestraintData
 
 
 def _ethane():
@@ -409,7 +409,7 @@ def test_conf_slack_null_handling_uniform(term, default):
     null/zero handling can't drift (it previously diverged: only some terms had an `or 0.0`
     guard, so `slack: null` crashed bond/angle and silently zeroed a non-zero default). The
     chiral case (default 0.05) exercises the trap that a zero default cannot."""
-    from rgi_utils.featurizer import _conf_slack
+    from rgi_toolkit.featurizer import _conf_slack
 
     assert _conf_slack({}, term, default) == default  # key absent
     assert _conf_slack({term: {}}, term, default) == default  # slack omitted

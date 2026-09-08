@@ -54,4 +54,4 @@ enabled appropriately for your integration.
 
 ## Where can I ask questions or report bugs about RGI?
 
-Please use [GitHub Issues](https://github.com/cddlab/rgi_utils/issues).
+Please use [GitHub Issues](https://github.com/cddlab/rgi_toolkit/issues).

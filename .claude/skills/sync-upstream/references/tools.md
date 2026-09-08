@@ -58,7 +58,7 @@ function RGI hooks — expect a conflict and re-derive the hook rather than forc
 ### boltz — `main` has genuinely diverged (this is intentional)
 
 `boltz_restr`'s `main` is the only one that is not a plain ancestor of upstream. It once
-carried an old, pre-`rgi_utils` in-tree RGI implementation, which was undone with a revert
+carried an old, pre-`rgi_toolkit` in-tree RGI implementation, which was undone with a revert
 commit (`5dd09f1`) rather than a history rewrite, because `main` is a published release.
 The net effect: `main`'s *tree* equals upstream, but its *history* has a detour.
 
@@ -134,7 +134,7 @@ git checkout --theirs uv.lock && uv lock
 ```
 
 Take upstream's lock as the base, then let the resolver re-add the RGI dependency
-(`rgi_utils`, declared in `pixi.toml` / `pyproject.toml` — make sure that declaration
+(`rgi-toolkit`, declared in `pixi.toml` / `pyproject.toml` — make sure that declaration
 survived the merge first, since it is the actual source of truth). Lock regeneration
 downloads packages, so on this cluster it belongs in an `sbatch` job, not the login node.
 
@@ -147,10 +147,11 @@ git -C <tool> grep -c -i 'rgi' origin/rgi-integration -- pixi.lock   # before
 git -C <tool> grep -c -i 'rgi' rgi-integration -- pixi.lock          # after
 ```
 
-As of 2026-07-17 both counts are **0** in every tool: `rgi_utils` is a git dependency and
-has no materialised entry in `pixi.lock` / `uv.lock`, so the RGI declaration lives only in
-`pixi.toml` / `pyproject.toml` (which the probe *does* cover). A nonzero-to-zero drop would
-be a real regression; 0-to-0 is the expected steady state.
+The AF3, OpenFold3, and ESM locks contain the `rgi-toolkit` distribution and its Git
+revision. Verify the distribution name, repository URL, and resolved commit together:
+a pre-rename commit still contains the old package metadata and namespace, even when
+accessed through the new repository URL. ESM also locks the Transformers integration;
+refresh that revision when its hook source changes.
 
 Git will sometimes **auto-merge a lock with no conflict** (this happened to esm's
 `pixi.lock` and af3's `uv.lock` on 2026-07-17). That result is not resolver output and may

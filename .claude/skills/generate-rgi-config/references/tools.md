@@ -96,11 +96,11 @@ GPU work goes through `sbatch` on a compute node, never the login node. See the 
 
 ## Which Python runs the validator
 
-The bundled `scripts/validate_config.py` needs `rgi_utils` (numpy-only) and, for YAML
+The bundled `scripts/validate_config.py` needs `rgi_toolkit` (numpy-only) and, for YAML
 files, `pyyaml`. Resolve `SKILL_DIR` to the directory containing the skill's `SKILL.md`,
 then run:
 
 ```bash
-uv run --project <rgi-utils-dir> --frozen --with pyyaml \
+uv run --project <rgi-toolkit-dir> --frozen --with pyyaml \
   python "$SKILL_DIR/scripts/validate_config.py" <file>
 ```

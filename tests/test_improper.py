@@ -8,11 +8,11 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from rgi_utils.config import RestraintsConfig
-from rgi_utils.custom.closure import build_terms
-from rgi_utils.energy import numpy_energy
-from rgi_utils.featurizer import build_spec
-from rgi_utils.group_geom_restr_data import (
+from rgi_toolkit.config import RestraintsConfig
+from rgi_toolkit.custom.closure import build_terms
+from rgi_toolkit.energy import numpy_energy
+from rgi_toolkit.featurizer import build_spec
+from rgi_toolkit.group_geom_restr_data import (
     DihedralRestraintData,
     ImproperRestraintData,
 )
@@ -194,7 +194,7 @@ def test_improper_backend_energy_and_gradient_parity():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.energy import jax_energy, torch_energy
+    from rgi_toolkit.energy import jax_energy, torch_energy
 
     spec = _improper_spec(75.0)
     pos = _coords()
@@ -260,7 +260,7 @@ def test_improper_optimizer_reduces_energy(backend):
     coords = _coords()[None, ...]
     if backend == "torch":
         torch = pytest.importorskip("torch")
-        from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+        from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
         value = torch.tensor(coords, dtype=torch.float64)
         optimizer = TorchRestraintOptimizer(spec, max_iter=500)
@@ -272,7 +272,7 @@ def test_improper_optimizer_reduces_energy(backend):
         jax.config.update("jax_enable_x64", True)
         import jax.numpy as jnp
 
-        from rgi_utils.optim.jax_optim import energy_of, make_minimizer
+        from rgi_toolkit.optim.jax_optim import energy_of, make_minimizer
 
         value = jnp.asarray(coords)
         before = energy_of(spec, value)

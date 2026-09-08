@@ -9,7 +9,7 @@ This page documents **every variable**: its type, default, allowed values, and m
 Omitted keys fall back to their documented defaults. Unknown top-level keys and unknown conformer
 keys raise an error. Unknown keys inside individual restraint entries are logged and ignored, so
 check their spelling against this page. Source of truth:
-`src/rgi_utils/{config,distance_restr_data,group_geom_restr_data,base_pair_restr_data,ref_geom_restr_data,ref_config,featurizer,rmsd_restr_data,pdb_ref,_align,selection}.py`.
+`src/rgi_toolkit/{config,distance_restr_data,group_geom_restr_data,base_pair_restr_data,ref_geom_restr_data,ref_config,featurizer,rmsd_restr_data,pdb_ref,_align,selection}.py`.
 
 > **Don't want to hand-write this?** Run the `generate-rgi-config` skill in Claude Code
 > (`/generate-rgi-config`) or Codex (`$generate-rgi-config`). It turns a plain-language
@@ -1273,7 +1273,7 @@ custom_restraints_config:
 The function can be reused via `use:` or passed directly with `add_custom`:
 
 ```python
-from rgi_utils import custom_restraint, CombinedRestraints
+from rgi_toolkit import custom_restraint, CombinedRestraints
 
 @custom_restraint("symmetric")                 # reusable: config can {use: "symmetric"}
 def energy(ctx):

@@ -2,7 +2,7 @@
 
 [Documentation index](README.md) · [Configuration reference](config.md)
 
-OpenFold3-preview + [`rgi_utils`](https://github.com/cddlab/rgi_utils) restraint-guided inference.
+OpenFold3-preview + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided inference.
 Full `restraints_config` schema & atom-selection DSL: [`config.md`](config.md).
 
 > **Or generate it automatically:** the `generate-rgi-config` skill in Claude Code
@@ -13,20 +13,20 @@ Full `restraints_config` schema & atom-selection DSL: [`config.md`](config.md).
 ## Installation
 
 The RGI code lives in the `cddlab/openfold-3_restr` fork — install **that fork**, not the upstream
-PyPI `openfold3`. The `rgi_utils` engine is declared in `pixi.toml` (no `[torch]` extra — it uses the
+PyPI `openfold3`. The `rgi_toolkit` engine is declared in `pixi.toml` (no `[torch]` extra — it uses the
 conda torch, not a pip wheel), so `pixi install` pulls it automatically. Run on a CUDA GPU (RTX 4090
 / sm_89 works).
 
 ```bash
 git clone https://github.com/cddlab/openfold-3_restr.git
 cd openfold-3_restr
-pixi install -e openfold3-cuda12        # builds the env + pulls rgi_utils (declared in pixi.toml)
+pixi install -e openfold3-cuda12        # builds the env + pulls rgi_toolkit (declared in pixi.toml)
 printf '\n\n\nno\n' | pixi run -e openfold3-cuda12 setup_openfold   # fetch model params to ~/.openfold3
 export OPENFOLD_CACHE="$HOME/.openfold3"
 ```
 
 > For co-development of the engine, override with a local editable checkout AFTER pixi install:
-> `pixi run -e openfold3-cuda12 python -m pip install -e ../rgi_utils` (sibling clone).
+> `pixi run -e openfold3-cuda12 python -m pip install -e ../RGI-toolkit` (sibling clone).
 
 ## Configuration
 

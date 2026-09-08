@@ -13,9 +13,9 @@ import pytest
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
-from rgi_utils import CombinedRestraints
-from rgi_utils._align import THREE_TO_ONE
-from rgi_utils.atom_context import AtomRecord, LigandConf
+from rgi_toolkit import CombinedRestraints
+from rgi_toolkit._align import THREE_TO_ONE
+from rgi_toolkit.atom_context import AtomRecord, LigandConf
 
 _ONE_TO_THREE = {v: k for k, v in THREE_TO_ONE.items()}
 
@@ -623,7 +623,7 @@ def test_rmsd_stop_sigma_above_start_raises(tmp_path):
 def test_distance_move_mode_parsing():
     """The distance `move` key parses to move_mode 0/1/2 (both / 1 / 2), accepts int or
     string, defaults to 0 (both) when omitted, and raises on an unknown value."""
-    from rgi_utils.distance_restr_data import DistanceData
+    from rgi_toolkit.distance_restr_data import DistanceData
 
     def mode(move):
         dd = DistanceData()
@@ -650,7 +650,7 @@ def test_distance_move_mode_parsing():
 def test_distance_weight_parsing():
     """The distance `weight` key parses to DistanceData.weight (float), defaulting to 1.0
     when omitted. It is accepted alongside move (no `warn_unknown_keys` warning)."""
-    from rgi_utils.distance_restr_data import DistanceData
+    from rgi_toolkit.distance_restr_data import DistanceData
 
     def weight(w):
         dd = DistanceData()
@@ -1309,7 +1309,7 @@ def test_rmsd_default_no_polymer_uses_identity(tmp_path):
     """The align DEFAULT degrades to identity when there is nothing to align: a
     ligand-only structure (no polymer type) pairs by ordinal identity and does NOT
     raise, even though `pairing` is unset (-> align)."""
-    from rgi_utils.rmsd_restr_data import RmsdData
+    from rgi_toolkit.rmsd_restr_data import RmsdData
 
     pdb = tmp_path / "lig.pdb"
     pdb.write_text(
@@ -1551,7 +1551,7 @@ def _pdb_atom_line(rec, chain, resseq, name, x=0.0, y=0.0, z=0.0):
 def test_pdb_ref_hetatm_per_atom_ordinal(tmp_path):
     """HETATM atoms get a per-atom ordinal (matching the adapters' one-token-per-atom
     ligand convention); ATOM atoms in one residue still share a single ordinal."""
-    from rgi_utils.pdb_ref import read_pdb_atoms
+    from rgi_toolkit.pdb_ref import read_pdb_atoms
 
     pdb = tmp_path / "mix.pdb"
     pdb.write_text(
@@ -1571,7 +1571,7 @@ def test_rmsd_ligand_identity_pairing(tmp_path):
     """A ligand reference (HETATM, single resSeq) identity-pairs with an adapter that
     gives each ligand atom its own per-atom ordinal. Regression: pdb_ref used to give
     every ligand atom one ordinal -> the (chain, resid, name) key never matched."""
-    from rgi_utils.rmsd_restr_data import RmsdData
+    from rgi_toolkit.rmsd_restr_data import RmsdData
 
     pdb = tmp_path / "lig.pdb"
     pdb.write_text(
@@ -1648,7 +1648,7 @@ def test_cif_pdb_equivalence(tmp_path):
     quote-stripping would corrupt."""
     from dataclasses import astuple
 
-    from rgi_utils.pdb_ref import read_cif_atoms, read_pdb_atoms
+    from rgi_toolkit.pdb_ref import read_cif_atoms, read_pdb_atoms
 
     rows = [
         ("ATOM  ", "A", 5, "N", 1.0, 2.0, 3.0),
@@ -1672,7 +1672,7 @@ def test_cif_pdb_equivalence(tmp_path):
 def test_cif_ref_hetatm_per_atom_ordinal(tmp_path):
     """CIF version of test_pdb_ref_hetatm_per_atom_ordinal: HETATM atoms get a per-atom
     ordinal, ATOM atoms in one residue share one (the same _build_atoms convention)."""
-    from rgi_utils.pdb_ref import read_cif_atoms
+    from rgi_toolkit.pdb_ref import read_cif_atoms
 
     cif = tmp_path / "mix.cif"
     cif.write_text(
@@ -1696,7 +1696,7 @@ def test_cif_quoted_value_with_space_not_truncated(tmp_path):
     must not inflate the token count and silently truncate the parse. Before the quote-aware
     tokeniser, raw.split() turned 'has a space' into 3 tokens -> len(toks) != ncol -> the row
     read as the block terminator and every atom from it on was dropped."""
-    from rgi_utils.pdb_ref import read_cif_atoms
+    from rgi_toolkit.pdb_ref import read_cif_atoms
 
     cif = tmp_path / "quoted.cif"
     cif.write_text(
@@ -1757,7 +1757,7 @@ def test_minimize_jax_requires_explicit_sigma():
 def test_rmsd_ref_cif_and_pdb_mutually_exclusive():
     """ref_pdb and ref_cif are mutually exclusive -- giving both is a config error
     (which file wins would otherwise be silent)."""
-    from rgi_utils.rmsd_restr_data import RmsdData
+    from rgi_toolkit.rmsd_restr_data import RmsdData
 
     rr = RmsdData()
     with pytest.raises(ValueError, match="mutually exclusive"):
@@ -1773,7 +1773,7 @@ def test_rmsd_ref_cif_and_pdb_mutually_exclusive():
 def test_rmsd_resolve_with_cif(tmp_path):
     """A ligand reference given as ref_cif resolves to the same sites/coords ref_pdb would
     (read_cif_atoms feeds the identical pairing path)."""
-    from rgi_utils.rmsd_restr_data import RmsdData
+    from rgi_toolkit.rmsd_restr_data import RmsdData
 
     cif = tmp_path / "lig.cif"
     cif.write_text(
@@ -1808,7 +1808,7 @@ def test_rmsd_resolve_with_cif(tmp_path):
 def test_cif_no_atom_site_loop_raises(tmp_path):
     """A CIF with no _atom_site loop must fail loudly (a missing restraint is the worst
     silent failure), like read_pdb_atoms on an empty file."""
-    from rgi_utils.pdb_ref import read_cif_atoms
+    from rgi_toolkit.pdb_ref import read_cif_atoms
 
     cif = tmp_path / "empty.cif"
     cif.write_text("data_x\n#\n_cell.length_a 1.0\n#\n")
@@ -1818,7 +1818,7 @@ def test_cif_no_atom_site_loop_raises(tmp_path):
 
 def test_cif_label_only_fallback(tmp_path):
     """An mmCIF with only label_* columns (no auth_*) falls back to the label fields."""
-    from rgi_utils.pdb_ref import read_cif_atoms
+    from rgi_toolkit.pdb_ref import read_cif_atoms
 
     cif = tmp_path / "label.cif"
     cif.write_text(
@@ -1843,8 +1843,8 @@ def test_cif_label_only_fallback(tmp_path):
 def test_rmsd_duplicate_ref_key_raises():
     """Duplicate (chain, resid, name) reference atoms must raise rather than silently
     collapse last-wins (e.g. an altloc collision within one polymer residue)."""
-    from rgi_utils.pdb_ref import PdbAtom
-    from rgi_utils.rmsd_restr_data import RmsdData
+    from rgi_toolkit.pdb_ref import PdbAtom
+    from rgi_toolkit.rmsd_restr_data import RmsdData
 
     rr = RmsdData()
     rr.ref_pdb = "dup.pdb"
@@ -1860,7 +1860,7 @@ def test_rmsd_duplicate_ref_key_raises():
 def test_rmsd_weight_zero_preserved_and_default():
     """weight: 0 stays 0 (a no-op restraint); an omitted weight defaults to 1.0.
     The old `or 1.0` truthiness coerced an explicit 0 to full weight."""
-    from rgi_utils.rmsd_restr_data import RmsdData
+    from rgi_toolkit.rmsd_restr_data import RmsdData
 
     base = {
         "ref_pdb": "x.pdb",
@@ -1881,7 +1881,7 @@ def test_boltz_adapter_decodes_atom_names_from_ref_chars():
     ord(c)-32 codes), not the nonexistent record[0].atoms. Regression for the silent
     name=None that degraded RMSD identity pairing to selection-order pairing."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.boltz.adapter import BoltzFeatsAdapter
+    from rgi_toolkit.boltz.adapter import BoltzFeatsAdapter
 
     names = ["N", "CA", "C", "O", "CB"]
     n_pad = 3
@@ -1900,7 +1900,7 @@ def test_boltz_adapter_decodes_atom_names_from_ref_chars():
 def test_rmsd_no_selection_whole_structure(tmp_path):
     """No atom_selection -> fit + RMSD over the WHOLE structure (every atom paired to the
     reference by identity); only ref_pdb + target_rmsd are required."""
-    from rgi_utils.rmsd_restr_data import RmsdData
+    from rgi_toolkit.rmsd_restr_data import RmsdData
 
     rng = np.random.default_rng(11)
     n = 8  # 4 residues x (N, CA)
@@ -1924,7 +1924,7 @@ def test_rmsd_no_selection_whole_structure(tmp_path):
 def test_rmsd_no_selection_best_effort_skips_unmatched(tmp_path):
     """No selection + a reference that lacks some structure atoms (e.g. no hydrogens):
     best-effort fits/measures over the matched subset instead of raising."""
-    from rgi_utils.rmsd_restr_data import RmsdData
+    from rgi_toolkit.rmsd_restr_data import RmsdData
 
     rng = np.random.default_rng(12)
     atoms, recs = [], []
@@ -1949,7 +1949,7 @@ def test_rmsd_no_selection_best_effort_skips_unmatched(tmp_path):
 
 def test_rmsd_requires_ref_pdb_and_target_only():
     """Selections are optional now, but a reference + target_rmsd are still required."""
-    from rgi_utils.rmsd_restr_data import RmsdData
+    from rgi_toolkit.rmsd_restr_data import RmsdData
 
     with pytest.raises(ValueError, match="ref_pdb or ref_cif and a restraint-type"):
         RmsdData().set_config({"harmonic": {"target_rmsd": 0.0}})  # missing reference

@@ -3,9 +3,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from rgi_utils.config import RestraintsConfig
-from rgi_utils.custom.closure import build_terms
-from rgi_utils.featurizer import build_spec
+from rgi_toolkit.config import RestraintsConfig
+from rgi_toolkit.custom.closure import build_terms
+from rgi_toolkit.featurizer import build_spec
 
 
 class _FakeAdapter:
@@ -138,7 +138,7 @@ def test_custom_move_uses_selection_names_with_reference(tmp_path):
 
 
 def test_add_custom_forwards_move():
-    from rgi_utils import CombinedRestraints
+    from rgi_toolkit import CombinedRestraints
 
     restraints = CombinedRestraints()
     restraints.add_custom(

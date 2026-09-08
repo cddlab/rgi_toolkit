@@ -2,7 +2,7 @@
 
 [Documentation index](README.md) · [Configuration reference](config.md)
 
-OpenDDE + [`rgi_utils`](https://github.com/cddlab/rgi_utils) restraint-guided inference. Full
+OpenDDE + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided inference. Full
 `restraints_config` schema & atom-selection DSL: [`config.md`](config.md).
 
 > **Or generate it automatically:** the `generate-rgi-config` skill in Claude Code
@@ -21,11 +21,11 @@ git clone https://github.com/cddlab/OpenDDE_restr.git
 cd OpenDDE_restr
 git switch rgi-integration
 uv venv --python 3.12 .venv && source .venv/bin/activate
-uv pip install --torch-backend cu126 -e ".[gpu]"  # also pulls rgi_utils (declared in pyproject)
+uv pip install --torch-backend cu126 -e ".[gpu]"  # also pulls rgi_toolkit (declared in pyproject)
 ```
 
 > For co-development of the engine, override the declared dependency with a local editable
-> checkout in a SEPARATE step: `uv pip install -e ../rgi_utils` (sibling clone).
+> checkout in a SEPARATE step: `uv pip install -e ../RGI-toolkit` (sibling clone).
 
 OpenDDE also needs its checkpoint and common runtime data under `OPENDDE_ROOT_DIR`; follow the
 fork's `docs/inference_instructions.md` or run `scripts/download_opendde_data.sh`.
@@ -245,7 +245,7 @@ distance and `../check_conf.py <pred.cif> GLN` checks ligand geometry.
 
 ## Integration details
 
-- `rgi_utils.opendde.OpenDDEAdapter` reads atom metadata and real bond orders from OpenDDE's
+- `rgi_toolkit.opendde.OpenDDEAdapter` reads atom metadata and real bond orders from OpenDDE's
   stashed Biotite `AtomArray`, reference geometry from `ref_pos`, and the pre-expansion
   `residue_level_atom_to_token_idx` mapping when structural tokens are enabled.
 - OpenDDE constructs a fresh `CombinedRestraints` for each structure and carries it through

@@ -1,8 +1,8 @@
 import pytest
 
-from rgi_utils.config import RestraintsConfig
-from rgi_utils.custom.dsl import parse_formula
-from rgi_utils.ref_config import split_ref_selection
+from rgi_toolkit.config import RestraintsConfig
+from rgi_toolkit.custom.dsl import parse_formula
+from rgi_toolkit.ref_config import split_ref_selection
 
 
 def _ref(path: str) -> dict:

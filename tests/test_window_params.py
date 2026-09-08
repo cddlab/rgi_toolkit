@@ -11,14 +11,14 @@ other entries pre-init 1.0, and whose ``stop_sigma`` re-asserts -1.0.
 
 import pytest
 
-from rgi_utils.custom.data import CustomData
-from rgi_utils.distance_restr_data import DistanceData
-from rgi_utils.group_geom_restr_data import (
+from rgi_toolkit.custom.data import CustomData
+from rgi_toolkit.distance_restr_data import DistanceData
+from rgi_toolkit.group_geom_restr_data import (
     AngleRestraintData,
     DihedralRestraintData,
     ImproperRestraintData,
 )
-from rgi_utils.rmsd_restr_data import RmsdData
+from rgi_toolkit.rmsd_restr_data import RmsdData
 
 # minimal valid configs per type, parameterised so the shared keys (weight + windows)
 # can be merged in. Each carries exactly the type-specific selection/target keys needed

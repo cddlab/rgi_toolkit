@@ -23,7 +23,7 @@ GPU paths (real CUDA torch / jax devices) are exercised by the host tools via
 
 ## Architecture
 
-**rgi_utils** — Restraint-Guided Inference (RGI): inject distance + ligand
+**rgi_toolkit** — Restraint-Guided Inference (RGI): inject distance + ligand
 conformer + RMSD restraints into a structure-prediction diffusion loop via gradient
 optimization. Shared by **seven** integrations — boltz / protenix / chai-lab / openfold-3 /
 esmfold2 / opendde (torch) and alphafold3 (jax), covering 9 model variants (boltz1+boltz2 and
@@ -193,7 +193,7 @@ inert — to run AF3 restraints on CPU, run the whole process on the JAX CPU pla
 framework-free EXCEPT boltz, whose feats arrive as native torch tensors so its adapter
 imports torch (read at batch 0); the others import no framework. AF3's CCD/SMILES mol
 resolution lives in a thin in-tool shim
-(`alphafold3_restr` `build_af3_adapter`) that feeds `rgi_utils/alphafold3/adapter.py` plain
+(`alphafold3_restr` `build_af3_adapter`) that feeds `rgi_toolkit/alphafold3/adapter.py` plain
 data): implement `iter_atoms()` (→
 `AtomRecord(chain, resid, index)` for distance selection) and optionally
 `num_atoms()`, `get_elements()`, `iter_ligand_confs()` (→
@@ -317,7 +317,7 @@ candidate dict); a ligand atom named "C"/"N"/"O" never matches them.
 
 (`rmsd_restr_data.py` + `pdb_ref.py`): `RmsdData` resolves a moving
 group against a reference structure — `ref_pdb` (PDB) or `ref_cif` (mmCIF), **mutually
-exclusive**, both **coordinate-parsed via gemmi** (lazy-imported, so `import rgi_utils` stays numpy-only)
+exclusive**, both **coordinate-parsed via gemmi** (lazy-imported, so `import rgi_toolkit` stays numpy-only)
 by `read_pdb_atoms` / `read_cif_atoms` into the same `PdbAtom` list (a shared `_build_atoms`
 applies the per-chain ordinal once, so the two are interchangeable; PDB goes through
 `gemmi.read_structure`, mmCIF reads the `_atom_site` loop via `gemmi.cif` preferring the
@@ -427,7 +427,7 @@ Cell buckets are fully traversed and hash collisions are verified, so a collapse
 loses no candidates; it degrades to `O(LB)` / `O(N^2)` time in that worst case without
 materializing a dense distance matrix.
 
-### Custom restraints (the extension point — `rgi_utils/custom/`)
+### Custom restraints (the extension point — `rgi_toolkit/custom/`)
 
 Beyond the eight built-ins, a user can define an **original** restraint as a backend-agnostic
 energy `energy(ctx) -> scalar`. Two authoring paths, ONE mechanism:
@@ -483,7 +483,7 @@ compile per structure, VdW mode and active custom subset, vs `gpu_cg`'s process-
 JAX uses `lax.cond` for custom gates; zero-weight closures are omitted. Disabled formulas
 must never be evaluated and multiplied by zero, because an undefined value would still poison gradients. Any
 compile failure still degrades to the eager CG, which sums the identical terms. `import
-rgi_utils` stays numpy-only (torch/jax pulled lazily per backend by `get_ops`). Harness:
+rgi_toolkit` stays numpy-only (torch/jax pulled lazily per backend by `get_ops`). Harness:
 `tests/test_custom.py` + `tests/test_custom_move.py` (both paths × 3-backend energy/grad
 parity + move pinning + jax-scan + torch minimize + DSL safety). Full config surface: `doc/config.md`.
 
@@ -631,11 +631,11 @@ show up in the `distances=` / `n_group_plane=` counts). Full field surface: `doc
   (not numpy-FD), the same carve-out as rmsd's stop-gradient. Verified E2E on boltz: the
   qbp 3-region angle (624/690/314 atoms) reaches 90.0° and the 4-region dihedral ±180° at
   the default `weight: 1`.
-- Top-level `import rgi_utils` must not pull a compute backend — keep heavy imports lazy
+- Top-level `import rgi_toolkit` must not pull a compute backend — keep heavy imports lazy
   inside the backend modules. Measured (2026-08-21): the eager set is **numpy + rdkit**
   (`featurizer.py` `from rdkit import Chem`, and `__init__` imports `featurizer`); torch,
   jax, gemmi and biopython all stay unloaded. So "numpy-only" as written elsewhere in this
   file means "no torch/jax/gemmi/biopython" — rdkit is a hard eager dependency, not a
   lazy one. Verify with
-  `.venv/bin/python -c "import sys, rgi_utils; print([m for m in ('torch','jax','gemmi','Bio') if m in sys.modules])"`.
+  `.venv/bin/python -c "import sys, rgi_toolkit; print([m for m in ('torch','jax','gemmi','Bio') if m in sys.modules])"`.
 - GPU tests are marked `@pytest.mark.gpu` and excluded in CI.

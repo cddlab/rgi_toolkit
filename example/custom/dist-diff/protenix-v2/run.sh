@@ -3,10 +3,10 @@
 # Restraint config = bench-rgi minimal; MSA is fetched from a server so the example is
 # self-contained. (AlphaFold3 is the exception -- it needs external model params + DBs.)
 # GPU only: run on a GPU compute node (not a shared login node).
-# Requires the protenix_restr checkout to exist as a sibling of rgi_utils/.
+# Requires the protenix_restr checkout to exist as a sibling of rgi_toolkit/.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-WS="$HERE"; while [ "$WS" != / ] && [ ! -d "$WS/rgi_utils" ]; do WS="$(dirname "$WS")"; done
+WS="$HERE"; while [ "$WS" != / ] && [ ! -d "$WS/RGI-toolkit" ]; do WS="$(dirname "$WS")"; done
 source "$WS/protenix_restr/.venv/bin/activate"
 cd "$HERE"
 # protenix must run on sm_89 (e.g. RTX 4090); Blackwell emits silent all-NaN coords.

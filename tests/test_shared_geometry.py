@@ -7,11 +7,11 @@ import inspect
 import numpy as np
 import pytest
 
-from rgi_utils import _geometry as G
-from rgi_utils._array_ops import get_ops
-from rgi_utils.custom import vocabulary as V
-from rgi_utils.energy import numpy_energy
-from rgi_utils.energy._terms import TERM_DEFS
+from rgi_toolkit import _geometry as G
+from rgi_toolkit._array_ops import get_ops
+from rgi_toolkit.custom import vocabulary as V
+from rgi_toolkit.energy import numpy_energy
+from rgi_toolkit.energy._terms import TERM_DEFS
 
 
 def _scalar(value) -> float:

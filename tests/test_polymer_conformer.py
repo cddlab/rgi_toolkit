@@ -6,9 +6,9 @@ import pathlib
 import numpy as np
 import pytest
 
-from rgi_utils.atom_context import AtomRecord
-from rgi_utils.combined import CombinedRestraints
-from rgi_utils.config import RestraintsConfig
+from rgi_toolkit.atom_context import AtomRecord
+from rgi_toolkit.combined import CombinedRestraints
+from rgi_toolkit.config import RestraintsConfig
 
 
 class _PolymerAdapter:
@@ -131,7 +131,7 @@ def _config():
 def test_disabled_polymer_residue_breaks_link_adjacency(uids, atom_tokens):
     from types import SimpleNamespace
 
-    from rgi_utils.polymer import build_polymer_geometry
+    from rgi_toolkit.polymer import build_polymer_geometry
 
     records = [
         AtomRecord(
@@ -338,11 +338,11 @@ def test_active_vdw_exclusion_gradient_and_backend_parity():
     torch = pytest.importorskip("torch")
     jax = pytest.importorskip("jax")
     jnp = pytest.importorskip("jax.numpy")
-    from rgi_utils.optim._torch_cg_gpu import (
+    from rgi_toolkit.optim._torch_cg_gpu import (
         active_vdw_pair_energy,
         build_active_vdw_pairs,
     )
-    from rgi_utils.optim.jax_optim import (
+    from rgi_toolkit.optim.jax_optim import (
         _active_vdw_pair_energy,
         _build_active_vdw_pairs,
     )
@@ -447,8 +447,8 @@ def test_active_vdw_cell_list_matches_dense_reference():
     torch = pytest.importorskip("torch")
     jax = pytest.importorskip("jax")
     jnp = pytest.importorskip("jax.numpy")
-    from rgi_utils.optim._torch_cg_gpu import build_active_vdw_pairs
-    from rgi_utils.optim.jax_optim import _build_active_vdw_pairs
+    from rgi_toolkit.optim._torch_cg_gpu import build_active_vdw_pairs
+    from rgi_toolkit.optim.jax_optim import _build_active_vdw_pairs
 
     rng = np.random.default_rng(7)
     n_atom = 70
@@ -562,7 +562,7 @@ def test_active_vdw_int32_guard_rejects_oversized_polymer():
     # The JAX active-active VdW encodes pairs as min(i,j)*n_active+max(i,j) in int32.
     # 46340**2 still fits (~2.147e9 < 2**31-1); 46341**2 overflows -> loud failure so the
     # covalent-pair exclusion cannot be silently corrupted (torch uses int64, unaffected).
-    from rgi_utils.spec import check_active_vdw_int32_safe
+    from rgi_toolkit.spec import check_active_vdw_int32_safe
 
     check_active_vdw_int32_safe(1)
     check_active_vdw_int32_safe(46340)

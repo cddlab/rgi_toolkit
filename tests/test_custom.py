@@ -27,9 +27,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from rgi_utils.config import RestraintsConfig
-from rgi_utils.custom.closure import build_terms
-from rgi_utils.featurizer import build_spec
+from rgi_toolkit.config import RestraintsConfig
+from rgi_toolkit.custom.closure import build_terms
+from rgi_toolkit.featurizer import build_spec
 
 
 class _FakeAdapter:
@@ -227,7 +227,7 @@ def _dist_spec():
 
 def test_custom_torch_minimize_converges():
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     spec = _dist_spec()
     coords = torch.zeros((1, 2, 3), dtype=torch.float64)
@@ -242,7 +242,7 @@ def test_custom_jax_minimize_nan_free():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim.jax_optim import make_minimizer
+    from rgi_toolkit.optim.jax_optim import make_minimizer
 
     spec = _dist_spec()
     coords = np.zeros((1, 2, 3))
@@ -258,9 +258,9 @@ def test_custom_jax_minimize_nan_free():
 # --------------------------------------------------------------------------------------
 def test_code_ctx_restraint_parity_and_minimize():
     torch = pytest.importorskip("torch")
-    from rgi_utils import custom_restraint
-    from rgi_utils.custom.registry import clear_custom_fns
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit import custom_restraint
+    from rgi_toolkit.custom.registry import clear_custom_fns
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     @custom_restraint("pull5")
     def energy(ctx):
@@ -286,7 +286,7 @@ def test_code_ctx_restraint_parity_and_minimize():
 
 def test_add_custom_direct_callable():
     torch = pytest.importorskip("torch")
-    from rgi_utils import CombinedRestraints
+    from rgi_toolkit import CombinedRestraints
 
     def energy(ctx):
         return (ctx.distance("resid 1", "resid 2") - 5.0) ** 2
@@ -307,7 +307,7 @@ def test_add_custom_re_setup_without_config_no_duplication():
     ``extend(self._pending_custom)`` would re-append the pending custom restraint every call
     and silently duplicate it. The local-merge fix keeps the spec at exactly one custom term
     and leaves config.custom_data untouched."""
-    from rgi_utils import CombinedRestraints
+    from rgi_toolkit import CombinedRestraints
 
     def energy(ctx):
         return (ctx.distance("resid 1", "resid 2") - 5.0) ** 2
@@ -355,8 +355,8 @@ def test_custom_gate_sigma_window():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim.jax_optim import make_minimizer
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.jax_optim import make_minimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     spec = _dist_spec_win({"start_sigma": 2.0})
 
@@ -386,8 +386,8 @@ def test_custom_gate_step_window():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim.jax_optim import make_minimizer
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.jax_optim import make_minimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     spec = _dist_spec_win({"start_step": 5, "stop_step": 10})
 
@@ -427,7 +427,7 @@ def test_custom_weight_scaling():
 # DSL safety + config whitelist
 # --------------------------------------------------------------------------------------
 def test_dsl_rejects_unsafe():
-    from rgi_utils.custom.dsl import parse_formula
+    from rgi_toolkit.custom.dsl import parse_formula
 
     parse_formula("(distance(A,B) - 2.0)**2")  # ok
     # branching + logical operators are part of the surface (they lower to where / & / |)
@@ -593,7 +593,7 @@ def test_dsl_ternary_jax_minimize_nearest_group():
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim.jax_optim import make_minimizer
+    from rgi_toolkit.optim.jax_optim import make_minimizer
 
     n = 12
     selections = {"L": "resid 1 to 2", "PA": "resid 5 to 6", "PB": "resid 9 to 10"}
@@ -873,7 +873,7 @@ def test_custom_rmsd_minimize_converges(tmp_path):
     """rmsd(g, r)**2 (target 0) drives the moving group's superposed RMSD onto the ref down
     under the torch CG (the same convergence contract as the built-in RMSD restraint)."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     rng = np.random.default_rng(17)
     n = 8
@@ -898,7 +898,7 @@ def test_custom_rmsd_jax_minimize_nan_free(tmp_path):
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim.jax_optim import make_minimizer
+    from rgi_toolkit.optim.jax_optim import make_minimizer
 
     rng = np.random.default_rng(19)
     n = 8
@@ -919,7 +919,7 @@ def test_custom_rmsd_add_custom_fn_with_refs(tmp_path):
     function calling ctx.rmsd(prediction, reference_selection) resolves its reference (regression: refs must flow
     through add_custom like selections, not only via a config entry)."""
     torch = pytest.importorskip("torch")
-    from rgi_utils import CombinedRestraints
+    from rgi_toolkit import CombinedRestraints
 
     rng = np.random.default_rng(23)
     n = 6
@@ -1119,7 +1119,7 @@ def test_custom_ref_minimize_converges(tmp_path):
     """harmonic(distance(A, B), 5.0) under the torch CG drives the measured prediction
     group to 5 A from the fitted reference landmark."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     rng = np.random.default_rng(43)
     n = 12
@@ -1151,7 +1151,7 @@ def test_custom_ref_jax_minimize_nan_free(tmp_path):
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim.jax_optim import make_minimizer
+    from rgi_toolkit.optim.jax_optim import make_minimizer
 
     rng = np.random.default_rng(47)
     n = 12
@@ -1370,7 +1370,7 @@ def test_refgeom_large_group_converges(tmp_path):
     """A reference-group distance with a large (30-atom) prediction group converges to its target
     at weight=1 under the torch CG — the rigid centroid gives the whole group a full-step pull."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.optim.torch_optim import TorchRestraintOptimizer
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
     rng = np.random.default_rng(55)
     n = 40
@@ -1487,7 +1487,7 @@ def test_refgeom_jax_minimize_nan_free(tmp_path):
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
-    from rgi_utils.optim.jax_optim import make_minimizer
+    from rgi_toolkit.optim.jax_optim import make_minimizer
 
     rng = np.random.default_rng(59)
     n = 12
@@ -1572,7 +1572,7 @@ def test_refgeom_combined_lifecycle(tmp_path, capsys):
     a ref_geom CustomSpec, the verbose setup log counts it (ref_distance=1), and minimize on
     gpu:false (torch on CPU) converges the prediction group to the target from the fitted ref."""
     torch = pytest.importorskip("torch")
-    from rgi_utils import CombinedRestraints
+    from rgi_toolkit import CombinedRestraints
 
     rng = np.random.default_rng(61)
     n = 12
@@ -1722,7 +1722,7 @@ def test_custom_plane_move_pins_the_other_selection():
 def test_custom_plane_torch_minimize_flattens():
     """The closure actually flattens the selection under the torch CG."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.combined import CombinedRestraints
+    from rgi_toolkit.combined import CombinedRestraints
 
     pos = np.zeros((12, 3))
     pos[:6] = _puckered_ring(0.6)
@@ -1752,8 +1752,8 @@ def test_custom_plane_torch_minimize_flattens():
 def test_custom_plane_resolve_records_selections():
     """The setup-time resolve pass must see BOTH arguments, else the second selection is
     never resolved and the closure raises at evaluation time."""
-    from rgi_utils.custom.context import ResolveContext
-    from rgi_utils.custom.dsl import eval_formula, parse_formula
+    from rgi_toolkit.custom.context import ResolveContext
+    from rgi_toolkit.custom.dsl import eval_formula, parse_formula
 
     ctx = ResolveContext()
     eval_formula(parse_formula("plane(A) + plane(B, C)"), ctx)
@@ -1765,7 +1765,7 @@ def test_refgeom_plane_pulls_prediction_onto_the_reference_plane(tmp_path, capsy
     and the prediction group is pulled onto it. Distinct from the array-path plane term,
     which fits the plane to the prediction's own atoms."""
     torch = pytest.importorskip("torch")
-    from rgi_utils.combined import CombinedRestraints
+    from rgi_toolkit.combined import CombinedRestraints
 
     n = 12
     ring = _puckered_ring(0.0)  # flat hexagon in z=0, resid 1..6 of the ref

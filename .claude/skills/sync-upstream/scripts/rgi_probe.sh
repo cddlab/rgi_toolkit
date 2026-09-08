@@ -30,13 +30,13 @@ d="$ROOT/$tool"
 
 # The strings that mark RGI wiring. Two of these look redundant but are not:
 #  - `conformer_restraint`: the per-ligand opt-in plumbing, which an upstream merge has
-#    actually dropped before (boltz f99e260). It mentions neither rgi_utils nor
+#    actually dropped before (boltz f99e260). It mentions neither rgi_toolkit nor
 #    CombinedRestraints, so the obvious markers miss it entirely.
 #  - `restraints=` / `is_active`: the pass-through plumbing. Whole files of the RGI patch
 #    (e.g. transformers' modeling_esmfold2.py) consist only of threading a `restraints=`
 #    kwarg down the call chain. Drop that and the hook below it never fires, while every
 #    other marker still greps clean.
-MARKERS='rgi_utils|CombinedRestraints|restraints_config|restraints\.minimize|restr\.minimize|conformer_restraint|build_.*_adapter|restraints=|restraints is not None|restraints\.is_active'
+MARKERS='rgi_toolkit|CombinedRestraints|restraints_config|restraints\.minimize|restr\.minimize|conformer_restraint|build_.*_adapter|restraints=|restraints is not None|restraints\.is_active'
 
 echo "# rgi_probe: $tool"
 echo "# branch: $(git -C "$d" rev-parse --abbrev-ref HEAD)"

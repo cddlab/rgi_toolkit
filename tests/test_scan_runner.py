@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from rgi_utils.optim.scan_runner import ScanMinimizer
+from rgi_toolkit.optim.scan_runner import ScanMinimizer
 
 
 class _FakeSpec:

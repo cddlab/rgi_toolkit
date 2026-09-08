@@ -18,10 +18,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from rgi_utils.atom_context import AtomRecord
-from rgi_utils.base_pair_restr_data import BasePairData
-from rgi_utils.combined import CombinedRestraints
-from rgi_utils.config import RestraintsConfig
+from rgi_toolkit.atom_context import AtomRecord
+from rgi_toolkit.base_pair_restr_data import BasePairData
+from rgi_toolkit.combined import CombinedRestraints
+from rgi_toolkit.config import RestraintsConfig
 
 # base + a few backbone atoms (P/O5'/C1') so the coplanarity filter is exercised
 _G_BASE = ["N9", "C8", "N7", "C5", "C6", "O6", "N1", "C2", "N2", "N3", "C4"]

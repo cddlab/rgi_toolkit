@@ -1,4 +1,4 @@
-# rgi_utils RGI examples
+# rgi_toolkit RGI examples
 
 Minimal, ready-to-run Restraint-Guided Inference (RGI) samples: **4 restraint types x 7
 predictors**. Each `<type>/<tool>/` (and `custom/dist-diff/<tool>/`) is one representative
@@ -26,9 +26,9 @@ Each `run.sh` locates the workspace root, activates/uses the matching fork's env
 
 ## Prerequisites
 
-- **The matching fork must exist as a sibling of `rgi_utils/`** (e.g. `../boltz_restr`,
+- **The matching fork must exist as a sibling of `RGI-toolkit/`** (e.g. `../boltz_restr`,
   `../esm_restr`) with its venv/pixi env built. `run.sh` finds it automatically. See each
-  fork's `rgi_utils/doc/<tool>.md` for install steps.
+  fork's `RGI-toolkit/doc/<tool>.md` for install steps.
 - **Run on a GPU compute node** — not a shared login node. GPU generations: RTX 4090 (sm_89)
   and Blackwell (sm_120).
 - **protenix runs on sm_89 only** (Blackwell emits silent all-NaN). The default esm/chai torch

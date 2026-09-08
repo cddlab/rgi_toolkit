@@ -1,6 +1,6 @@
 import pytest
 
-from rgi_utils.selection import AtomSelector
+from rgi_toolkit.selection import AtomSelector
 
 
 def mol(chain="A", resid=1, index=0, name=None, mol_type=None, resname=None):

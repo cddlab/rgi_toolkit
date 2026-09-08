@@ -3,10 +3,10 @@
 import numpy as np
 import pytest
 
-from rgi_utils.atom_context import AtomRecord
-from rgi_utils.pdb_ref import PdbAtom, read_cif_atoms
-from rgi_utils.rmsd_restr_data import pair_target_to_ref
-from rgi_utils.selection import AtomSelector
+from rgi_toolkit.atom_context import AtomRecord
+from rgi_toolkit.pdb_ref import PdbAtom, read_cif_atoms
+from rgi_toolkit.rmsd_restr_data import pair_target_to_ref
+from rgi_toolkit.selection import AtomSelector
 
 
 @pytest.mark.parametrize(

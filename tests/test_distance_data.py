@@ -1,7 +1,7 @@
 import pytest
 
-from rgi_utils.atom_context import AtomRecord
-from rgi_utils.distance_restr_data import DistanceData
+from rgi_toolkit.atom_context import AtomRecord
+from rgi_toolkit.distance_restr_data import DistanceData
 
 
 class MockAdapter:

@@ -2,11 +2,11 @@
 
 - ``decode_atom_name`` (boltz/esm/AF3 shared ord(c)-32 kernel)
 - ``MOLTYPE_BY_ID`` (boltz/esm shared enum)
-- ``rgi_utils.alphafold3.adapter.AF3RestraintAdapter`` (framework-free, fed plain
+- ``rgi_toolkit.alphafold3.adapter.AF3RestraintAdapter`` (framework-free, fed plain
   data by the in-tool shim) — verifies it imports NO alphafold3 and that
   iter_atoms / iter_ligand_confs (SMILES positional + CCD by-name leaving-atom drop)
   produce the expected records.
-- ``rgi_utils._biotite_adapter`` (protenix/openfold/OpenDDE shared core) over a
+- ``rgi_toolkit._biotite_adapter`` (protenix/openfold/OpenDDE shared core) over a
   duck-typed fake AtomArray, covering the tools' parameterisation.
 """
 
@@ -19,11 +19,11 @@ import pytest
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
-from rgi_utils._biotite_adapter import biotite_get_elements, biotite_ligand_confs
-from rgi_utils._mol_build import _expected_stereo, _stereo_mismatch_counts
-from rgi_utils._moltype import MOLTYPE_BY_ID
-from rgi_utils.alphafold3.adapter import AF3RestraintAdapter
-from rgi_utils.atom_context import decode_atom_name
+from rgi_toolkit._biotite_adapter import biotite_get_elements, biotite_ligand_confs
+from rgi_toolkit._mol_build import _expected_stereo, _stereo_mismatch_counts
+from rgi_toolkit._moltype import MOLTYPE_BY_ID
+from rgi_toolkit.alphafold3.adapter import AF3RestraintAdapter
+from rgi_toolkit.atom_context import decode_atom_name
 
 
 # --- shared helpers --------------------------------------------------------------
@@ -199,7 +199,7 @@ def test_boltz_atom_metadata_uses_bulk_reads(monkeypatch):
     from types import SimpleNamespace
 
     torch = pytest.importorskip("torch")
-    from rgi_utils.boltz.adapter import BoltzFeatsAdapter
+    from rgi_toolkit.boltz.adapter import BoltzFeatsAdapter
 
     tokens = torch.tensor([0, 0, 1, 2, 3, 4, 0])
     mapping = torch.nn.functional.one_hot(tokens, num_classes=5).float()
@@ -244,7 +244,7 @@ def test_boltz_ligand_retains_source_stereo():
     from types import SimpleNamespace
 
     torch = pytest.importorskip("torch")
-    from rgi_utils.boltz.adapter import BoltzFeatsAdapter
+    from rgi_toolkit.boltz.adapter import BoltzFeatsAdapter
 
     source = Chem.AddHs(_stereo_graph())
     assert AllChem.EmbedMolecule(source, randomSeed=7) == 0
@@ -270,7 +270,7 @@ def test_boltz_ligand_retains_source_stereo():
 
 
 def test_af3_adapter_imports_no_alphafold3():
-    # the whole point of the split: the rgi_utils adapter must not pull in alphafold3
+    # the whole point of the split: the rgi_toolkit adapter must not pull in alphafold3
     assert "alphafold3" not in sys.modules
 
 
@@ -362,7 +362,7 @@ def test_af3_iter_ligand_confs_ccd_leaving_atom_drop():
 def test_esmfold2_adapter_retains_source_stereo():
     from types import SimpleNamespace
 
-    from rgi_utils.esmfold2.adapter import ESMFold2Adapter
+    from rgi_toolkit.esmfold2.adapter import ESMFold2Adapter
 
     source = _stereo_graph()
     names = ["F1", "C1", "C2", "CL1"]
@@ -485,7 +485,7 @@ def _chemistry_adapter(tool, source, smiles):
     ]
     if tool == "boltz":
         torch = pytest.importorskip("torch")
-        from rgi_utils.boltz.adapter import BoltzFeatsAdapter
+        from rgi_toolkit.boltz.adapter import BoltzFeatsAdapter
 
         return BoltzFeatsAdapter(
             {
@@ -520,7 +520,7 @@ def _chemistry_adapter(tool, source, smiles):
             ligand_mols=[("B", Chem.Mol(source), True)],
         )
     if tool == "chai":
-        from rgi_utils.chai.adapter import ChaiStructureAdapter
+        from rgi_toolkit.chai.adapter import ChaiStructureAdapter
 
         return ChaiStructureAdapter(
             SimpleNamespace(
@@ -537,7 +537,7 @@ def _chemistry_adapter(tool, source, smiles):
             conf_restraints_by_subchain={"B": True},
         )
     if tool == "esmfold2":
-        from rgi_utils.esmfold2.adapter import ESMFold2Adapter
+        from rgi_toolkit.esmfold2.adapter import ESMFold2Adapter
 
         token_bonds = np.zeros((n_atoms, n_atoms))
         for i, j, _ in bonds:
@@ -584,14 +584,14 @@ def _chemistry_adapter(tool, source, smiles):
         "ref_pos": coords[None],
     }
     if tool == "protenix":
-        from rgi_utils.protenix.adapter import ProtenixAdapter
+        from rgi_toolkit.protenix.adapter import ProtenixAdapter
 
         return ProtenixAdapter(features)
     if tool == "opendde":
-        from rgi_utils.opendde.adapter import OpenDDEAdapter
+        from rgi_toolkit.opendde.adapter import OpenDDEAdapter
 
         return OpenDDEAdapter(features)
-    from rgi_utils.openfold3.adapter import Openfold3Adapter
+    from rgi_toolkit.openfold3.adapter import Openfold3Adapter
 
     assert tool == "openfold3"
     return Openfold3Adapter(
@@ -723,7 +723,7 @@ def test_biotite_ligand_confs_post_build_hook():
 # so a runtime NameError / wrong kwarg INSIDE iter_ligand_confs/get_elements (which
 # "import succeeds" can't catch) is caught here on CPU, not only at the GPU smoke.
 def test_protenix_adapter_delegation():
-    from rgi_utils.protenix.adapter import ProtenixAdapter
+    from rgi_toolkit.protenix.adapter import ProtenixAdapter
 
     aa = _fake_aa()  # hetero=[T,T,F] marks the 2-atom ligand chain "L"
     ad = ProtenixAdapter({"atom_array": aa, "atom_to_token_idx": np.zeros((1, 5))})
@@ -735,7 +735,7 @@ def test_protenix_adapter_delegation():
 
 
 def test_protenix_adapter_retains_source_stereo():
-    from rgi_utils.protenix.adapter import ProtenixAdapter
+    from rgi_toolkit.protenix.adapter import ProtenixAdapter
 
     aa = _stereo_aa()
     adapter = ProtenixAdapter(
@@ -749,7 +749,7 @@ def test_protenix_adapter_retains_source_stereo():
 
 
 def test_openfold3_adapter_delegation():
-    from rgi_utils.openfold3.adapter import Openfold3Adapter
+    from rgi_toolkit.openfold3.adapter import Openfold3Adapter
 
     # molecule_type_id annotation present -> _ligand_mask uses it (3 == LIGAND)
     aa = _FakeAtomArray(
@@ -786,7 +786,7 @@ def test_openfold3_adapter_delegation():
 
 
 def test_openfold3_adapter_retains_source_stereo():
-    from rgi_utils.openfold3.adapter import Openfold3Adapter
+    from rgi_toolkit.openfold3.adapter import Openfold3Adapter
 
     aa = _stereo_aa()
     adapter = Openfold3Adapter(
@@ -799,7 +799,7 @@ def test_openfold3_adapter_retains_source_stereo():
 
 
 def test_opendde_adapter_uses_residue_level_tokens_and_ref_pos():
-    from rgi_utils.opendde.adapter import OpenDDEAdapter
+    from rgi_toolkit.opendde.adapter import OpenDDEAdapter
 
     aa = _FakeAtomArray(
         element=["N", "C", "C", "C"],
@@ -846,7 +846,7 @@ def test_opendde_adapter_uses_residue_level_tokens_and_ref_pos():
 
 
 def test_opendde_adapter_retains_source_stereo():
-    from rgi_utils.opendde.adapter import OpenDDEAdapter
+    from rgi_toolkit.opendde.adapter import OpenDDEAdapter
 
     aa = _stereo_aa()
     adapter = OpenDDEAdapter(
@@ -865,7 +865,7 @@ def test_opendde_adapter_imports_no_tool_or_torch():
     import importlib
 
     before = set(sys.modules)
-    importlib.import_module("rgi_utils.opendde.adapter")
+    importlib.import_module("rgi_toolkit.opendde.adapter")
     newly_loaded = set(sys.modules) - before
     assert not any(
         name == "opendde" or name.startswith("opendde.") for name in newly_loaded
