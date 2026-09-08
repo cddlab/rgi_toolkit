@@ -177,7 +177,7 @@ class VdwArrays:
 class VdwConfig:
     """Dynamic fixed-background VdW repulsion for the torch + jax optimizers.
 
-    The fixed-background half of the ``intermolecular`` VdW category. Ligand atoms
+    The fixed-background portion of the selected molecule category. Ligand/polymer atoms
     move (they live in ``active_sites``, addressed by ``ligand_local``); the
     background atoms (every non-padding atom not optimised — protein, DNA/RNA, any
     non-restrained ligand) are read from the full coordinate tensor via
@@ -185,8 +185,9 @@ class VdwConfig:
     neighbour list between bounded iteration blocks, so only the ligand is pushed out
     of contacts while the optimised variable set stays limited to ``active_sites``. The
     penalty is
-    ``clamp(d - scale*(r_i+r_j), max=0)**2`` summed over candidate pairs —
-    identical maths to ``vdw_energy``, only the pair list is dynamic.
+    ``weight * (clamp(d - scale*contact, max=0)/ESD)**2`` summed over candidates.
+    ``chemistry`` holds small type tables and sparse exclusions. Without it, explicit
+    radii use their sum as the contact distance and ESD 0.2 A.
     """
 
     weight: float
@@ -197,24 +198,34 @@ class VdwConfig:
     scale: float = VDW_SCALE_DEFAULT
     dmax: float = 5.0
     max_neighbors: int = 32
+    chemistry: dict[str, np.ndarray] | None = None
+
+    @property
+    def max_contact(self) -> float:
+        if self.chemistry is not None:
+            return float(self.scale) * max(
+                float(np.max(self.chemistry[k], initial=0))
+                for k in ("contacts", "one_four_contacts")
+            )
+        return float(self.scale) * (
+            float(np.max(self.ligand_radii, initial=0))
+            + float(np.max(self.background_radii, initial=0))
+        )
 
     @property
     def search_radius(self) -> float:
         """Baseline search radius covering every possible contact."""
-        contact = float(self.scale) * (
-            float(np.max(self.ligand_radii, initial=0))
-            + float(np.max(self.background_radii, initial=0))
-        )
-        return max(float(self.dmax), contact)
+        return max(float(self.dmax), self.max_contact)
 
 
 @dataclass
 class ActiveVdwConfig:
-    """Dynamic active-active VdW neighbours involving restrained polymer atoms.
+    """Dynamic active-active VdW neighbours involving conformer-restrained atoms.
 
     A fixed-width Verlet-style neighbour list is rebuilt between bounded CG blocks.
-    This keeps each energy evaluation O(N*K), while 1-2/1-3/1-4 covalent pairs are
-    removed through ``excluded_codes`` before the K-neighbour cap is applied.
+    Typed topology excludes 1-2/1-3 and same-plane 1-4 pairs before the K-neighbour
+    cap. Without ``chemistry``, the explicit ``polymer_mask`` and ``excluded_codes``
+    define eligibility, and the radii sum / 0.2-A ESD define the penalty.
     """
 
     weight: float
@@ -224,12 +235,21 @@ class ActiveVdwConfig:
     scale: float = VDW_SCALE_DEFAULT
     dmax: float = 5.0
     max_neighbors: int = 32
+    chemistry: dict[str, np.ndarray] | None = None
+
+    @property
+    def max_contact(self) -> float:
+        if self.chemistry is not None:
+            return float(self.scale) * max(
+                float(np.max(self.chemistry[k], initial=0))
+                for k in ("contacts", "one_four_contacts")
+            )
+        return 2 * float(self.scale) * float(np.max(self.radii, initial=0))
 
     @property
     def search_radius(self) -> float:
         """Baseline search radius covering every possible contact."""
-        contact = 2 * float(self.scale) * float(np.max(self.radii, initial=0))
-        return max(float(self.dmax), contact)
+        return max(float(self.dmax), self.max_contact)
 
 
 # Largest positive value an int32 can hold; the JAX pair-code encoding lives in int32.

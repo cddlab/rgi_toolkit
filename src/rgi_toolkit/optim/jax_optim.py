@@ -32,7 +32,7 @@ import logging
 import jax
 import jax.numpy as jnp
 
-from rgi_toolkit._array_ops import VDW_OVERLAP_EPS
+from rgi_toolkit._array_ops import VDW_OVERLAP_EPS, get_ops
 from rgi_toolkit._config_util import (
     VDW_MAX_ATOM_STEP_DEFAULT,
     VDW_NEIGHBOR_REBUILD_INTERVAL_DEFAULT,
@@ -40,6 +40,7 @@ from rgi_toolkit._config_util import (
     VDW_SCALE_DEFAULT,
 )
 from rgi_toolkit.energy import jax_energy
+from rgi_toolkit.energy._nonbonded import pair_parameters, prepare_chemistry
 from rgi_toolkit.optim._cell_list import (
     CELL_CHUNK_SIZE,
     CELL_HASH_PRIMES,
@@ -236,10 +237,12 @@ def _build_cell_pairs_jax(
     target_polymer=None,
     excluded_codes=None,
     pair_code_size=None,
+    chemistry=None,
 ):
     """Return target indices and ranking scores from a sorted cell list."""
 
     n_query, n_target = query.shape[-2], target.shape[-2]
+    chemistry = prepare_chemistry(get_ops("jax"), chemistry, query)
     query_batch = jax.lax.stop_gradient(query.reshape((-1, n_query, 3)))
     target_batch = jax.lax.stop_gradient(target.reshape((-1, n_target, 3)))
     if query_batch.shape[0] != target_batch.shape[0]:
@@ -263,14 +266,24 @@ def _build_cell_pairs_jax(
         score = dist2
         source = jnp.arange(n_query, dtype=jnp.int32).reshape((1, n_query, 1))
         neighbours = jnp.zeros(dist2.shape, dtype=jnp.int32)
-        if query_radii is not None:
+        if chemistry is not None:
+            contact, _, allowed = pair_parameters(
+                get_ops("jax"), chemistry, source, neighbours
+            )
+            score = jnp.sqrt(dist2 + EPS) - pair_scale * contact
+            valid = valid & allowed
+        elif query_radii is not None:
             source_r = query_radii[source]
             target_r = target_radii[neighbours]
             valid = valid & (source_r > 0) & (target_r > 0)
             score = jnp.sqrt(dist2 + EPS) - pair_scale * (source_r + target_r)
-        if query_polymer is not None:
+        if chemistry is None and query_polymer is not None:
             valid = valid & (query_polymer[source] | target_polymer[neighbours])
-        if excluded_codes is not None and excluded_codes.shape[0] > 0:
+        if (
+            chemistry is None
+            and excluded_codes is not None
+            and excluded_codes.shape[0] > 0
+        ):
             lo = jnp.minimum(source, neighbours)
             hi = jnp.maximum(source, neighbours)
             codes = lo * pair_code_size + hi
@@ -337,16 +350,26 @@ def _build_cell_pairs_jax(
             if exclude_self:
                 valid_candidate = valid_candidate & (candidate != source)
             score = dist2
-            if query_radii is not None:
+            if chemistry is not None:
+                contact, _, allowed = pair_parameters(
+                    get_ops("jax"), chemistry, source, candidate
+                )
+                score = jnp.sqrt(dist2 + EPS) - pair_scale * contact
+                valid_candidate = valid_candidate & allowed
+            elif query_radii is not None:
                 source_r = query_radii[source]
                 target_r = target_radii[candidate]
                 valid_candidate = valid_candidate & (source_r > 0) & (target_r > 0)
                 score = jnp.sqrt(dist2 + EPS) - pair_scale * (source_r + target_r)
-            if query_polymer is not None:
+            if chemistry is None and query_polymer is not None:
                 valid_candidate = valid_candidate & (
                     query_polymer[source] | target_polymer[candidate]
                 )
-            if excluded_codes is not None and excluded_codes.shape[0] > 0:
+            if (
+                chemistry is None
+                and excluded_codes is not None
+                and excluded_codes.shape[0] > 0
+            ):
                 lo = jnp.minimum(source, candidate)
                 hi = jnp.maximum(source, candidate)
                 codes = lo * pair_code_size + hi
@@ -381,6 +404,7 @@ def _build_active_vdw_pairs(
     dmax,
     max_neighbors,
     scale=VDW_SCALE_DEFAULT,
+    chemistry=None,
 ):
     """Pure-jax sorted-cell neighbour builder matching the torch implementation.
 
@@ -404,6 +428,7 @@ def _build_active_vdw_pairs(
         target_polymer=polymer_mask,
         excluded_codes=excluded_codes,
         pair_code_size=n_atom,
+        chemistry=chemistry,
     )
     if neighbours.shape[-1] == 0:
         return neighbours, neighbours.astype(active.dtype)
@@ -421,7 +446,15 @@ def _build_active_vdw_pairs(
 
 
 def _build_fixed_vdw_pairs(
-    active, bg_pos, lig_local, dmax, max_neighbors, lig_r=None, bg_r=None, scale=None
+    active,
+    bg_pos,
+    lig_local,
+    dmax,
+    max_neighbors,
+    lig_r=None,
+    bg_r=None,
+    scale=None,
+    chemistry=None,
 ):
     """Build moving-ligand to fixed-background neighbours for the current CG block."""
 
@@ -436,6 +469,7 @@ def _build_fixed_vdw_pairs(
         query_radii=lig_r,
         target_radii=bg_r,
         pair_scale=scale,
+        chemistry=chemistry,
     )
     return neighbours, jnp.isfinite(best_dist2).astype(active.dtype)
 
@@ -468,6 +502,7 @@ def _vdw_pair_energy(
     bg_r,
     scale,
     weight,
+    chemistry=None,
 ):
     """Fixed-background VdW energy over the per-step neighbour list."""
 
@@ -481,12 +516,23 @@ def _vdw_pair_energy(
     source = lig_local.reshape((1, -1, 1))
     diff = _safe_vdw_diff_jax(diff, source, neighbours, canonical=False)
     dist = jnp.sqrt(jnp.sum(diff**2, axis=-1) + EPS)
-    r_min = scale * (lig_r[None, :, None] + bg_r[neighbours])
+    if chemistry is None:
+        contact = lig_r[None, :, None] + bg_r[neighbours]
+        inverse = 1 / 0.2**2
+    else:
+        query = jnp.arange(lig_local.shape[0], dtype=jnp.int32).reshape((1, -1, 1))
+        contact, inverse, valid = pair_parameters(
+            get_ops("jax"), chemistry, query, neighbours
+        )
+        pair_mask = pair_mask * valid
+    r_min = scale * contact
     delta = jnp.minimum(dist - r_min, 0.0)
-    return weight * jnp.sum(pair_mask * delta**2)
+    return weight * jnp.sum(pair_mask * inverse * delta**2)
 
 
-def _active_vdw_pair_energy(active, neighbours, pair_factor, radii, scale, weight):
+def _active_vdw_pair_energy(
+    active, neighbours, pair_factor, radii, scale, weight, chemistry=None
+):
     """VdW energy over the per-step active-active neighbour list."""
 
     n_atom = active.shape[-2]
@@ -497,9 +543,17 @@ def _active_vdw_pair_energy(active, neighbours, pair_factor, radii, scale, weigh
     source = jnp.arange(n_atom, dtype=jnp.int32).reshape((1, n_atom, 1))
     diff = _safe_vdw_diff_jax(diff, source, neighbours, canonical=True)
     dist = jnp.sqrt(jnp.sum(diff**2, axis=-1) + EPS)
-    r_min = scale * (radii[None, :, None] + radii[neighbours])
+    if chemistry is None:
+        contact = radii[None, :, None] + radii[neighbours]
+        inverse = 1 / 0.2**2
+    else:
+        contact, inverse, valid = pair_parameters(
+            get_ops("jax"), chemistry, source, neighbours
+        )
+        pair_factor = pair_factor * valid
+    r_min = scale * contact
     delta = jnp.minimum(dist - r_min, 0.0)
-    return weight * jnp.sum(pair_factor * delta**2)
+    return weight * jnp.sum(pair_factor * inverse * delta**2)
 
 
 def make_minimizer(
@@ -544,6 +598,7 @@ def make_minimizer(
         vdw_weight = jnp.asarray(float(_vc.weight))
         vdw_dmax = jnp.asarray(_vc.search_radius)
         vdw_max_neighbors = int(_vc.max_neighbors)
+        vdw_chemistry = prepare_chemistry(get_ops("jax"), _vc.chemistry, vdw_lig_r)
     _ac = getattr(spec, "active_vdw_config", None)
     has_active_vdw = _ac is not None and _ac.weight > 0
     if has_active_vdw:
@@ -557,6 +612,9 @@ def make_minimizer(
         active_vdw_weight = jnp.asarray(float(_ac.weight))
         active_vdw_dmax = jnp.asarray(_ac.search_radius)
         active_vdw_max_neighbors = int(_ac.max_neighbors)
+        active_vdw_chemistry = prepare_chemistry(
+            get_ops("jax"), _ac.chemistry, active_vdw_radii
+        )
     has_static_vdw = spec.has_array_term("vdw")
     has_any_vdw = has_static_vdw or has_vdw or has_active_vdw
     vdw_step_limit = float(
@@ -620,6 +678,7 @@ def make_minimizer(
                         vdw_lig_r,
                         vdw_bg_r,
                         vdw_scale,
+                        vdw_chemistry,
                     )
                 if has_active_vdw:
                     active_neighbours, active_factor = _build_active_vdw_pairs(
@@ -630,6 +689,7 @@ def make_minimizer(
                         active_cutoff,
                         active_vdw_max_neighbors,
                         active_vdw_scale,
+                        active_vdw_chemistry,
                     )
                 return (
                     fixed_neighbours,
@@ -696,6 +756,7 @@ def make_minimizer(
                         vdw_bg_r,
                         vdw_scale,
                         vdw_w,
+                        vdw_chemistry,
                     )
                 if has_active_vdw:
                     e = e + _active_vdw_pair_energy(
@@ -705,6 +766,7 @@ def make_minimizer(
                         active_vdw_radii,
                         active_vdw_scale,
                         active_vdw_w,
+                        active_vdw_chemistry,
                     )
                 for _name, start, stop, start_step, stop_step, closure in custom_terms:
                     _sc = jnp.asarray(sigma)
@@ -734,10 +796,10 @@ def make_minimizer(
                 fixed_cutoff = None
                 active_cutoff = None
                 if has_vdw:
-                    _mr = vdw_scale * (jnp.max(vdw_lig_r) + jnp.max(vdw_bg_r))
+                    _mr = jnp.asarray(_vc.max_contact)
                     fixed_cutoff = jnp.maximum(vdw_dmax, _mr + movement + vdw_skin)
                 if has_active_vdw:
-                    _mr = active_vdw_scale * 2.0 * jnp.max(active_vdw_radii)
+                    _mr = jnp.asarray(_ac.max_contact)
                     active_cutoff = jnp.maximum(
                         active_vdw_dmax, _mr + 2.0 * movement + vdw_skin
                     )
@@ -801,6 +863,7 @@ def make_minimizer(
                                     vdw_lig_r,
                                     vdw_bg_r,
                                     vdw_scale,
+                                    vdw_chemistry,
                                 ),
                                 lambda: (c["fn"], c["fm"]),
                             )
@@ -822,6 +885,7 @@ def make_minimizer(
                                     active_cutoff,
                                     active_vdw_max_neighbors,
                                     active_vdw_scale,
+                                    active_vdw_chemistry,
                                 ),
                                 lambda: (c["an"], c["af"]),
                             )
@@ -946,6 +1010,7 @@ def dynamic_vdw_energy(spec, coords) -> float:
         lig_r = jnp.asarray(vc.ligand_radii, dtype=dtype)
         bg_r = jnp.asarray(vc.background_radii, dtype=dtype)
         scale = jnp.asarray(float(vc.scale), dtype=dtype)
+        chemistry = prepare_chemistry(get_ops("jax"), vc.chemistry, active)
         bg_pos = coords[..., jnp.asarray(vc.background_global, dtype=jnp.int32), :]
         neighbours, pair_mask = _build_fixed_vdw_pairs(
             active,
@@ -956,6 +1021,7 @@ def dynamic_vdw_energy(spec, coords) -> float:
             lig_r,
             bg_r,
             scale,
+            chemistry,
         )
         total += float(
             _vdw_pair_energy(
@@ -968,12 +1034,14 @@ def dynamic_vdw_energy(spec, coords) -> float:
                 bg_r,
                 scale,
                 jnp.asarray(float(vc.weight), dtype=dtype),
+                chemistry,
             )
         )
     if has_active_vdw:
         check_active_vdw_int32_safe(int(ac.radii.shape[0]))
         radii = jnp.asarray(ac.radii, dtype=dtype)
         scale = jnp.asarray(float(ac.scale), dtype=dtype)
+        chemistry = prepare_chemistry(get_ops("jax"), ac.chemistry, active)
         neighbours, pair_factor = _build_active_vdw_pairs(
             active,
             radii,
@@ -982,6 +1050,7 @@ def dynamic_vdw_energy(spec, coords) -> float:
             jnp.asarray(ac.search_radius, dtype=dtype),
             int(ac.max_neighbors),
             scale,
+            chemistry,
         )
         total += float(
             _active_vdw_pair_energy(
@@ -991,6 +1060,7 @@ def dynamic_vdw_energy(spec, coords) -> float:
                 radii,
                 scale,
                 jnp.asarray(float(ac.weight), dtype=dtype),
+                chemistry,
             )
         )
     return total

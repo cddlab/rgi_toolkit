@@ -42,6 +42,12 @@ Each `run.sh` locates the workspace root, activates/uses the matching fork's env
 
 ## Notes
 
+- For conformer settings beyond these examples, see [the configuration guide](../doc/config.md#conformer_restraints_config-single-dict).
+  `cistrans` covers protein chi, peptide omega and acyclic sp2 torsions as well as ligand E/Z.
+  A configured monomer library supplies dictionary targets; otherwise the new polymer torsions
+  use documented RDKit-based approximations without downloading a dictionary. VdW now uses
+  chemical contact distances, ESD 0.2 A (dummy 0.3 A), and default `scale: 1.0`.
+  Existing VdW weights may need retuning against reference geometry terms.
 - The `rmsd/` reference structures (`1GGG.cif`, `1WDN.cif`) are **not stored in the repo** --
   each `rmsd/*/run.sh` `wget`s them from RCSB into its own directory at run time (needs network
   on the compute node). They are byte-identical to the RCSB deposits.

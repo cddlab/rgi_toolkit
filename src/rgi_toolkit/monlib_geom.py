@@ -53,6 +53,9 @@ class LibraryTargets:
     covered: tuple[str, ...] = ()
     missing: tuple[str, ...] = ()
     on_missing: str = "fallback"
+    source: object | None = None
+    atom_types: dict[int, str] = field(default_factory=dict)
+    plane_groups: set[tuple[int, ...]] = field(default_factory=set)
 
 
 def parse_config(conformer_config: dict | None) -> tuple[str | None, str] | None:
@@ -219,15 +222,20 @@ def _link_options(library, previous, current, targets, enabled):
     return [(trans, trans_rows, ((selector, 0),)), (cis, cis_rows, ((selector, 1),))]
 
 
-def _add_geometry(targets, records, conditions, enabled, source):
+def _add_geometry(targets, records, conditions, enabled, source, peptide=False):
     targets.bond_pairs.update(tuple(sorted(r.atoms)) for r in records["bond"])
     targets.angle_tuples.update(r.atoms for r in records["angle"])
+    targets.plane_groups.update(
+        r.atoms for r in records["plane"] if math.isfinite(r.esd) and r.esd > 0
+    )
     for kind in ("bond", "angle", "plane", "cistrans"):
         if kind not in enabled:
             continue
         for r in records[kind]:
             if kind == "cistrans" and not (
-                r.label == "omega" or r.label.startswith("sp2_sp2")
+                r.label == "omega"
+                or r.label.startswith("sp2_sp2")
+                or (peptide and r.label.startswith("chi"))
             ):
                 continue
             if not validate_target(r, f"{source} {kind}"):
@@ -277,7 +285,7 @@ def _add_chirals(targets, records, bonds, angles, conditions, enabled, source):
 def collect(library, residues, on_missing, connections=(), enabled=None):
     """Resolve each residue/link with only its adjacent peptide state combinations."""
     enabled = set(KINDS) if enabled is None else set(enabled)
-    targets = LibraryTargets(on_missing=on_missing)
+    targets = LibraryTargets(on_missing=on_missing, source=library)
     covered = {m["resname"] for m in residues if library.covers(m["resname"])}
     missing = {str(m["resname"]) for m in residues if not library.covers(m["resname"])}
     if missing:
@@ -318,6 +326,34 @@ def collect(library, residues, on_missing, connections=(), enabled=None):
                 )
             )
             named = modified_restraints(comp.rt, mods)
+            # Chemical typing and exclusions are needed even when the associated
+            # geometry energy is disabled. Link modifications can change both.
+            atom_types = {a.id: a.chem_type for a in comp.atoms}
+            for mod in mods:
+                for atom_mod in mod.atom_mods:
+                    old = atom_mod.old_id
+                    op = (
+                        chr(atom_mod.func)
+                        if isinstance(atom_mod.func, int)
+                        else atom_mod.func
+                    )
+                    if op == "d":
+                        atom_types.pop(old, None)
+                    else:
+                        name = atom_mod.new_id or old
+                        value = atom_mod.chem_type or atom_types.get(old, "")
+                        if name != old:
+                            atom_types.pop(old, None)
+                        atom_types[name] = value
+            from rgi_toolkit._atom_names import normalise_atom_name
+
+            targets.atom_types.update(
+                {
+                    meta["names"][normalise_atom_name(n)]: t
+                    for n, t in atom_types.items()
+                    if normalise_atom_name(n) in meta["names"]
+                }
+            )
             # Explicit deletions must not resurrect a reference-conformer chiral.
             final_atoms = {r.atoms for r in named["chiral"]}
             for r in original_chirals:
@@ -327,7 +363,14 @@ def collect(library, residues, on_missing, connections=(), enabled=None):
                         targets.chiral_centers.add(center)
             records = resolve(named, {1: meta["names"]})
             variants[uid].append((records, conditions))
-            _add_geometry(targets, records, conditions, enabled, meta["resname"])
+            _add_geometry(
+                targets,
+                records,
+                conditions,
+                enabled,
+                meta["resname"],
+                peptide=meta["mol_type"] == "protein",
+            )
             _add_chirals(
                 targets,
                 records,

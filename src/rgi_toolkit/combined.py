@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import logging
 
+import numpy as np
+
 from rgi_toolkit.config import RestraintsConfig
 from rgi_toolkit.energy._terms import (
     BREAKDOWN_KEYS,
@@ -210,6 +212,20 @@ class CombinedRestraints:
             else None
         )
 
+        atom_records = (
+            list(adapter.iter_atoms())
+            if has_conformer and hasattr(adapter, "iter_atoms")
+            else []
+        )
+        reference_uids = None
+        if has_conformer and hasattr(adapter, "get_reference_space_uid"):
+            try:
+                reference_uids = np.asarray(adapter.get_reference_space_uid()).reshape(
+                    -1
+                )
+            except (AttributeError, KeyError):
+                pass
+
         self.spec = build_spec(
             ligand_confs,
             distance_data,
@@ -226,6 +242,8 @@ class CombinedRestraints:
             custom_restraints=custom_data,
             polymer_geometry=polymer_geometry,
             plane_restraints=plane_data,
+            atom_records=atom_records,
+            reference_uids=reference_uids,
         )
         # backend is inferred lazily (get_minimizer() -> jax; minimize(coords) -> from
         # the coords type) and the matching optimizer built on first use; reset here so a

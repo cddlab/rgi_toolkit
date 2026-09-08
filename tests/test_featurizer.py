@@ -156,7 +156,7 @@ def test_vdw_config_fixed_background():
     assert {int(x) for x in spec.vdw_config.background_global} == {n, n + 1}
     assert spec.vdw_config.background_radii.shape == (2,)
     assert spec.vdw_config.max_neighbors == 7
-    assert spec.vdw_config.scale == pytest.approx(0.75)
+    assert spec.vdw_config.scale == pytest.approx(1.0)
 
     with pytest.raises(ValueError, match="max_neighbors must be >= 1"):
         build_spec(
@@ -171,7 +171,7 @@ def test_vdw_config_fixed_background():
 def test_intramolecular_vdw_static_arrays():
     """vdw mode=intramolecular builds a static spec.vdw (works in jax/numpy too),
     not the dynamic fixed-background vdw_config."""
-    m = Chem.MolFromSmiles("CCCCC")  # pentane: only C1-C5 has topological dist > 3
+    m = Chem.MolFromSmiles("CCCCC")  # pentane: two nonplanar 1-4 pairs and one 1-5 pair
     m = Chem.AddHs(m)
     AllChem.EmbedMolecule(m, randomSeed=1)
     m = Chem.RemoveHs(m)  # 5 heavy atoms
@@ -187,11 +187,10 @@ def test_intramolecular_vdw_static_arrays():
     # static VdwArrays, not the dynamic fixed-background config
     assert spec.vdw is not None
     assert spec.vdw_config is None
-    # Pentane's 1-4 pairs are excluded; only C1-C5 (topological distance 4) remains.
-    assert spec.vdw.idx.shape == (1, 2)
-    np.testing.assert_array_equal(spec.vdw.idx[0], [0, 4])
-    assert float(spec.vdw.weight[0]) == 1.0
-    assert float(spec.vdw.r_min[0]) == pytest.approx(0.75 * (1.7 + 1.7))
+    # Nonplanar 1-4 contacts are retained with reduced contact radii.
+    np.testing.assert_array_equal(spec.vdw.idx, [[0, 3], [0, 4], [1, 4]])
+    np.testing.assert_allclose(spec.vdw.weight, 1 / 0.2**2)
+    np.testing.assert_allclose(spec.vdw.r_min, [3.56, 3.88, 3.56])
     assert int(spec.vdw.idx.max()) < spec.n_active  # valid local indices
 
     # explicit mode=intermolecular keeps ONLY the dynamic/inter paths (no static intra);
@@ -226,7 +225,7 @@ def test_vdw_both_modes_compose():
     )
     # BOTH flavours present and independent
     assert spec.vdw is not None  # static intramolecular (all backends)
-    assert spec.vdw.idx.shape == (1, 2)  # pentane C1-C5
+    assert spec.vdw.idx.shape == (3, 2)  # two 1-4 pairs plus C1-C5
     assert spec.vdw_config is not None  # dynamic fixed-background (torch)
     assert {int(x) for x in spec.vdw_config.background_global} == {n, n + 1}
 
@@ -271,10 +270,11 @@ def test_plane_perception():
 
     # fumarate: 2 carboxyl groups (each carboxyl C + O + O + alkene C = 4 coplanar atoms)
     # -> plane=2; no ring. The C=C alkene centre has only 2 heavy neighbours (a 3-atom,
-    # trivially-planar group, skipped) so the bond's E/Z is held by cistrans (=1).
+    # trivially-planar group, skipped). E/Z and conjugated single bonds use torsions.
     spec = build_spec([_lig_heavy(r"OC(=O)/C=C/C(=O)O")], [], cfg)
     assert nrow(spec.plane) == 2
-    assert nrow(spec.cistrans) == 1
+    assert nrow(spec.cistrans) == 5
+    np.testing.assert_array_equal(spec.cistrans.period, [1, 2, 2, 2, 2])
     assert spec.plane.idx.shape == (2, 4)  # two 4-atom groups
     assert (spec.plane.grp_mask.sum(axis=1) == 4).all()  # no padding for 4-atom groups
     assert int(spec.plane.idx.max()) < spec.n_active  # valid local indices
@@ -351,11 +351,11 @@ def test_interligand_vdw_default_both():
 
 def test_interligand_vdw_composes_with_intra():
     """mode='both' CONCATENATES intra (per ligand) + inter (cross) pairs into one
-    spec.vdw: two pentanes give 2 intra (one C1-C5 each) + n*n inter."""
-    lcA, n = _lig_heavy_at("CCCCC", base=0, seed=1)  # pentane: 1 intra pair (C1-C5)
+    spec.vdw: two pentanes give 6 intra (two 1-4 pairs and one 1-5 pair each) + n*n inter."""
+    lcA, n = _lig_heavy_at("CCCCC", base=0, seed=1)  # pentane: 3 intra pairs
     lcB, _ = _lig_heavy_at("CCCCC", base=100, seed=2)
     spec = build_spec([lcA, lcB], [], {"vdw": {"weight": 1.0, "dmax": 10.0}})
-    assert spec.vdw.idx.shape == (2 + n * n, 2)
+    assert spec.vdw.idx.shape == (6 + n * n, 2)
 
 
 def test_interligand_vdw_only_in_both_mode():
@@ -439,7 +439,7 @@ def test_intramolecular_vdw_does_not_use_reference_distance_cutoff():
 
     assert np.linalg.norm(coords[0] - coords[4]) > 5.0
     assert spec.vdw is not None
-    np.testing.assert_array_equal(spec.vdw.idx, [[0, 4]])
+    np.testing.assert_array_equal(spec.vdw.idx, [[0, 3], [0, 4], [1, 4]])
 
 
 def test_vdw_cg_controls_are_stored_on_spec():

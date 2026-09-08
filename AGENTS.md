@@ -49,7 +49,7 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
    single `energy/_terms.py` `TermDef` registry drives spec packing, dispatch, gating,
    and breakdown for
    `bond/angle/chiral/plane/cistrans/vdw/distance/rmsd/group_angle/group_dihedral/group_improper/group_plane`
-   (cistrans = periodicity-safe torsion for cis/trans; plane = [servalcat](https://github.com/keitaroyam/servalcat)-style best-fit
+   (cistrans = periodic torsions for E/Z, protein chi, peptide omega and acyclic sp2 axes; plane = [servalcat](https://github.com/keitaroyam/servalcat)-style best-fit
    plane over whole planar atom GROUPS (aromatic/conjugated rings + non-ring sp2 groups),
    penalising each group's out-of-plane RMS deviation via the smallest-eigenvalue plane
    normal (stop-gradient like `rmsd`'s Kabsch rotation), opt-in/off by
@@ -103,9 +103,10 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
 `build_spec(ligand_confs, distance_restraints, conformer_config,
 elements, conf_start_sigma, rmsd_restraints)` — the single place RDKit mols become bond/angle/
 chiral/cistrans restraints (global indices, multi-ligand) and the dynamic
-fixed-background `VdwConfig` is assembled. Cis/trans detection keys on
-acyclic, non-aromatic `BondType.DOUBLE` bonds and targets the reference-conformer
-torsion; it needs real bond orders, which every tool supplies — chai via its adapter's
+fixed-background `VdwConfig` is assembled. Cis/trans E/Z detection keys on
+acyclic, non-aromatic `BondType.DOUBLE` bonds and keeps period 1. Conjugated single
+sp2-sp2 axes add period-2 torsions with approximate 5-degree ESD from the same relaxed
+reference. They need real bond orders, which every tool supplies — chai via its adapter's
 source-SMILES path (`chai/adapter.py` `_mol_from_smiles`, complete graph), the
 geometry-perceived fallback (no SMILES) being all-single so `cistrans=0`.
 
@@ -146,7 +147,8 @@ weight, **not slack**: `_monlib_spec.py` packs `weight / ESD**2`, and plane addi
 multiplies by group size so its existing RMS-squared kernel equals the per-atom squared sum.
 Explicit user slack remains separate; dictionary slack defaults to 0 for all terms (reference
 chiral keeps 0.05). Nonpositive ESD disables energy, retaining topology exclusions; nonfinite
-active targets/ESDs raise. Dictionary-free paths retain their behavior.
+active targets/ESDs raise. Reference bond/angle/chiral/plane and ligand E/Z weights retain
+their behavior; the new approximate torsions and VdW have their own ESD normalization.
 
 `_monlib_records.py` applies link add/change/delete operations to private records before deriving
 chiral scalar-triple-product magnitude and propagated ESD from three bonds/three angles. Keep
@@ -155,7 +157,8 @@ integer character code: missing an atom deletion can leave a phantom phosphate c
 inputs follow `on_missing` and are logged; strict mode raises. Each residue's incoming and outgoing
 modifications belong to separate links, including at an X-Pro boundary.
 
-Only dictionary torsions labeled `omega` or `sp2_sp2*` enter `cistrans` (no chi/phi/psi). Preserve
+Dictionary torsions labeled `omega` or `sp2_sp2*`, plus protein `chi*`, enter `cistrans`
+(no backbone phi/psi or complete nucleic backbone torsion set). Preserve
 periodicity (`<=0` becomes 1); convert angular values/ESDs to radians and **negate dictionary torsion
 targets** because RGI and Gemmi use opposite signs. `TRANS/CIS`, `PTRANS/PCIS`, `NMTRANS/NMCIS`
 are local alternatives for all link geometry/modifications. `energy/_peptide.py` chooses per-sample
@@ -164,6 +167,15 @@ through CG/L-BFGS trials and VdW blocks; never write them into device/dtype or g
 invocation reselects. Local condition tables avoid exponential whole-chain enumeration.
 Tests: `tests/test_monlib_{geom,dictionary,esd,cache}.py` use self-contained fixtures; no installed
 CCP4 library or external download is needed by the suite.
+
+`_polymer_torsions.py` supplies dictionary-free chi/omega/sp2 approximations from standard
+RDKit residue templates, using only modeled atoms. Chi uses reference targets with periods
+3/6/2 for sp3-sp3/sp3-sp2/sp2-sp2 and approximate ESDs 10/10/5 degrees. Omega uses the same
+per-invocation frozen cis/trans selector with 0/180-degree targets and 5-degree ESD.
+Unknown residues or missing chi atoms warn and skip; an omitted library never downloads one.
+Conformer angles within a strict 0.5 degrees of 180 use `2*w*(1+cos(theta))`; nonzero slack
+uses a chord residual with the same angular free interval. This branch and its 0.02-A bond
+norm floor live only in `energy/_kernels.py`, not the group/custom geometry primitives.
 
 **Don't add a REFERENCE-CONFORMER polymer restraint as a default "keep the backbone sane"
 layer under an RMSD restraint.** Measured 2×2 ablation (boltz2, QBP, 3 seeds, MolProbity
@@ -380,8 +392,9 @@ VdW is **not a sixth restraint type** — it is the non-bonded term of the **con
 restraint, configured under `conformer_restraints_config.vdw` (one of bond/angle/chiral/
 plane/cistrans/vdw). `mode` picks **two categories** (default `both` = both):
 
-- **Intramolecular** (`mode: intramolecular`): clashes WITHIN one ligand. Static
-  non-bonded ligand-internal pairs (topological distance > 3, without a reference-coordinate cutoff), built in
+- **Intramolecular** (`mode: intramolecular`): clashes WITHIN one ligand or polymer chain. Static
+  ligand pairs exclude 1-2/1-3 and same-plane 1-4 pairs; eligible 1-4 pairs remain.
+  There is no reference-coordinate cutoff. Ligand pairs are built in
   `featurizer.py` (`_build_intramolecular_vdw`) and carried in `spec.vdw` (`VdwArrays`).
   Scored in the **energy layer → all backends**.
 - **Intermolecular** (`mode: intermolecular`): clashes between that ligand and **every
@@ -406,8 +419,19 @@ plane/cistrans/vdw). `mode` picks **two categories** (default `both` = both):
     cross pairs are listed and the clamp contributes zero beyond contact. Only built when
     ≥2 ligands opted in.
 
-Both halves share `weight * clamp(d - scale*(r_i+r_j), max=0)**2` (zero gradient beyond
-contact — same maths as boltz's radius search). The fixed-background half scores the
+All paths share `weight * (clamp(d - scale*contact, max=0)/ESD)**2`. `_vdw_chemistry.py`
+collects chemistry for ALL atoms, including fixed background and nonrestrained ligands.
+Configured `type_energy`/`ener_lib` parameters take priority; otherwise RDKit templates/source
+graphs give approximate chemistry, with warning plus elemental fallback when unavailable.
+Contact priority is 1-4, hydrogen bond, metal, dummy, ordinary; ESD is 0.2 A except dummy
+0.3 A. Hydrogen-inclusive radii are capped at 2 A. `scale` defaults to 1.0 (formerly 0.75)
+and multiplies the resulting contact, not unconditionally a radius sum. Topology and plane
+exclusions survive disabled geometry terms. `energy/_nonbonded.py` gathers common contact,
+inverse-variance and eligibility tables for BOTH neighbor ranking and energy scoring.
+These prepared constants belong to the Torch device/dtype cache; JAX casts table floats to
+the query dtype before its cell-list carry. Active pairs include a conformer-restrained atom
+against an atom moved by another restraint, while static ligand pairs are never counted twice.
+The fixed-background half scores the
 neighbour list it rebuilds on measured displacement (see the Verlet-skin paragraph below —
 NOT once per diffusion step); restrained-ligand pairs remain statically enumerated. `mode` defaults to **`both`**
 (intramolecular + intermolecular); the explicit values pick one category. **The old

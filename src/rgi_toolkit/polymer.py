@@ -303,6 +303,14 @@ def build_polymer_geometry(
                 connections.append((previous, current))
 
     targets = _load_library(conformer_config, residue_meta, connections)
+    torsion_config = (conformer_config or {}).get("cistrans") or {}
+    if (
+        "cistrans" in (conformer_config or {})
+        and (torsion_config.get("weight", 1.0) or 0) > 0
+    ):
+        from rgi_toolkit._polymer_torsions import add_polymer_torsions
+
+        add_polymer_torsions(targets, residue_meta, connections, ref_pos)
     link_bonds, link_angles, link_planes = [], [], []
     for previous, current in connections:
         if (previous["uid"], current["uid"]) in targets.covered_links:

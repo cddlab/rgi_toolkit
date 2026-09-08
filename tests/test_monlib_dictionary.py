@@ -305,17 +305,21 @@ def test_each_peptide_link_family_has_its_own_cis_and_trans_targets(
         assert omega.period == 1
 
 
-def test_only_omega_and_sp2_torsions_are_selected_and_dictionary_sign_is_converted(
+def test_chi_omega_and_sp2_selected_with_dictionary_sign_and_period(
     peptide_library,
 ):
     targets = _targets(peptide_library, _residues(("AAA",)))
     rows = targets.terms["cistrans"]
-    assert len(rows) == 2
+    assert len(rows) == 3
     (sp2,) = [r for r in rows if r.atoms == (0, 1, 2, 3)]
     assert sp2.value == pytest.approx(-math.radians(37))
     assert sp2.esd == pytest.approx(math.radians(7))
     assert sp2.period == 3
-    assert not any(r.atoms[0] == 4 for r in rows)
+    (chi,) = [r for r in rows if r.atoms == (4, 1, 2, 3)]
+    assert chi.value == pytest.approx(-math.radians(60))
+    assert chi.esd == pytest.approx(math.radians(7))
+    assert chi.period == 3
+    assert not any(r.atoms == (4, 1, 0, 2) for r in rows)
 
 
 def test_gemmi_add_change_delete_operations_do_not_mutate_shared_components(

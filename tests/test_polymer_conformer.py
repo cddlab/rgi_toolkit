@@ -190,15 +190,15 @@ def test_protein_builds_peptide_link_plane_and_vdw_exclusions():
     av = spec.active_vdw_config
     assert av is not None
     assert av.polymer_mask.all()
-    assert av.scale == pytest.approx(0.75)
+    assert av.scale == pytest.approx(1.0)
     assert spec.conf_start_sigma == float("inf")
     # Peptide C-N and the CA-C-N 1-3 pair must never receive VdW repulsion.
-    assert 2 * spec.n_active + 5 in set(av.excluded_codes.tolist())
-    assert 1 * spec.n_active + 5 in set(av.excluded_codes.tolist())
-    # The cross-link CA-C-N-CA 1-4 path is also excluded, while the N-CA-C-N-CA
-    # 1-5 path remains eligible for VdW repulsion.
-    assert 1 * spec.n_active + 6 in set(av.excluded_codes.tolist())
-    assert 0 * spec.n_active + 6 not in set(av.excluded_codes.tolist())
+    assert 2 * spec.n_active + 5 in set(av.chemistry["excluded"].tolist())
+    assert 1 * spec.n_active + 5 in set(av.chemistry["excluded"].tolist())
+    # The omega CA-C-N-CA 1-4 pair spans different planes and remains eligible.
+    assert 1 * spec.n_active + 6 in set(av.chemistry["one_four"].tolist())
+    assert 1 * spec.n_active + 6 not in set(av.chemistry["excluded"].tolist())
+    assert 0 * spec.n_active + 6 not in set(av.chemistry["excluded"].tolist())
 
 
 def test_conformer_derived_targets_keep_the_configured_slack():
@@ -288,7 +288,10 @@ def test_phosphodiester_link_targets_are_present():
 def test_polymer_restraint_repairs_peptide_link_at_high_sigma():
     torch = pytest.importorskip("torch")
     restr = CombinedRestraints()
-    restr.setup(_PolymerAdapter("protein", _ALA_NAMES, _ALA_COORDS), config=_config())
+    # Isolate reference-link repair; typed VdW has its own ESD-weighted objective.
+    config = _config()
+    del config["conformer_restraints_config"]["vdw"]
+    restr.setup(_PolymerAdapter("protein", _ALA_NAMES, _ALA_COORDS), config=config)
     coords = np.concatenate([_ALA_COORDS, _ALA_COORDS + np.array([5.0, 0.0, 0.0])])
     coords = torch.tensor(coords, dtype=torch.float64)
     before = abs(float(torch.linalg.vector_norm(coords[2] - coords[5])) - 1.329)
@@ -330,7 +333,7 @@ def test_active_vdw_exclusion_gradient_and_backend_parity():
         coords_t, neighbours_t, factor_t, radii_t, torch.tensor(0.75), torch.tensor(1.0)
     )
     energy_t.backward()
-    assert float(energy_t.detach()) == pytest.approx((0.5 - 0.75 * 3.4) ** 2)
+    assert float(energy_t.detach()) == pytest.approx(((0.5 - 0.75 * 3.4) / 0.2) ** 2)
     assert float(coords_t.grad[2, 0]) < 0.0
 
     coords_j = jnp.asarray(coords_np)

@@ -15,7 +15,7 @@ from typing import Iterable
 _TRUE_STRINGS = ("1", "true", "yes", "on")
 
 
-VDW_SCALE_DEFAULT = 0.75
+VDW_SCALE_DEFAULT = 1.0
 VDW_MAX_ATOM_STEP_DEFAULT = 0.1
 # How often the CG CHECKS whether a dynamic neighbour list has gone stale (in iterations).
 # It is no longer how often it rebuilds -- that is decided by measured displacement against

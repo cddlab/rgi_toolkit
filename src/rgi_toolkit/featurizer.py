@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import itertools
 import logging
+from dataclasses import replace
 
 import numpy as np
 from rdkit import Chem
@@ -125,6 +126,7 @@ def _extract_conformer(
     *,
     relax: bool = True,
     force_field: str = "uff",
+    extra_torsions: list | None = None,
 ):
     """Return bond/angle/chiral/cistrans restraint tuples and plane groups in GLOBAL atom
     indices.
@@ -197,6 +199,11 @@ def _extract_conformer(
                 stereo_mol,
                 force_field=ff if do_relax else "none",
             )
+
+        if extra_torsions is not None:
+            from rgi_toolkit._polymer_torsions import ligand_sp2_torsions
+
+            extra_torsions.extend(ligand_sp2_torsions([replace(lc, conf_coords=crds)]))
 
         for b in mol.GetBonds():
             ai, aj = b.GetBeginAtomIdx(), b.GetEndAtomIdx()
@@ -488,6 +495,7 @@ def _build_vdw_config(
     active_sites: np.ndarray,
     g2l: dict,
     elements: np.ndarray | None,
+    chemistry=None,
 ) -> VdwConfig | None:
     """Build the dynamic fixed-background VdW config (torch + jax optimizers).
 
@@ -540,6 +548,17 @@ def _build_vdw_config(
     background_radii = np.array(
         [_vdw_radius(int(elements[a])) for a in background_global], dtype=np.float64
     )
+    typed = None
+    if chemistry is not None:
+        ligand_radii = chemistry.radii[ligand_global]
+        background_radii = chemistry.radii[background_global]
+        typed = chemistry.subset(
+            ligand_global,
+            background_global,
+            set(ligand_global),
+            set(),
+            vcfg.get("mode", "both"),
+        )
     max_neighbors = int(vcfg.get("max_neighbors", 32))
     if max_neighbors < 1:
         raise ValueError("conformer vdw max_neighbors must be >= 1")
@@ -553,6 +572,7 @@ def _build_vdw_config(
         scale=float(vcfg.get("scale", VDW_SCALE_DEFAULT)),
         dmax=float(vcfg.get("dmax", 5.0)),
         max_neighbors=max_neighbors,
+        chemistry=typed,
     )
 
 
@@ -563,11 +583,23 @@ def _build_active_vdw_config(
     elements: np.ndarray | None,
     bonds,
     angles,
+    chemistry=None,
+    ligand_confs=(),
 ) -> ActiveVdwConfig | None:
     """Build dynamic polymer-involving VdW metadata in local active-site space."""
 
     weight = _conf_weight(conformer_config, "vdw")
-    if weight <= 0.0 or len(polymer_atoms) == 0 or elements is None:
+    static_ligands = {int(g) for lc in ligand_confs for g in lc.global_indices}
+    moving = set(map(int, polymer_atoms)) | static_ligands
+    extra_active = set(map(int, active_sites)) - static_ligands
+    if (
+        weight <= 0.0
+        or elements is None
+        or (
+            len(polymer_atoms) == 0
+            and (chemistry is None or not extra_active or not moving)
+        )
+    ):
         return None
     elements = np.asarray(elements)
     g2l = {int(g): i for i, g in enumerate(active_sites)}
@@ -578,6 +610,8 @@ def _build_active_vdw_config(
         ],
         dtype=np.float64,
     )
+    if chemistry is not None:
+        radii = chemistry.radii[active_sites]
     polymer_set = {int(g) for g in polymer_atoms}
     polymer_mask = np.array([int(g) in polymer_set for g in active_sites], dtype=bool)
     n_active = len(active_sites)
@@ -598,7 +632,7 @@ def _build_active_vdw_config(
 
     # Exclude every pair separated by at most three covalent bonds (1-2/1-3/1-4),
     # including paths that cross peptide or phosphodiester links.
-    for start in adjacency:
+    for start in adjacency if chemistry is None else ():
         seen = {start}
         frontier = {start}
         for _distance in range(3):
@@ -618,6 +652,17 @@ def _build_active_vdw_config(
         exclude(g0, g1)
         exclude(g1, g2)
         exclude(g0, g2)
+    typed = None
+    if chemistry is not None:
+        excluded.clear()
+        typed = chemistry.subset(
+            active_sites,
+            active_sites,
+            moving,
+            static_ligands,
+            (conformer_config.get("vdw") or {}).get("mode", "both"),
+            active=True,
+        )
 
     vcfg = (conformer_config or {}).get("vdw", {}) or {}
     max_neighbors = int(vcfg.get("max_neighbors", 32))
@@ -631,6 +676,7 @@ def _build_active_vdw_config(
         scale=float(vcfg.get("scale", VDW_SCALE_DEFAULT)),
         dmax=float(vcfg.get("dmax", 5.0)),
         max_neighbors=max_neighbors,
+        chemistry=typed,
     )
 
 
@@ -638,12 +684,13 @@ def _build_intramolecular_vdw(
     ligand_confs: list[LigandConf],
     conformer_config: dict,
     g2l: dict,
+    chemistry=None,
 ) -> VdwArrays | None:
     """Static intramolecular VdW repulsion within each ligand (all backends).
 
-    Penalizes every atom pair within one ligand whose topological distance is > 3
-    (so 1-2 bonds, 1-3 angles, and 1-4 dihedrals are skipped), with a lower bound
-    ``scale * (r_i + r_j)``. Reference distance is deliberately not a build filter. Unlike the
+    Excludes 1-2/1-3 and same-plane 1-4 pairs. Every other pair uses its chemical
+    contact distance and inverse-ESD-squared weight, including eligible 1-4 contacts.
+    Reference distance is deliberately not a build filter. Unlike the
     dynamic fixed-background ``VdwConfig``, the pair list is fixed, so this term also
     works in the jax/numpy backends via ``VdwArrays``. Enabled when
     ``conformer_config['vdw']['mode']`` is ``'intramolecular'`` or ``'both'`` (the
@@ -653,32 +700,36 @@ def _build_intramolecular_vdw(
     weight = _conf_weight(conformer_config, "vdw")
     if weight <= 0.0 or not ligand_confs:
         return None
-    from rdkit.Chem import rdmolops
+    if chemistry is None:
+        from rgi_toolkit._vdw_chemistry import build_chemistry
+
+        chemistry = build_chemistry(ligand_confs, None)
 
     scale = float(vcfg.get("scale", VDW_SCALE_DEFAULT))
     idx_pairs: list[list[int]] = []
     r_min_list: list[float] = []
+    weights = []
     for lc in ligand_confs:
         mol = lc.mol
         gidx = np.asarray(lc.global_indices, dtype=np.int64)
         n = mol.GetNumAtoms()
         if n < 2:
             continue
-        topo = rdmolops.GetDistanceMatrix(mol)
-        radii = [_vdw_radius(a.GetAtomicNum()) for a in mol.GetAtoms()]
         for i in range(n):
             for j in range(i + 1, n):
-                if topo[i, j] <= 3:  # skip 1-2, 1-3, and 1-4 pairs
+                pair = chemistry.pair(int(gidx[i]), int(gidx[j]))
+                if pair is None:
                     continue
                 idx_pairs.append([g2l[int(gidx[i])], g2l[int(gidx[j])]])
-                r_min_list.append(scale * (radii[i] + radii[j]))
+                r_min_list.append(scale * pair[0])
+                weights.append(weight * pair[1])
     if not idx_pairs:
         return None
     n_pair = len(idx_pairs)
     return VdwArrays(
         idx=np.array(idx_pairs, dtype=np.int64),
         r_min=np.array(r_min_list, dtype=np.float64),
-        weight=np.full(n_pair, weight),
+        weight=np.asarray(weights),
         mask=np.ones(n_pair),
     )
 
@@ -687,6 +738,7 @@ def _build_interligand_vdw(
     ligand_confs: list[LigandConf],
     conformer_config: dict,
     g2l: dict,
+    chemistry=None,
 ) -> VdwArrays | None:
     """Static inter-ligand VdW repulsion BETWEEN distinct ligands (all backends).
 
@@ -709,29 +761,33 @@ def _build_interligand_vdw(
         return None
 
     scale = float(vcfg.get("scale", VDW_SCALE_DEFAULT))
-    radii = [
-        [_vdw_radius(a.GetAtomicNum()) for a in lc.mol.GetAtoms()]
-        for lc in ligand_confs
-    ]
+    if chemistry is None:
+        from rgi_toolkit._vdw_chemistry import build_chemistry
+
+        chemistry = build_chemistry(ligand_confs, None)
     idx_pairs: list[list[int]] = []
     r_min_list: list[float] = []
+    weights = []
     for a in range(len(ligand_confs)):
         gA = np.asarray(ligand_confs[a].global_indices, dtype=np.int64)
         for b in range(a + 1, len(ligand_confs)):
             gB = np.asarray(ligand_confs[b].global_indices, dtype=np.int64)
             for i in range(len(gA)):
                 li = g2l[int(gA[i])]
-                ri = radii[a][i]
                 for j in range(len(gB)):
+                    pair = chemistry.pair(int(gA[i]), int(gB[j]))
+                    if pair is None:
+                        continue
                     idx_pairs.append([li, g2l[int(gB[j])]])
-                    r_min_list.append(scale * (ri + radii[b][j]))
+                    r_min_list.append(scale * pair[0])
+                    weights.append(weight * pair[1])
     if not idx_pairs:
         return None
     n_pair = len(idx_pairs)
     return VdwArrays(
         idx=np.array(idx_pairs, dtype=np.int64),
         r_min=np.array(r_min_list, dtype=np.float64),
-        weight=np.full(n_pair, weight),
+        weight=np.asarray(weights),
         mask=np.ones(n_pair),
     )
 
@@ -776,6 +832,8 @@ def build_spec(
     polymer_geometry=None,
     plane_restraints: list | None = None,
     improper_restraints: list | None = None,
+    atom_records=(),
+    reference_uids=None,
 ) -> RestraintSpec:
     """Build a RestraintSpec. ``distance_restraints`` are DistanceData with
     ``target_sites1``/``target_sites2`` already resolved to global indices;
@@ -800,6 +858,7 @@ def build_spec(
     cfg_present = any(not str(k).startswith("_") for k in cfg)
     if not cfg_present:
         ligand_confs = []
+    all_ligand_confs = list(ligand_confs)
     _n_before = len(ligand_confs)
     ligand_confs = [
         lc for lc in ligand_confs if getattr(lc, "conformer_restraints", False)
@@ -863,8 +922,9 @@ def build_spec(
     # off it. LIGANDS only -- the polymer call below stays relax=False (monomer-library
     # residues are never relaxed), so this can never fire there.
     relax_ff = parse_relax_force_field(cfg)
+    ligand_torsions = [] if dw > 0 else None
     bonds, angles, chirals, cistrans, planes = _extract_conformer(
-        ligand_confs, force_field=relax_ff
+        ligand_confs, force_field=relax_ff, extra_torsions=ligand_torsions
     )
     polymer_atoms = np.empty(0, dtype=np.int64)
     library = LibraryTargets()
@@ -911,12 +971,16 @@ def build_spec(
         planes.extend(pp)
         planes.extend(polymer_geometry.link_planes)
         polymer_atoms = np.asarray(polymer_geometry.atom_indices, dtype=np.int64)
+    if dw > 0:
+        library = replace(library, terms={k: list(v) for k, v in library.terms.items()})
+        library.terms["cistrans"].extend(ligand_torsions)
     # VdW covalent exclusions must survive even when bond/angle energy blocks are off.
     exclusion_bonds = list(bonds)
     exclusion_angles = list(angles)
     # Covalent exclusions survive disabled dictionary energies (including ESD <= 0).
     exclusion_bonds.extend((*idx, 0.0, None) for idx in library.bond_pairs)
     exclusion_angles.extend((*idx, 0.0, None) for idx in library.angle_tuples)
+    exclusion_planes = list(planes)
     # weight<=0 means "disable": drop the term BEFORE the active_sites union so its
     # atoms do not become optimisable and it is never iterated — uniform across all
     # conformer terms. weight<=0 now also covers an ABSENT sub-block (_conf_weight -> 0),
@@ -997,24 +1061,48 @@ def build_spec(
             "conformer vdw mode must be 'intramolecular', 'intermolecular', or "
             f"'both', got {vdw_mode!r}"
         )
+    chemistry = None
+    if vdw_weight > 0 and (ligand_confs or len(polymer_atoms)):
+        from rgi_toolkit._vdw_chemistry import build_chemistry
+
+        chemistry = build_chemistry(
+            all_ligand_confs,
+            elements,
+            atom_records,
+            cfg,
+            reference_uids,
+            library.source,
+            exclusion_bonds,
+            exclusion_planes,
+        )
     vdw_intra = (
-        _build_intramolecular_vdw(ligand_confs, cfg, g2l)
+        _build_intramolecular_vdw(ligand_confs, cfg, g2l, chemistry)
         if vdw_mode in ("intramolecular", "both")
         else None
     )
     vdw_inter = (
-        _build_interligand_vdw(ligand_confs, cfg, g2l)
+        _build_interligand_vdw(ligand_confs, cfg, g2l, chemistry)
         if vdw_mode in ("intermolecular", "both")
         else None
     )
     vdw_arrays = _concat_vdw_arrays(vdw_intra, vdw_inter)
     vdw_config = (
-        _build_vdw_config(ligand_confs, polymer_atoms, cfg, active_sites, g2l, elements)
+        _build_vdw_config(
+            ligand_confs, polymer_atoms, cfg, active_sites, g2l, elements, chemistry
+        )
         if vdw_mode in ("intermolecular", "both")
+        or (chemistry is not None and len(polymer_atoms))
         else None
     )
     active_vdw_config = _build_active_vdw_config(
-        polymer_atoms, cfg, active_sites, elements, exclusion_bonds, exclusion_angles
+        polymer_atoms,
+        cfg,
+        active_sites,
+        elements,
+        exclusion_bonds,
+        exclusion_angles,
+        chemistry,
+        ligand_confs,
     )
 
     # ---- conformer arrays (local indices) -------------------------------------

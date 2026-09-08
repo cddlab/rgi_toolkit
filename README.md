@@ -38,11 +38,12 @@ per-tool prerequisites.
 Eight **built-in** restraint types, all minimized during the denoising loop to guide coordinate optimization:
 
 - **conformer** — ligand and polymer-local bond / angle / chiral-volume / VdW;
-  ligand cistrans (E/Z), polymer dictionary omega/sp2 torsions, and plane
+  ligand E/Z, protein side-chain χ, peptide ω, acyclic sp2 torsions, and plane
   ([servalcat](https://github.com/keitaroyam/servalcat)-style best-fit-plane flatness of aromatic rings + sp2 groups, opt-in)
   toward an ideal RDKit geometry, plus **VdW**
   non-bonded clash avoidance (intramolecular and/or intermolecular; `mode`
-  defaults to `both`). For polymers the targets can instead come from a **CCP4 monomer
+  defaults to `both`; chemical contact distances and ESD weighting). Near-linear conformer
+  angles use a stable cosine residual. For polymers the targets can instead come from a **CCP4 monomer
   library** (`monomer_library: true` downloads and caches it) — targets and ESD-based
   inverse-variance weights, with a local-path option for an existing snapshot. Prefer that
   for nucleic acids: the predictor's own reference conformer is an ETKDG embedding of the
@@ -148,7 +149,7 @@ restraints_config = {
         "bond": {"weight": 1.0},
         "angle": {"weight": 1.0},
         "chiral": {"weight": 1.0},
-        "cistrans": {"weight": 1.0},         # ligand cis/trans (acyclic C=C only)
+        "cistrans": {"weight": 1.0},         # ligand E/Z and conjugated sp2 torsions
         "plane": {"weight": 1.0},            # best-fit plane: rings + sp2 groups (off by default)
         "vdw": {
             "weight": 1.0, "max_neighbors": 32,  # mode defaults to "both"

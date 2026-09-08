@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from rgi_toolkit import _geometry as G
 from rgi_toolkit._array_ops import EPS, VDW_OVERLAP_EPS
 
@@ -25,7 +27,21 @@ def angle_energy(ops, positions, idx, th0, slack, weight, mask):
         positions[..., idx[:, 2], :],
     )
     delta = G.symmetric_flat_bottom_delta(ops, theta - th0, slack)
-    return ops.sum(weight * delta * delta * mask)
+    # Linear targets use the same cosine residual as Servalcat. The factor two
+    # preserves RGI's quadratic-weight convention in the small-deviation limit.
+    first = positions[..., idx[:, 0], :] - positions[..., idx[:, 1], :]
+    second = positions[..., idx[:, 2], :] - positions[..., idx[:, 1], :]
+    first_norm = ops.sqrt(ops.maximum(ops.vdot(first, first), 0.02**2))
+    second_norm = ops.sqrt(ops.maximum(ops.vdot(second, second), 0.02**2))
+    cosine = ops.clip(ops.vdot(first, second) / (first_norm * second_norm), -1, 1)
+    chord2 = ops.maximum(2 * (1 + cosine), 0.0)
+    tolerance = 2 * ops.sin(ops.minimum(slack, math.pi) / 2)
+    # Do not differentiate sqrt(0), including the unselected branch of where.
+    chord = ops.sqrt(ops.maximum(chord2, EPS))
+    flat = ops.maximum(chord - tolerance, 0.0) ** 2
+    linear = ops.where(slack > 0, flat, chord2)
+    penalty = ops.where(ops.abs(th0 * (180 / math.pi) - 180) < 0.5, linear, delta**2)
+    return ops.sum(weight * penalty * mask)
 
 
 def chiral_energy(ops, positions, idx, vol0, slack, weight, mask, both=None):

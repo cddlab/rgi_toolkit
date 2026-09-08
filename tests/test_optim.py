@@ -72,11 +72,12 @@ def test_solver_objective_tracks_new_contacts(backend, method, dynamic):
     )
     if dynamic == "fixed":
         spec.vdw_config = VdwConfig(
-            weight=10.0,
+            weight=10.0 * 0.2**2,
             ligand_local=np.array([0]),
             ligand_radii=np.array([1.7]),
             background_global=np.array([2, 3]),
             background_radii=np.full(2, 1.7),
+            scale=0.75,
             dmax=0.5,
         )
     elif dynamic == "active":
@@ -84,10 +85,11 @@ def test_solver_objective_tracks_new_contacts(backend, method, dynamic):
         spec.n_active = 4
         spec.active_sites = np.arange(4)
         spec.active_vdw_config = ActiveVdwConfig(
-            weight=10.0,
+            weight=10.0 * 0.2**2,
             radii=np.full(4, 1.7),
             polymer_mask=np.array([True, False, False, False]),
             excluded_codes=np.array([1], dtype=np.int64),
+            scale=0.75,
             dmax=0.5,
         )
     if backend.startswith("torch"):
@@ -1691,7 +1693,7 @@ def test_dynamic_vdw_diagnostics_cover_contacts_beyond_dmax(active_half):
         coords = np.array([[0.0, 0.0, 0.0], [20.0, 0.0, 0.0], [2.0, 0.0, 0.0]])
     else:
         coords = np.array([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0]])
-    expected = (2.55 - 2.0) ** 2
+    expected = ((2.55 - 2.0) / 0.2) ** 2
     assert TorchRestraintOptimizer(spec).energy(torch.tensor(coords)) == pytest.approx(
         expected, abs=1e-7
     )
@@ -1749,7 +1751,7 @@ def test_dynamic_vdw_energy_matches_across_backends(active_half):
         if active_half
         else np.array([[[0.0, 0.0, 0.0], [0.5, 0.0, 0.0]]])
     )
-    expected = (0.5 - 0.75 * 3.4) ** 2
+    expected = ((0.5 - 0.75 * 3.4) / 0.2) ** 2
     e_torch = TorchRestraintOptimizer(spec, max_iter=1).dynamic_vdw_energy(
         torch.tensor(coords_np, dtype=torch.float64)
     )
@@ -1786,8 +1788,8 @@ def test_finalize_reports_dynamic_vdw_before_minimize(backend, capsys):
     output = capsys.readouterr().out
 
     assert "finalize (step 7)" in output
-    assert "vdw=4.20250" in output
-    assert "total=4.20250" in output
+    assert "vdw=105.06250" in output
+    assert "total=105.06250" in output
 
 
 @pytest.mark.parametrize("active_half", [False, True])

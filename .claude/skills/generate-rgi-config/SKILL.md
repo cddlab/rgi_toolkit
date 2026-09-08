@@ -111,9 +111,14 @@ silent failures:
   acquires and caches the public CCP4 library when setup needs it. Use a path for an existing
   snapshot; `{on_missing: error}` requests the automatic cache with strict coverage. Keep
   each requested term and entity opt-in explicit. Dictionary bond/angle/chiral/plane and
-  omega/sp2 torsions use ESD-based inverse-variance weights automatically, with default
+  chi/omega/sp2 torsions use ESD-based inverse-variance weights automatically, with default
   slack zero. ESD is relative strength, not a tolerance band. Do not copy ESD into `slack`;
   consult `doc/config.md` for units, peptide state selection and offline cache behavior.
+- **Without a dictionary**: protein chi/omega and acyclic sp2 torsions use documented
+  RDKit-based approximations; omitting `monomer_library` never acquires a dictionary.
+  VdW uses chemical contact rules and ESD 0.2 A (dummy atoms 0.3 A), with `scale` default
+  1.0. Existing VdW weights may need retuning against unnormalized reference geometry;
+  do not assume the former 0.75-scale objective. Read `doc/config.md` before migrating one.
 
 ### 5. Write the config in the right place
 

@@ -284,7 +284,7 @@ class AF3RestraintAdapter:
             # correct ETKDGv3 conformer encoding the SMILES @/@@ and /\. So bond/angle/
             # chiral AND cistrans all target the correct geometry. E2E-verified on af3:
             # SMILES fumarate (E) keeps its C=C at -180 deg and maleate (Z) at ~0 deg,
-            # both with cistrans=1 — so cis/trans is fully (not partially) handled.
+            # both with one E/Z torsion; conjugated single bonds may add sp2 torsions.
             if mol.GetNumConformers() == 0 and mol.GetNumAtoms() == len(conf_crds):
                 conf = Chem.Conformer(mol.GetNumAtoms())
                 for i in range(len(conf_crds)):

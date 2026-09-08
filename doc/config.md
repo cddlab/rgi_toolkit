@@ -138,10 +138,14 @@ partners). `P_intra` and `P_ll` are the explicit static pair counts defined belo
 
 | VdW path | pair-list construction | one objective + gradient evaluation | pair-list / working storage | worst case |
 |---|---:|---:|---:|---|
-| Intramolecular ligand | setup pair scan `O(sum_l n_l^2)` | `O(P_intra)` | `O(P_intra)` | `P_intra = O(sum_l n_l^2)`; RDKit's topological-distance calculation is additional setup-only library work. |
+| Intramolecular ligand | setup pair scan `O(sum_l n_l^2)` | `O(P_intra)` | `O(P_intra)` | `P_intra = O(sum_l n_l^2)`; sparse topology comes from a bounded three-bond traversal. |
 | Restrained ligand-ligand | setup `O(P_ll)`, where `P_ll = sum_(i<j) n_i n_j` | `O(P_ll)` | `O(P_ll)` | `O((sum_l n_l)^2)`; this remains an explicit all-cross-pairs list. |
 | Moving atoms vs fixed background | ordinary density: `O(B log B + L log B)` per CG block | `O(LK)` | `O(B + LK)` | A collapsed/hash-colliding cell population degrades to `O(LB)` build time, without allocating an `L x B` distance matrix. |
-| Active-active pairs involving restrained polymer | ordinary density: `O(N log N)` per CG block | `O(NK)` | `O(NK)` for fixed `K` | A collapsed cell degrades to `O(N^2)` build time, without allocating an `N x N` distance matrix. |
+| Active-active pairs involving conformer-restrained atoms | ordinary density: `O(N log N)` per CG block | `O(NK)` | `O(NK)` for fixed `K` | A collapsed cell degrades to `O(N^2)` build time, without allocating an `N x N` distance matrix. |
+
+The dynamic rows show coordinate-search/scoring costs. Typed contacts additionally binary-search
+sorted sparse topology codes: an `O(log Q)` factor per candidate or scored pair when `Q` exclusion
+or 1–4 codes are present. Atom-type parameter tables use `O(T^2)` storage for `T` distinct types.
 
 The cell-list orders treat the 27 adjacent cells, traversal chunk width 32, and configured `K` as
 bounded constants, which is the intended use (`K=32` by default). If `K` itself is scaled with the
@@ -520,9 +524,9 @@ Two things worth knowing:
   NOT rescaled by the group size — the plane RMS is a genuine least-squares fit, not a rigid-body
   translation. `weight: 1` converges any group on its own, but a very large group's contribution is
   weaker *relative to other restraints*; raise `weight` if a big plane loses a tug-of-war.
-- **VdW side effect.** A restrained group's atoms join the optimized set, which removes them from the
-  fixed-background VdW partner list (see [Van der Waals modes](#van-der-waals-modes)). Restraining a
-  large protein group therefore stops those atoms from repelling a ligand through that term.
+- **VdW partners.** A restrained group's atoms join the optimized set. When a ligand or polymer
+  also opts into conformer VdW, contacts with that group move from the fixed-background list to the
+  active-active list, where both endpoints receive gradients.
 
 ### Reference groups
 
@@ -720,8 +724,8 @@ sub-block): residue-local aromatic rings — His/Phe/Tyr/Trp side chains and nuc
 the protein **peptide plane**, the canonical inter-residue four-atom group `{C, CA, O}` (previous
 residue) `+ {N}` (current), scored by the best-fit-plane `plane` term (this replaces the old
 peptide-plane zero-volume impropers that rode the `chiral` term — so a `chiral`-only config no longer
-flattens the peptide plane; add a `plane` sub-block). Polymer `cistrans` requires a monomer
-library and selects dictionary omega/sp2 torsions.
+flattens the peptide plane; add a `plane` sub-block). Polymer `cistrans` includes side-chain χ,
+peptide ω and selected sp2 torsions, with dictionary or approximate targets as described below.
 
 Top-level (shared by all terms): `start_sigma` (`+inf`), `stop_sigma` (`-1`) — or the step-window
 alternative `start_step` (`-inf`) / `stop_step` (`+inf`) (mutually exclusive with the sigma window).
@@ -735,18 +739,19 @@ not configured" rule the other restraint types follow.
 | term | keys (default) | meaning |
 |---|---|---|
 | `bond` | `weight` (1.0), `slack` (0.0 Å) | bond lengths toward ideal; flat-bottomed by `slack` |
-| `angle` | `weight` (1.0), `slack` (0.0 rad) | bond angles toward ideal |
+| `angle` | `weight` (1.0), `slack` (0.0 rad) | bond angles toward ideal; targets within 0.5° of 180° use a stable cosine residual |
 | `chiral` | `weight` (1.0), `slack` (0.05 Å³ reference / 0.0 Å³ library) | signed chiral volume; the library may also allow either sign |
 | `plane` | `weight` (1.0), `slack` (0.0 Å) | **best-fit-plane** flatness of whole planar atom groups ([servalcat](https://github.com/keitaroyam/servalcat)-style) — penalises each group's out-of-plane RMS deviation toward 0. Fires on (a) aromatic/conjugated rings (whole ring) and (b) non-ring sp2 groups (an acyclic double-bond centre + its heavy neighbors: carbonyl / amide / ester / carboxyl / trisubstituted alkene). Group membership is confirmed by the reference conformer being coplanar (not the RDKit aromaticity flag). Add a `plane:` block to activate |
-| `cistrans` | `weight` (1.0), `slack` (0.0 rad) | reference **cis/trans (E/Z)** of acyclic, non-aromatic double bonds (requires bond orders), or library `omega` / `sp2_sp2*` torsions with their periodicity |
-| `vdw` | `weight` (1.0), `mode` (`"both"`), `scale` (0.75), `dmax` (5.0 Å), `max_neighbors` (32), `max_atom_step` (0.1 Å), `neighbor_rebuild_interval` (10), `neighbor_skin` (2.0 Å) | non-bonded clash avoidance with bounded CG steps and displacement-triggered Verlet neighbor rebuilds |
+| `cistrans` | `weight` (1.0), `slack` (0.0 rad) | ligand E/Z, protein side-chain χ, peptide ω and acyclic sp2 torsions, with explicit periodicity |
+| `vdw` | `weight` (1.0), `mode` (`"both"`), `scale` (1.0), `dmax` (5.0 Å), `max_neighbors` (32), `max_atom_step` (0.1 Å), `neighbor_rebuild_interval` (10), `neighbor_skin` (2.0 Å) | chemical contact distances and ESD-based clash penalties, with bounded CG steps and displacement-triggered Verlet neighbor rebuilds |
 
 ### `monomer_library` — refinement targets for polymers (not a term)
 
 `monomer_library` sits alongside the term blocks but builds nothing of its own: it changes
 where the **polymer** `bond` / `angle` / `chiral` / `plane` / `cistrans` and inter-residue
-link targets and uncertainties come from. Each desired term and polymer entity still needs
-its normal opt-in.
+link targets and uncertainties come from. It also supplies VdW `type_energy` assignments and
+`ener_lib.cif` parameters for any covered atoms, including ligands and fixed background. Each
+desired energy term and moving entity still needs its normal opt-in.
 
 By default they are **measured from the predictor's per-residue reference conformer**, which is
 not refinement geometry — AF3 fills `ref_pos` by RDKit **ETKDG-embedding the free CCD component**.
@@ -808,8 +813,8 @@ Dictionary ESD and user `slack` are separate:
   the number of modeled atoms. Explicit plane slack still applies to the group's RMS.
   Named nucleobase planes and local peptide planes stay separate; the usual peptide group
   is `{CA, C, O}(previous) + {N}(current)`, without the next Cα.
-- **Torsion:** only `omega` and labels beginning `sp2_sp2` are used. Side-chain χ and
-  backbone φ/ψ are not enabled by this setting. The residual is
+- **Torsion:** `omega` and labels beginning `sp2_sp2` are used, plus `chi*` for proteins.
+  Backbone φ/ψ and the complete nucleic-acid backbone torsion set are not enabled. The residual is
   `wrap(period * (angle - target)) / period`, with `period <= 0` treated as 1.
 - **Peptide state:** each sample chooses the nearer cis/trans omega target from its coordinates
   at the start of each `minimize` call. Ties and degenerate geometry choose trans. That state
@@ -828,9 +833,25 @@ Dictionary ESD and user `slack` are separate:
   Setup logs component coverage and candidate row counts; cis/trans rows are alternatives.
 
 ESD determines relative strength between competing restraints. It does not create a free
-interval: an isolated harmonic term can still converge to its exact target. Dictionary-free
-ligands, uncovered reference geometry, built-in link tolerances, standalone restraints and
-custom energies retain their existing behavior.
+interval: an isolated harmonic term can still converge to its exact target. Existing reference
+bond/angle/chiral/plane and ligand E/Z weights and built-in link tolerances remain unchanged;
+the new approximate torsions and VdW use the ESDs described below. Standalone and custom
+restraints keep their own weight conventions.
+
+### Torsions without a monomer library
+
+An omitted or false `monomer_library` never downloads a dictionary. Standard-residue RDKit
+templates supply chemical bond orders for protein χ and acyclic sp2 torsions; ligand source
+graphs supply the same classification for ligands. Only atoms already present are used.
+Unknown residues, missing χ atoms and degenerate χ references are logged and skipped.
+
+χ targets are measured from the predictor's residue reference. The approximate periods are
+3 for sp3–sp3, 6 for sp3–sp2, and 2 for sp2–sp2 axes, with ESDs of 10°, 10° and 5°,
+respectively. Acyclic conjugated sp2–sp2 single bonds use period 2 and ESD 5°; ligand targets
+come from the same relaxed, stereo-checked coordinates as the other ligand geometry.
+Peptide ω uses cis 0° / trans 180°, ESD 5°, with the nearest state fixed for each minimization.
+The existing double-bond E/Z restraints keep period 1, so a trans double bond never gains a
+second cis minimum. These chemical approximations are not dictionary-derived uncertainties.
 
 ### `relax_force_field` — which force field idealises the ligand reference (not a term)
 
@@ -923,25 +944,61 @@ quantity $x$:
 | `angle` | bond angle $\theta$ (radians) | $\theta_0$ |
 | `chiral` | signed volume $V = (a_1 - a_0)\cdot\big((a_2 - a_0)\times(a_3 - a_0)\big)$ | $V_0$ (handedness) |
 | `plane` | group's out-of-plane RMS deviation $\sqrt{\lambda_{\min}/N}$ ($\lambda_{\min}$ = smallest eigenvalue of the centred covariance) | $0$ (planar) |
-| `cistrans` | double-bond torsion $\phi$ (deviation wrapped to $\pm 180^\circ$) | $\phi_0$ (E/Z) |
+| `cistrans` | torsion $\phi$, residual $\operatorname{wrap}(n(\phi-\phi_0))/n$ | $\phi_0$ and periodicity $n$ |
+
+Conformer angles with `abs(target_degrees - 180) < 0.5` use
+`2 * weight * (1 + cos(theta))` instead of squared angle deviation. Dictionary weights
+already include `1 / ESD_radians**2`. The factor two preserves RGI's quadratic coefficient
+for small deviations from linearity. With nonzero slack, the squared residual is
+`max(2*sin((pi-theta)/2) - 2*sin(slack/2), 0)**2`, preserving the requested angular free interval.
+Bond lengths in the cosine denominator are floored at 0.02 Å. Ordinary-length linear bonds
+have zero energy and gradient; degenerate bonds remain finite. Standalone group angles and
+custom angle functions are unchanged.
 
 `vdw` is one-sided (repulsion only),
 
 ```math
-E = w \sum_{(i,j)} \min\big(0,\; d_{ij} - \text{scale}\cdot(r_i + r_j)\big)^2,
+E = w \sum_{(i,j)} \left[\frac{\min(0,\;d_{ij}-\text{scale}\cdot R_{ij})}{\sigma_{ij}}\right]^2,
 ```
 
-where $d_{ij}$ is the pair distance and $r_i, r_j$ are their VdW radii. Static ligand pairs are
-enumerated from topology; `dmax` is the baseline cutoff for dynamic neighbor searches.
+where $d_{ij}$ is the pair distance and $R_{ij}$ is the chemical contact distance. With a
+configured dictionary, `type_energy` and `ener_lib.cif` provide atom radii and hydrogen-bond
+classes; otherwise standard-residue/source-molecule RDKit chemistry provides an offline
+approximation. Unavailable chemistry or unknown energy types warn and fall back to elemental
+parameters. Background atoms and nonrestrained ligands are typed too. Hydrogens participate
+only when already present; typing never changes protonation, formal charges or stereochemistry.
+
+The contact rules follow [Servalcat's geometry implementation](https://github.com/keitaroyam/servalcat/blob/75813905c2d02d9892e52b11a701e36eab931e41/src/refine/geom.hpp):
+
+| Contact, in priority order | $R_{ij}$ | ESD $\sigma_{ij}$ |
+|---|---|---|
+| Eligible 1–4 pair | radius sum minus 0.1 Å per N/O atom or 0.15 Å per other atom | 0.2 Å |
+| Donor–acceptor, including atoms of both classes | radius sum minus 0.3 Å | 0.2 Å |
+| Donor hydrogen–acceptor | acceptor radius plus 0.1 Å | 0.2 Å |
+| Metal contact with both ionic radii available | ionic radius sum | 0.2 Å |
+| One dummy atom / two dummy atoms | `max(0.7, radius sum - 0.7)` / radius sum | 0.3 Å |
+| Other | radius sum | 0.2 Å |
+
+Hydrogen-inclusive radii are preferred and capped at 2 Å. Covalent 1–2 and 1–3 pairs are
+excluded. A 1–4 pair is excluded only when both endpoints belong to a common plane group;
+otherwise its adjusted contact is retained. These exclusions use chemical topology even when
+bond, angle or plane energy blocks are disabled. Static ligand pairs are enumerated from
+topology; `dmax` is the baseline cutoff for dynamic neighbor searches.
 The verbose `finalize` `vdw=` value includes these static rows and both optimizer-only dynamic
 halves on Torch and JAX.
+
+**Migration:** `scale` now defaults to 1.0 (formerly 0.75) and multiplies the chemical contact
+distance. At the same distance and contact threshold, ESD 0.2 Å multiplies the former VdW
+energy and gradient by 25. Existing weights may therefore need retuning against reference
+geometry terms that do not use ESDs. `weight` remains a linear multiplier; no new ESD setting
+is required. Doubling an ESD divides both energy and gradient by four.
 
 ### Van der Waals modes
 
 `vdw.mode` picks **two categories** (default `"both"` = both):
 
-- `"intramolecular"` — clashes **within** a ligand (static pairs more than three covalent bonds
-  apart, all backends).
+- `"intramolecular"` — clashes **within** one ligand or polymer chain, with the covalent and
+  plane exclusions above. Ligand pairs are static; polymer contacts use dynamic lists.
 - `"intermolecular"` — clashes between the ligand and **every other molecule**: the **fixed
   background** (every non-padding atom not being optimized — protein, DNA/RNA, any **non-restrained**
   ligand; dynamic, torch/jax) **and** other **restrained** ligands (≥2 ligands that each set
@@ -950,9 +1007,9 @@ halves on Torch and JAX.
   backends).
 
 So to make two restrained ligands avoid each other, just keep the default `mode: both` (or set
-`intermolecular`) and give both a `vdw` block — no extra key. `scale` = fraction of the summed VdW
-radii used as the contact threshold. `dmax` is the baseline dynamic-search cutoff; CG expands it
-with a safe movement skin. Intramolecular pairs more than three bonds apart and all inter-ligand
+`intermolecular`) and give both a `vdw` block — no extra key. `scale` multiplies the chemical
+contact threshold. `dmax` is the baseline dynamic-search cutoff; CG expands it
+with a safe movement skin. Eligible intramolecular pairs and all inter-ligand
 pairs are enumerated regardless of their reference-conformer distance, because either can clash in
 the predicted coordinates. Like every conformer term, `vdw` is built only when a `vdw:` block is
 present (then `weight` defaults to 1.0); omit the block to leave it off. **The old
@@ -980,7 +1037,7 @@ evaluation nor the conjugate direction. Energy evaluation remains `O(L * max_nei
 `O(N * max_neighbors)`. With `method: l-bfgs`, both lists are rebuilt at every
 objective evaluation, including line-search trials, because its steps have no CG displacement bound.
 For both solvers and energy diagnostics, the search radius is at least the largest contact
-distance `scale * (r_i + r_j)`, even when `dmax` is smaller.
+distance `scale * R_ij`, even when `dmax` is smaller.
 
 `max_atom_step` (default 0.1 Å) caps each atom's accepted displacement in one CG iteration whenever
 VdW is active. The line search uses the capped displacement in its Armijo test, so increasing
@@ -997,10 +1054,11 @@ alongside it if you go much above the default.
 
 The neighbor-list build uses a sorted spatial cell list whose cell width is the resulting search
 cutoff (never smaller than `dmax`). Hash collisions are checked against the full cell coordinate,
-and each bucket is traversed completely in fixed-width chunks. Covalent 1-2/1-3/1-4 exclusions,
-the polymer-participation rule, and zero-radius atoms are filtered **before** the K cap. Remaining
-candidates are ranked by clearance `distance - scale * (r_i + r_j)`, so the most severe clashes
-win even when radii differ. At ordinary density the build remains
+and each bucket is traversed completely in fixed-width chunks. Chemical topology exclusions,
+molecule mode and moving-atom participation are filtered **before** the K cap. Remaining
+candidates are ranked by clearance `distance - scale * R_ij`, so the most severe clashes
+win even when hydrogen bonds, metals and 1–4 contacts have different thresholds. Small type-pair
+tables and sparse topology codes avoid a dense atom-pair parameter matrix. At ordinary density the build remains
 `O(B log B + L log B)` / `O(N log N)`, with linear fixed-width working memory; a collapsed
 structure degrades to `O(LB)` / `O(N^2)` time without allocating a dense distance matrix.
 

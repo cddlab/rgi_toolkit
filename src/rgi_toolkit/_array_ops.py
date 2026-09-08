@@ -95,6 +95,9 @@ class _AxisOps:
     def arccos(self, value):
         return self.xp.arccos(value)
 
+    def searchsorted(self, values, queries):
+        return self.xp.searchsorted(values, queries)
+
     def arctan2(self, first, second):
         return self.xp.arctan2(first, second)
 
@@ -147,6 +150,9 @@ class _TorchOps:
 
     def asint(self, value):
         return self.t.as_tensor(value, dtype=self.t.long, device=self._device)
+
+    def searchsorted(self, values, queries):
+        return self.t.searchsorted(values, queries.contiguous())
 
     def const(self, value):
         return value

@@ -307,6 +307,11 @@ class TorchRestraintOptimizer:
         return cache[key]
 
     def _setup_vdw(self, device, dtype) -> None:
+        from rgi_toolkit._array_ops import get_ops
+        from rgi_toolkit.energy._nonbonded import prepare_chemistry
+
+        ops = get_ops("torch", device)
+        like = torch.empty((), device=device, dtype=dtype)
         vc = getattr(self.spec, "vdw_config", None)
         if vc is None or vc.weight <= 0:
             self._vdw = None
@@ -326,6 +331,8 @@ class TorchRestraintOptimizer:
                 "scale": torch.as_tensor(float(vc.scale), dtype=dtype, device=device),
                 "dmax": torch.as_tensor(vc.search_radius, dtype=dtype, device=device),
                 "max_neighbors": int(vc.max_neighbors),
+                "contact": torch.as_tensor(vc.max_contact, dtype=dtype, device=device),
+                "chemistry": prepare_chemistry(ops, vc.chemistry, like),
             }
 
         ac = getattr(self.spec, "active_vdw_config", None)
@@ -344,6 +351,8 @@ class TorchRestraintOptimizer:
                 "scale": torch.as_tensor(float(ac.scale), dtype=dtype, device=device),
                 "dmax": torch.as_tensor(ac.search_radius, dtype=dtype, device=device),
                 "max_neighbors": int(ac.max_neighbors),
+                "contact": torch.as_tensor(ac.max_contact, dtype=dtype, device=device),
+                "chemistry": prepare_chemistry(ops, ac.chemistry, like),
             }
 
     def _fixed_vdw_pairs(self, active, bg_pos, dmax=None):
@@ -360,6 +369,7 @@ class TorchRestraintOptimizer:
             v["lig_r"],
             v["bg_r"],
             v["scale"],
+            v["chemistry"],
         )
 
     def _vdw_energy(self, active, bg_pos, pairs=None):
@@ -379,6 +389,7 @@ class TorchRestraintOptimizer:
             v["bg_r"],
             v["scale"],
             v["weight"],
+            v["chemistry"],
         )
 
     def minimize(self, coords, sigma=None, step=None, start_sigma=None, max_iter=None):
@@ -513,9 +524,7 @@ class TorchRestraintOptimizer:
                     v = self._vdw
                     cutoff = v["dmax"]
                     if movement is not None:
-                        max_r_min = v["scale"] * (
-                            torch.max(v["lig_r"]) + torch.max(v["bg_r"])
-                        )
+                        max_r_min = v["contact"]
                         cutoff = torch.maximum(cutoff, max_r_min + movement + skin)
                     fixed_vdw = self._fixed_vdw_pairs(active, bg_pos, cutoff)
 
@@ -526,7 +535,7 @@ class TorchRestraintOptimizer:
                     av = self._active_vdw
                     cutoff = av["dmax"]
                     if movement is not None:
-                        max_r_min = av["scale"] * 2.0 * torch.max(av["radii"])
+                        max_r_min = av["contact"]
                         # both endpoints move, hence 2x the one-sided travel allowance
                         cutoff = torch.maximum(
                             cutoff, max_r_min + 2.0 * movement + skin
@@ -539,6 +548,7 @@ class TorchRestraintOptimizer:
                         cutoff,
                         av["max_neighbors"],
                         av["scale"],
+                        av["chemistry"],
                     )
                     active_vdw = (neighbours, pair_factor)
 
@@ -566,6 +576,7 @@ class TorchRestraintOptimizer:
                             av["radii"],
                             av["scale"],
                             av["weight"],
+                            av["chemistry"],
                         )
                     ce = self._custom_energy(active, sigma, step)
                     if ce is not None:
@@ -585,6 +596,7 @@ class TorchRestraintOptimizer:
                             v["bg_r"],
                             v["scale"],
                             v["weight"],
+                            v["chemistry"],
                         )
                     active_args = None
                     if active_vdw is not None:
@@ -595,6 +607,7 @@ class TorchRestraintOptimizer:
                             av["radii"],
                             av["scale"],
                             av["weight"],
+                            av["chemistry"],
                         )
                     return vdw, active_args
 
@@ -895,6 +908,7 @@ class TorchRestraintOptimizer:
                     av["dmax"],
                     av["max_neighbors"],
                     av["scale"],
+                    av["chemistry"],
                 )
                 total += float(
                     active_vdw_pair_energy(
@@ -904,6 +918,7 @@ class TorchRestraintOptimizer:
                         av["radii"],
                         av["scale"],
                         av["weight"],
+                        av["chemistry"],
                     )
                 )
             return total

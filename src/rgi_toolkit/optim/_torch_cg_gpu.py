@@ -47,9 +47,10 @@ import os
 
 import torch
 
-from rgi_toolkit._array_ops import VDW_OVERLAP_EPS
+from rgi_toolkit._array_ops import VDW_OVERLAP_EPS, get_ops
 from rgi_toolkit._config_util import VDW_SCALE_DEFAULT
 from rgi_toolkit.energy import torch_energy
+from rgi_toolkit.energy._nonbonded import pair_parameters
 from rgi_toolkit.optim._cell_list import (
     CELL_CHUNK_SIZE,
     CELL_HASH_PRIMES,
@@ -144,6 +145,7 @@ def _build_cell_pairs_torch(
     target_polymer=None,
     excluded_codes=None,
     pair_code_size=None,
+    chemistry=None,
 ):
     """Return target indices and ranking scores from a sorted cell list."""
 
@@ -220,16 +222,26 @@ def _build_cell_pairs_torch(
             if exclude_self:
                 valid_candidate = valid_candidate & (candidate != source)
             score = dist2
-            if query_radii is not None:
+            if chemistry is not None:
+                contact, _, allowed = pair_parameters(
+                    get_ops("torch"), chemistry, source, candidate
+                )
+                score = torch.sqrt(dist2 + EPS) - pair_scale * contact
+                valid_candidate = valid_candidate & allowed
+            elif query_radii is not None:
                 source_r = query_radii[source]
                 target_r = target_radii[candidate]
                 valid_candidate = valid_candidate & (source_r > 0) & (target_r > 0)
                 score = torch.sqrt(dist2 + EPS) - pair_scale * (source_r + target_r)
-            if query_polymer is not None:
+            if chemistry is None and query_polymer is not None:
                 valid_candidate = valid_candidate & (
                     query_polymer[source] | target_polymer[candidate]
                 )
-            if excluded_codes is not None and excluded_codes.numel() > 0:
+            if (
+                chemistry is None
+                and excluded_codes is not None
+                and excluded_codes.numel() > 0
+            ):
                 lo = torch.minimum(source, candidate)
                 hi = torch.maximum(source, candidate)
                 codes = lo * pair_code_size + hi
@@ -257,6 +269,7 @@ def build_active_vdw_pairs(
     dmax,
     max_neighbors,
     scale=VDW_SCALE_DEFAULT,
+    chemistry=None,
 ):
     """Build a fixed-width directed neighbour list with a sorted spatial cell list.
 
@@ -283,6 +296,7 @@ def build_active_vdw_pairs(
         target_polymer=polymer_mask,
         excluded_codes=excluded_codes,
         pair_code_size=n_atom,
+        chemistry=chemistry,
     )
     if neighbours.shape[-1] == 0:
         return neighbours, neighbours.to(active.dtype)
@@ -298,7 +312,15 @@ def build_active_vdw_pairs(
 
 
 def build_fixed_vdw_pairs(
-    active, bg_pos, lig_local, dmax, max_neighbors, lig_r=None, bg_r=None, scale=None
+    active,
+    bg_pos,
+    lig_local,
+    dmax,
+    max_neighbors,
+    lig_r=None,
+    bg_r=None,
+    scale=None,
+    chemistry=None,
 ):
     """Build moving-ligand to fixed-background neighbours for the current CG block."""
 
@@ -313,6 +335,7 @@ def build_fixed_vdw_pairs(
         query_radii=lig_r,
         target_radii=bg_r,
         pair_scale=scale,
+        chemistry=chemistry,
     )
     return neighbours, torch.isfinite(best_score).to(active.dtype)
 
@@ -345,6 +368,7 @@ def _vdw_pair_energy(
     bg_r,
     scale,
     weight,
+    chemistry=None,
 ):
     """Fixed-background VdW energy over a fixed per-step neighbour list."""
 
@@ -360,12 +384,23 @@ def _vdw_pair_energy(
     source = lig_local.reshape(1, -1, 1)
     diff = _safe_vdw_diff_torch(diff, source, neighbours, canonical=False)
     dist = torch.sqrt(torch.sum(diff**2, dim=-1) + EPS)
-    r_min = scale * (lig_r[None, :, None] + bg_r[neighbours])
+    if chemistry is None:
+        contact = lig_r[None, :, None] + bg_r[neighbours]
+        inverse = 1 / 0.2**2
+    else:
+        query = torch.arange(lig_local.shape[0], device=active.device).reshape(1, -1, 1)
+        contact, inverse, valid = pair_parameters(
+            get_ops("torch"), chemistry, query, neighbours
+        )
+        pair_mask = pair_mask * valid
+    r_min = scale * contact
     delta = torch.clamp(dist - r_min, max=0.0)
-    return weight * torch.sum(pair_mask * delta**2)
+    return weight * torch.sum(pair_mask * inverse * delta**2)
 
 
-def active_vdw_pair_energy(active, neighbours, pair_factor, radii, scale, weight):
+def active_vdw_pair_energy(
+    active, neighbours, pair_factor, radii, scale, weight, chemistry=None
+):
     """VdW energy over a fixed per-step active-active neighbour list."""
 
     n_atom = active.shape[-2]
@@ -378,9 +413,17 @@ def active_vdw_pair_energy(active, neighbours, pair_factor, radii, scale, weight
     source = torch.arange(n_atom, device=active.device).reshape(1, n_atom, 1)
     diff = _safe_vdw_diff_torch(diff, source, neighbours, canonical=True)
     dist = torch.sqrt(torch.sum(diff**2, dim=-1) + EPS)
-    r_min = scale * (radii[None, :, None] + radii[neighbours])
+    if chemistry is None:
+        contact = radii[None, :, None] + radii[neighbours]
+        inverse = 1 / 0.2**2
+    else:
+        contact, inverse, valid = pair_parameters(
+            get_ops("torch"), chemistry, source, neighbours
+        )
+        pair_factor = pair_factor * valid
+    r_min = scale * contact
     delta = torch.clamp(dist - r_min, max=0.0)
-    return weight * torch.sum(pair_factor * delta**2)
+    return weight * torch.sum(pair_factor * inverse * delta**2)
 
 
 def _energy_vdw(
@@ -394,6 +437,7 @@ def _energy_vdw(
     bg_r,
     scale,
     weight,
+    chemistry=None,
 ):
     """``_energy`` + the dynamic fixed-background VdW term, as one compiled energy so the
     default boltz/protenix conformer (which uses the dynamic VdW) is JIT-compiled too."""
@@ -407,12 +451,15 @@ def _energy_vdw(
         bg_r,
         scale,
         weight,
+        chemistry,
     )
 
 
-def _energy_active_vdw(a, prepared, neighbours, pair_factor, radii, scale, weight):
+def _energy_active_vdw(
+    a, prepared, neighbours, pair_factor, radii, scale, weight, chemistry=None
+):
     return _energy(a, prepared) + active_vdw_pair_energy(
-        a, neighbours, pair_factor, radii, scale, weight
+        a, neighbours, pair_factor, radii, scale, weight, chemistry
     )
 
 
@@ -427,11 +474,13 @@ def _energy_both_vdw(
     bg_r,
     fixed_scale,
     fixed_weight,
+    fixed_chemistry,
     neighbours,
     pair_factor,
     radii,
     active_scale,
     active_weight,
+    active_chemistry,
 ):
     return (
         _energy(a, prepared)
@@ -445,6 +494,7 @@ def _energy_both_vdw(
             bg_r,
             fixed_scale,
             fixed_weight,
+            fixed_chemistry,
         )
         + active_vdw_pair_energy(
             a,
@@ -453,6 +503,7 @@ def _energy_both_vdw(
             radii,
             active_scale,
             active_weight,
+            active_chemistry,
         )
     )
 
