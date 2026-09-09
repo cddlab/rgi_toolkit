@@ -112,8 +112,14 @@ def _cg_minimize(
             predicted = (
                 step * slope if max_atom_step is None else jnp.sum(g_proto * delta)
             )
-            ok = ft <= f + ARMIJO_C1 * predicted
-            return (jnp.where(ok, step, step * BACKTRACK), ok, xt, ft, gt, i + 1)
+            moved = jnp.any(xt != x_base)
+            finite = (
+                jnp.isfinite(ft) & jnp.all(jnp.isfinite(xt)) & jnp.all(jnp.isfinite(gt))
+            )
+            ok = moved & finite & (ft <= f + ARMIJO_C1 * predicted)
+            # Shrinking an unrepresentable update cannot restore movement.
+            next_i = jnp.where(moved, i + 1, max_ls)
+            return (jnp.where(ok, step, step * BACKTRACK), ok, xt, ft, gt, next_i)
 
         init = (
             step0,
@@ -136,44 +142,47 @@ def _cg_minimize(
             -g_,
             jnp.sum(g_ * g_),
             jnp.asarray(LS_STEP_MAX),
+            jnp.asarray(False),  # low-progress restart latch
             jnp.max(jnp.abs(g_)) < gtol,
         )
 
     if state is None:
-        f0, g0, d0, gg0, s0, stop0 = _fresh()
+        f0, g0, d0, gg0, s0, small0, stop0 = _fresh()
     else:
         # Resume a previous block. `lax.cond` EXECUTES only the taken branch, so a carried
         # block genuinely pays no re-entry evaluation. Mirrors the torch `state` argument;
         # the caller must pass None after a neighbour rebuild (the objective changed).
-        f_c, g_c, d_c, gg_c, s_c, valid = state
-        f0, g0, d0, gg0, s0, stop0 = jax.lax.cond(
+        f_c, g_c, d_c, gg_c, s_c, small_c, valid = state
+        f0, g0, d0, gg0, s0, small0, stop0 = jax.lax.cond(
             valid,
-            lambda: (f_c, g_c, d_c, gg_c, s_c, jnp.asarray(False)),
+            lambda: (f_c, g_c, d_c, gg_c, s_c, small_c, jnp.asarray(False)),
             _fresh,
         )
 
     def cond(st):
-        _x, _f, _g, _d, _gg, it, stop, _step = st
+        _x, _f, _g, _d, _gg, it, stop, _step, _small_seen = st
         return jnp.logical_and(jnp.logical_not(stop), it < max_iter)
 
     def body(st):
-        x, f, g, d, gg, it, _stop, carried = st
+        x, f, g, d, gg, it, _stop, carried, small_seen = st
         bad = jnp.logical_or(jnp.logical_not(jnp.isfinite(gg)), gg <= GG_FLOOR)
         d = jnp.where(jnp.sum(d * g) >= 0.0, -g, d)  # restart if not a descent dir
-        # On a degenerate iteration (non-finite / underflowed gg) zero the search
-        # direction so the line search accepts step 0 in ONE eval (no wasted
-        # backtracking) — matching torch's pre-line-search break; `use` discards it.
+        # A degenerate iteration evaluates one unrepresentable zero step and stops.
         d = jnp.where(bad, jnp.zeros_like(d), d)
         slope = jnp.sum(d * g)
         step0 = jnp.minimum(
             LS_STEP_MAX, jnp.maximum(carried, LS_STEP_MIN) * LS_STEP_GROW
         )
-        xt, ft, gt, accepted, acc_step = line_search(x, d, f, g, slope, step0)
-        conv = jnp.logical_or(
-            jnp.max(jnp.abs(gt)) < gtol,
-            jnp.abs(ft - f) < ftol * (1.0 + jnp.abs(f)),
+        trial = line_search(x, d, f, g, slope, step0)
+        xt, ft, gt, accepted, acc_step, d = jax.lax.cond(
+            jnp.logical_and(jnp.logical_not(trial[3]), jnp.logical_not(bad)),
+            lambda: (*line_search(x, -g, f, g, -gg, step0), -g),
+            lambda: (*trial, d),
         )
+        conv = jnp.max(jnp.abs(gt)) < gtol
+        small = jnp.abs(ft - f) < ftol * (1.0 + jnp.abs(f))
         beta = jnp.maximum(0.0, jnp.sum(gt * (gt - g)) / (gg + EPS))  # PR+
+        beta = jnp.where(small & ~small_seen, 0.0, beta)
         use = jnp.logical_and(accepted, jnp.logical_not(bad))
         nx = jnp.where(use, xt, x)
         nf = jnp.where(use, ft, f)
@@ -184,14 +193,24 @@ def _cg_minimize(
         # the step is meaningless, and on exhaustion the slot holds the shrunk trial value.
         nstep = jnp.where(use, acc_step, carried)
         stop_next = jnp.logical_or(bad, jnp.logical_or(jnp.logical_not(accepted), conv))
-        return (nx, nf, ng, nd, ngg, it + 1, stop_next, nstep)
+        return (
+            nx,
+            nf,
+            ng,
+            nd,
+            ngg,
+            it + 1,
+            stop_next,
+            nstep,
+            jnp.where(use, small, small_seen),
+        )
 
-    init = (x0, f0, g0, d0, gg0, jnp.asarray(0), stop0, s0)
-    xf, ff, gf, df, ggf, _it, stopf, sf = jax.lax.while_loop(cond, body, init)
+    init = (x0, f0, g0, d0, gg0, jnp.asarray(0), stop0, s0, small0)
+    xf, ff, gf, df, ggf, _it, stopf, sf, smallf = jax.lax.while_loop(cond, body, init)
     if return_state:
         # `stop` is False exactly when the loop exited on the iteration budget, i.e. the
         # solver is still live and the next block can resume it.
-        return xf, (ff, gf, df, ggf, sf, jnp.logical_not(stopf))
+        return xf, (ff, gf, df, ggf, sf, smallf, jnp.logical_not(stopf))
     return xf
 
 

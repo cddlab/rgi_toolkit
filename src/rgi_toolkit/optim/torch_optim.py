@@ -139,7 +139,9 @@ class TorchRestraintOptimizer:
 
         try:
             self._custom_cvg[key] = torch.compile(
-                torch.func.grad_and_value(energy, argnums=0), fullgraph=False
+                torch.func.grad_and_value(energy, argnums=0),
+                fullgraph=False,
+                dynamic=False,  # specs and neighbor capacities have static shapes
             )
         except Exception as exc:
             logger.warning(
@@ -759,9 +761,9 @@ class TorchRestraintOptimizer:
         solver), so ``method='CG'`` is the same algorithm on both backends. ``active``
         is a leaf tensor (requires_grad=True); ``energy_fn()`` returns the scalar
         energy with ``active`` in its graph. Stops early on convergence
-        (``max|grad| < gtol`` or ``|df| < ftol``, mirroring torch LBFGS's
-        tolerance_grad / tolerance_change) or when the line search stalls, so simple
-        restraints finish well under ``max_iter``.
+        (``max|grad| < gtol``) or when the line search stalls. Small energy changes
+        restart the direction once per low-progress stretch; they do not establish
+        stationarity. See ``_cg_config`` for the shared stopping contract.
 
         ``state`` mirrors ``_torch_cg_gpu._cg_minimize_torch``: it lets the caller run the
         CG in blocks (to re-check a dynamic neighbour list) without paying a re-entry
@@ -801,8 +803,9 @@ class TorchRestraintOptimizer:
             d = g.neg()
             gg = torch.sum(g * g)
             carried = LS_STEP_MAX  # warm-started trial step (see _cg_config)
+            small_change_seen = False
         else:
-            f, g, d, gg, carried = state
+            f, g, d, gg, carried, small_change_seen = state
         finished = True  # cleared only if the iteration budget runs out with work left
         for _ in range(max_iter):
             # one host read for both top-of-iteration scalars (gg + descent slope)
@@ -815,27 +818,47 @@ class TorchRestraintOptimizer:
                 dg_v = float(torch.sum(d * g))
             slope = dg_v
             x0 = active.detach().clone()
-            step = min(LS_STEP_MAX, max(carried, LS_STEP_MIN) * LS_STEP_GROW)
+            step0 = min(LS_STEP_MAX, max(carried, LS_STEP_MIN) * LS_STEP_GROW)
             accepted = False
-            for _ in range(max_ls):
-                with torch.no_grad():
-                    delta = step * d
+            for attempt in range(2):
+                if attempt:
+                    d, slope = g.neg(), -gg_v
+                step = step0
+                for _ in range(max_ls):
+                    with torch.no_grad():
+                        delta = step * d
+                        if max_atom_step is not None:
+                            atom_norm = torch.sqrt(
+                                torch.sum(delta * delta, dim=-1, keepdim=True) + EPS
+                            )
+                            delta = delta * torch.clamp(
+                                max_atom_step / atom_norm, max=1.0
+                            )
+                        active.copy_(x0 + delta)
+                    e_t, g_new = value_grad()
+                    stats = [
+                        e_t,
+                        torch.any(active.detach() != x0),
+                        torch.isfinite(active).all() & torch.isfinite(g_new).all(),
+                    ]
                     if max_atom_step is not None:
-                        atom_norm = torch.sqrt(
-                            torch.sum(delta * delta, dim=-1, keepdim=True) + EPS
-                        )
-                        delta = delta * torch.clamp(max_atom_step / atom_norm, max=1.0)
-                    active.copy_(x0 + delta)
-                e_t, g_new = value_grad()
-                if max_atom_step is None:
-                    f_new, predicted = float(e_t), step * slope
-                else:
-                    f_new, predicted = torch.stack((e_t, torch.sum(g * delta))).tolist()
-                if f_new <= f + ARMIJO_C1 * predicted:
-                    accepted = True
+                        stats.append(torch.sum(g * delta))
+                    values = torch.stack(stats).tolist()
+                    f_new, moved, finite = values[:3]
+                    predicted = values[3] if max_atom_step is not None else step * slope
+                    if not moved:
+                        break  # smaller trials cannot restore representable movement
+                    if (
+                        finite
+                        and math.isfinite(f_new)
+                        and f_new <= f + ARMIJO_C1 * predicted
+                    ):
+                        accepted = True
+                        break
+                    step *= BACKTRACK
+                if accepted:
                     break
-                step *= BACKTRACK
-            if not accepted:  # line search exhausted -> converged / stuck
+            if not accepted:  # both directions stalled; retain the last accepted point
                 with torch.no_grad():
                     active.copy_(x0)
                 break
@@ -844,8 +867,12 @@ class TorchRestraintOptimizer:
             gmax_v, pr_num_v = torch.stack(
                 (g_new.abs().max(), torch.sum(g_new * (g_new - g)))
             ).tolist()
-            converged = gmax_v < gtol or abs(f_new - f) < ftol * (1.0 + abs(f))
+            converged = gmax_v < gtol
+            small_change = abs(f_new - f) < ftol * (1.0 + abs(f))
             beta = max(0.0, pr_num_v / (gg_v + EPS))  # gg_v = this iter's gg
+            if small_change and not small_change_seen:
+                beta = 0.0
+            small_change_seen = small_change
             d = g_new.neg() + beta * d  # Polak-Ribiere+ (auto-restart when beta<0)
             f, g, gg = f_new, g_new, torch.sum(g_new * g_new)
             if converged:
@@ -853,7 +880,7 @@ class TorchRestraintOptimizer:
         else:
             # ran out of iterations with the solver still live -> resumable
             finished = False
-        return None if finished else (f, g, d, gg, carried)
+        return None if finished else (f, g, d, gg, carried, small_change_seen)
 
     def energy(self, coords) -> float:
         """Current restraint energy (for verbose stats / finalize)."""

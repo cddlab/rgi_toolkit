@@ -529,6 +529,7 @@ def _get_cvg(mode=0):
             _CVG_BY_MODE[mode] = torch.compile(
                 torch.func.grad_and_value(_ENERGY_BY_MODE[mode], argnums=0),
                 fullgraph=False,
+                dynamic=False,  # specs and neighbor capacities have static shapes
             )
         return _CVG_BY_MODE[mode]
     except Exception as exc:
@@ -551,11 +552,11 @@ def _cg_minimize_torch(
     """Sequential nonlinear CG (Polak-Ribiere+, backtracking Armijo line search, restart
     on non-descent) — the exact algorithm of ``torch_optim._minimize_cg`` but functional:
     ``vg(x) -> (grad, value)``. ``x0`` is the active-site coords. Returns the optimized
-    coords (keeps ``x0`` if non-finite). The early-exit line search reaches arbitrarily
+    coords (rejects non-finite trials). The early-exit line search reaches arbitrarily
     fine steps, so stiff terms (chiral) converge as on CPU; the host scalar reads are
     cheap because each ``vg`` is a fused compiled call.
 
-    ``state`` resumes a previous call's ``(f, g, d, gg, step)``. The caller uses it to run
+    ``state`` resumes ``(f, g, d, gg, step, small_change_seen)``. The caller uses it to run
     the CG in blocks — to re-check a dynamic neighbour list — WITHOUT paying a fresh
     entry evaluation and, more importantly, without discarding the conjugate direction at
     every block boundary. It is only valid when the coordinates have not moved and the
@@ -572,8 +573,9 @@ def _cg_minimize_torch(
         d = -g
         gg = torch.sum(g * g)
         carried = LS_STEP_MAX  # warm-started trial step (see _cg_config)
+        small_change_seen = False
     else:
-        f, g, d, gg, carried = state
+        f, g, d, gg, carried, small_change_seen = state
     finished = True  # cleared only if the iteration budget runs out with work left
     for _ in range(max_iter):
         gg_v, dg_v = torch.stack((gg, torch.sum(d * g))).tolist()
@@ -584,27 +586,45 @@ def _cg_minimize_torch(
             dg_v = float(torch.sum(d * g))
         slope = dg_v
         xbase = x
-        step = min(LS_STEP_MAX, max(carried, LS_STEP_MIN) * LS_STEP_GROW)
+        step0 = min(LS_STEP_MAX, max(carried, LS_STEP_MIN) * LS_STEP_GROW)
         accepted = False
         gt = g
-        for _ in range(max_ls):
-            delta = step * d
-            if max_atom_step is not None:
-                atom_norm = torch.sqrt(
-                    torch.sum(delta * delta, dim=-1, keepdim=True) + EPS
-                )
-                delta = delta * torch.clamp(max_atom_step / atom_norm, max=1.0)
-            xt = xbase + delta
-            gt, e = vg(xt)
-            if max_atom_step is None:
-                f_new, predicted = float(e), step * slope
-            else:
-                f_new, predicted = torch.stack((e, torch.sum(g * delta))).tolist()
-            if f_new <= f + ARMIJO_C1 * predicted:
-                accepted = True
+        for attempt in range(2):
+            if attempt:
+                d, slope = g.neg(), -gg_v
+            step = step0
+            for _ in range(max_ls):
+                delta = step * d
+                if max_atom_step is not None:
+                    atom_norm = torch.sqrt(
+                        torch.sum(delta * delta, dim=-1, keepdim=True) + EPS
+                    )
+                    delta = delta * torch.clamp(max_atom_step / atom_norm, max=1.0)
+                xt = xbase + delta
+                gt, e = vg(xt)
+                stats = [
+                    e,
+                    torch.any(xt != xbase),
+                    torch.isfinite(xt).all() & torch.isfinite(gt).all(),
+                ]
+                if max_atom_step is not None:
+                    stats.append(torch.sum(g * delta))
+                values = torch.stack(stats).tolist()
+                f_new, moved, finite = values[:3]
+                predicted = values[3] if max_atom_step is not None else step * slope
+                if not moved:
+                    break
+                if (
+                    finite
+                    and math.isfinite(f_new)
+                    and f_new <= f + ARMIJO_C1 * predicted
+                ):
+                    accepted = True
+                    break
+                step *= BACKTRACK
+            if accepted:
                 break
-            step *= BACKTRACK
-        if not accepted:  # line search exhausted -> converged / stuck
+        if not accepted:  # both directions stalled; retain the last accepted point
             x = xbase
             break
         carried = step
@@ -612,8 +632,12 @@ def _cg_minimize_torch(
         gmax_v, pr_num_v = torch.stack(
             (gt.abs().max(), torch.sum(gt * (gt - g)))
         ).tolist()
-        converged = gmax_v < gtol or abs(f_new - f) < ftol * (1.0 + abs(f))
+        converged = gmax_v < gtol
+        small_change = abs(f_new - f) < ftol * (1.0 + abs(f))
         beta = max(0.0, pr_num_v / (gg_v + EPS))  # PR+ (gg_v = this iter's gg)
+        if small_change and not small_change_seen:
+            beta = 0.0
+        small_change_seen = small_change
         d = gt.neg() + beta * d
         f, g, gg = f_new, gt, torch.sum(gt * gt)
         if converged:
@@ -624,7 +648,7 @@ def _cg_minimize_torch(
     if not torch.isfinite(x).all():
         return (x0, None) if return_state else x0
     if return_state:
-        return x, (None if finished else (f, g, d, gg, carried))
+        return x, (None if finished else (f, g, d, gg, carried, small_change_seen))
     return x
 
 

@@ -1189,10 +1189,11 @@ Most geometry consumes selection **centroids**; `coords` / `kabsch` instead flow
 `plane` also reads the whole block (a centroid has no plane), and either argument may be a
 reference-backed selection.
 
-`plane`, like `kabsch` and `rmsd`, stop-gradients part of its maths (the plane normal), so its
-gradient is not the derivative of the value in the strict sense — the same deliberate carve-out the
-built-in `plane` / `rmsd` terms make. It converges under CG all the same; what it will not do is
-rotate a group by differentiating through the eigendecomposition. In `plane(A,B)` the plane's normal
+`plane`, like `kabsch` and `rmsd`, detaches the fitted orientation from autodiff. For a
+nondegenerate least-squares fit measured on the same atoms, this still agrees with the derivative
+of the minimized scalar. That equivalence need not hold when one moving group defines the fit
+and another defines the residual; see [gradient conventions](SPEC.md#gradient-conventions).
+In `plane(A,B)` the plane's normal
 is fixed but its **centre is not**, so a free `B` is pulled toward `A` as well; list only `A` in
 `move` (or make `B` reference-backed) for a genuinely fixed plane.
 

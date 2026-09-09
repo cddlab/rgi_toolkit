@@ -20,6 +20,8 @@ Restraint-Guided Inference (RGI) toolkit for diffusion-based structure predictor
 See each tool's guide in [`doc/`](doc/) for install / run details, and
 [`doc/config.md`](doc/config.md) for the full `restraints_config` schema. For common failure modes
 and troubleshooting guidance, see the [`FAQ`](doc/FAQ.md).
+The [`implementation specification`](doc/SPEC.md) covers API contracts, energy and
+gradient conventions, optimizer references, and independent SciPy/E2E validation.
 
 **Ready-to-run samples live in [`example/`](example/)** — 4 restraint types (`distance/`,
 `angle/`, `rmsd/`, `custom/dist-diff/`) × 7 predictors, each a real system with a `run.sh`

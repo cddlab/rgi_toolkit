@@ -31,6 +31,7 @@ jax = [
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
+    "scipy",
     "pyyaml>=6",
     "ruff>=0.15.7",
 ]

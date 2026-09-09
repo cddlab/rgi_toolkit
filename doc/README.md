@@ -3,6 +3,8 @@
 Use the tool-specific guide for installation, config placement, and the run command. Use the
 shared [`restraints_config` reference](config.md) for restraint semantics and defaults. See the
 [FAQ](FAQ.md) for common failure modes and troubleshooting guidance.
+The [implementation specification](SPEC.md) describes the toolkit's API, mathematical
+contracts, optimizer algorithms, and verification against independent implementations.
 
 ## Tool guides
 

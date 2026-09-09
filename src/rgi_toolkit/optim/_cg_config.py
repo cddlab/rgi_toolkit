@@ -13,7 +13,7 @@ from __future__ import annotations
 
 MAX_LS = 20  # max backtracking line-search trials per iteration
 GTOL = 1e-7  # converged when max|grad| < GTOL
-FTOL = 1e-9  # converged when |f_new - f| < FTOL * (1 + |f|)
+FTOL = 1e-9  # restart once on entering |df| < FTOL * (1 + |f|); not convergence
 ARMIJO_C1 = 1e-4  # Armijo sufficient-decrease coefficient
 BACKTRACK = 0.5  # line-search step shrink factor
 GG_FLOOR = 1e-20  # gg <= GG_FLOOR (or non-finite) -> degenerate iteration, stop
@@ -37,8 +37,8 @@ EPS = 1e-12  # denominator guard in the Polak-Ribiere+ beta
 # LS_STEP_MIN is not cosmetic. A cold start guarantees every accepted step is at least
 # BACKTRACK**MAX_LS; a warm start has no such floor, and a_k = min(1, 2*a_{k-1}) * 2**-j_k
 # ratchets down geometrically whenever j >= 2 is sustained. It would then terminate by
-# UNDERFLOWING to a no-op step — delta ~ 0, so Armijo passes trivially, |f_new - f| == 0, and
-# FTOL reports convergence — silently turning slow progress into an early stop. The floor
+# UNDERFLOWING to a no-op step, where Armijo would pass trivially. A trial must now move
+# a representable coordinate; the floor also prevents avoidable stagnation. It
 # restores the cold start's reachability guarantee. The measured steady state is j ~ 1.5 and
 # j == 1 is the fixed point, so this is a tail guard, not the operating point.
 #
@@ -54,7 +54,7 @@ LS_STEP_MIN = BACKTRACK**MAX_LS  # floor on the CARRIED step (see above)
 # All three solvers accept a `state` and hand one back, so a driver can run the CG in blocks
 # (to re-check a dynamic VdW neighbour list) without paying a re-entry energy+grad evaluation
 # or throwing away the conjugate direction at each boundary. The tuple is
-# `(f, g, d, gg, step)` — torch adds nothing else and jax appends a traced `valid` flag,
+# `(f, g, d, gg, step, small_change_seen)` — jax appends a traced `valid` flag,
 # since it cannot branch on python control flow inside a `fori_loop`.
 #
 # It is only valid while the coordinates AND the objective are unchanged. A driver must drop
@@ -64,3 +64,9 @@ LS_STEP_MIN = BACKTRACK**MAX_LS  # floor on the CARRIED step (see above)
 # REBUILD rather than rely on it. Rebuilds are displacement-triggered and therefore rare.
 # A solver returns None (torch) / valid=False (jax) once it has converged, stalled or hit a
 # degenerate iteration: there is then nothing to resume.
+#
+# Small energy changes can coexist with a large gradient (e.g. Rosenbrock). Only GTOL
+# establishes convergence. Entering a run of small changes restarts the direction ONCE;
+# restarting on every small change would discard conjugacy throughout the final approach.
+# The latch survives block boundaries and clears after a larger accepted decrease. A failed
+# line search retries steepest descent once, then returns the last accepted coordinates.

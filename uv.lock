@@ -581,6 +581,7 @@ dev = [
     { name = "pytest" },
     { name = "pyyaml" },
     { name = "ruff" },
+    { name = "scipy" },
 ]
 
 [package.metadata]
@@ -602,6 +603,7 @@ dev = [
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pyyaml", specifier = ">=6" },
     { name = "ruff", specifier = ">=0.15.7" },
+    { name = "scipy" },
 ]
 
 [[package]]

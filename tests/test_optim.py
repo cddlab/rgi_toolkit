@@ -1939,6 +1939,7 @@ def _mode_args(opt, coords):
         v["bg_r"],
         v["scale"],
         v["weight"],
+        v["chemistry"],
     )
     neighbours, pair_factor = build_active_vdw_pairs(
         active,
@@ -1947,8 +1948,17 @@ def _mode_args(opt, coords):
         av["excluded_codes"],
         av["dmax"],
         av["max_neighbors"],
+        av["scale"],
+        av["chemistry"],
     )
-    active_vdw = (neighbours, pair_factor, av["radii"], av["scale"], av["weight"])
+    active_vdw = (
+        neighbours,
+        pair_factor,
+        av["radii"],
+        av["scale"],
+        av["weight"],
+        av["chemistry"],
+    )
     return (
         active,
         bg_pos,
@@ -1982,7 +1992,7 @@ def test_compiled_vdw_energy_matches_eager(mode):
     base = g._ENERGY_BY_MODE[mode]
     extra = extras[mode]
     ge, ve = torch.func.grad_and_value(base, argnums=0)(active, prepared, *extra)
-    comp = torch.compile(torch.func.grad_and_value(base, argnums=0))
+    comp = torch.compile(torch.func.grad_and_value(base, argnums=0), dynamic=False)
     gc, vc = comp(active, prepared, *extra)
     assert float(ve) > 0.0, "degenerate fixture: the VdW term contributes nothing"
     assert torch.allclose(ge, gc, atol=1e-8), (ge - gc).abs().max()
@@ -2018,10 +2028,7 @@ def test_custom_compiled_energy_includes_vdw(mode):
     if mode & 1:
         ref = ref + opt._vdw_energy(active, bg_pos, extras[1][2:4])
     if mode & 2:
-        neighbours, pair_factor, radii, scale, weight = extras[2]
-        ref = ref + active_vdw_pair_energy(
-            active, neighbours, pair_factor, radii, scale, weight
-        )
+        ref = ref + active_vdw_pair_energy(active, *extras[2])
     assert abs(float(value) - float(ref)) < 1e-8, (float(value), float(ref))
 
 
