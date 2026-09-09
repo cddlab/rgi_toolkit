@@ -1,31 +1,15 @@
-"""GPU conjugate-gradient for the torch backend: same correct early-exit CG as the CPU
-path, but with a ``torch.compile``-d (inductor-fused) energy+grad so it stops losing to CPU.
+"""Compiled Torch energy/gradient evaluation for the shared SciPy-style CG.
 
-Why this shape. A single restraint energy+grad eval is **launch-bound** on GPU: it is
-dozens of tiny kernels whose launch latency dwarfs their compute (a 690-atom RMSD Kabsch,
-or ~200 conformer terms), so the eager CG (`torch_optim._minimize_cg`) ran ~1.6-2.8x
-slower than torch-on-CPU. A naive "sync-free" eager rewrite does NOT help: a vmap'd
-fixed-width line search either over-computes (large width -> compute-bound RMSD loses) or
-cannot reach the fine backtracking steps a stiff term needs (small width -> the chiral
-term silently fails to converge).
+The early-exit search in ``optim/_cg.py`` is host-controlled, with device-resident
+coordinates and gradients. ``torch.func.grad_and_value`` plus ``torch.compile``
+fuses the small energy kernels. The compilation cache specializes static shapes;
+prepared masks and dynamic neighbor arrays are inputs, so artifacts can be reused
+across denoising steps. This execution choice does not change PR+ or strong Wolfe.
 
-The torch analogue that is BOTH fast AND correct:
-  * keep the proven SEQUENTIAL early-exit line search (reaches arbitrarily fine steps, so
-    stiff chiral converges exactly like the CPU/jax path) -- it has host syncs, but they
-    are cheap once the eval itself is cheap;
-  * make the eval cheap: ``torch.func.grad_and_value(_energy)`` wrapped ONCE in
-    ``torch.compile`` so inductor FUSES the dozens of tiny fwd+bwd kernels into far fewer
-    launches -- which is what kills the launch-bound cost (measured: conformer x0.32 /
-    combined x0.49 vs torch-CPU; rmsd ~parity). It is compiled a single time at module
-    scope and reused: the changing data (``prepared`` masks, with the noise gate
-    pre-folded in by the caller so there is no python-float ``sigma``) is passed as an
-    ARGUMENT, not a closure, so dynamo guards on shapes only and the artifact is reused
-    across diffusion steps and structures of the same shape.
-
-NB: the default (inductor) compile mode is deliberate -- ``mode="reduce-overhead"``
-(CUDA graphs) is ~5x SLOWER here because the CG feeds a freshly-allocated trial tensor
-every line-search step, which makes the CUDA-graph tree re-record each call; plain
-inductor fusion has no such static-input requirement.
+The default Inductor mode is deliberate: trial coordinates use fresh allocations,
+which caused repeated CUDA-graph recording under ``mode="reduce-overhead"`` in the
+previous solver. Current timings must be measured separately from those historical
+Armijo-engine results.
 
 The two DYNAMIC VdW terms -- the fixed background (default boltz/protenix conformer) and the
 active-active polymer neighbour list -- are folded into further compiled energies, one per
@@ -42,7 +26,6 @@ to the eager functional CG -- still the correct early-exit algorithm.
 from __future__ import annotations
 
 import logging
-import math
 import os
 
 import torch
@@ -56,18 +39,7 @@ from rgi_toolkit.optim._cell_list import (
     CELL_HASH_PRIMES,
     CELL_OFFSETS,
 )
-from rgi_toolkit.optim._cg_config import (
-    ARMIJO_C1,
-    BACKTRACK,
-    EPS,
-    FTOL,
-    GG_FLOOR,
-    GTOL,
-    LS_STEP_GROW,
-    LS_STEP_MAX,
-    LS_STEP_MIN,
-    MAX_LS,
-)
+from rgi_toolkit.optim._cg_config import EPS, GTOL
 
 logger = logging.getLogger(__name__)
 
@@ -542,114 +514,28 @@ def _cg_minimize_torch(
     vg,
     x0,
     max_iter,
-    max_ls=MAX_LS,
     gtol=GTOL,
-    ftol=FTOL,
     max_atom_step=None,
     state=None,
     return_state=False,
+    return_info=False,
+    **search_options,
 ):
-    """Sequential nonlinear CG (Polak-Ribiere+, backtracking Armijo line search, restart
-    on non-descent) — the exact algorithm of ``torch_optim._minimize_cg`` but functional:
-    ``vg(x) -> (grad, value)``. ``x0`` is the active-site coords. Returns the optimized
-    coords (rejects non-finite trials). The early-exit line search reaches arbitrarily
-    fine steps, so stiff terms (chiral) converge as on CPU; the host scalar reads are
-    cheap because each ``vg`` is a fused compiled call.
+    """Functional entry to the shared SciPy-style strict-Wolfe CG solver."""
+    from rgi_toolkit.optim._cg import torch_cg
 
-    ``state`` resumes ``(f, g, d, gg, step, small_change_seen)``. The caller uses it to run
-    the CG in blocks — to re-check a dynamic neighbour list — WITHOUT paying a fresh
-    entry evaluation and, more importantly, without discarding the conjugate direction at
-    every block boundary. It is only valid when the coordinates have not moved and the
-    objective is unchanged since that state was produced; the caller must pass ``None``
-    after a neighbour rebuild. With ``return_state`` the second return value is the live
-    state, or ``None`` when the solver terminated (converged, stalled or degenerate) and
-    there is nothing to resume."""
-    x = x0
-    if state is None:
-        g, e = vg(x)
-        f = float(e)
-        if float(g.abs().max()) < gtol:
-            return (x, None) if return_state else x
-        d = -g
-        gg = torch.sum(g * g)
-        carried = LS_STEP_MAX  # warm-started trial step (see _cg_config)
-        small_change_seen = False
-    else:
-        f, g, d, gg, carried, small_change_seen = state
-    finished = True  # cleared only if the iteration budget runs out with work left
-    for _ in range(max_iter):
-        gg_v, dg_v = torch.stack((gg, torch.sum(d * g))).tolist()
-        if not math.isfinite(gg_v) or gg_v <= GG_FLOOR:
-            break
-        if dg_v >= 0.0:  # not a descent direction -> restart (rare)
-            d = g.neg()
-            dg_v = float(torch.sum(d * g))
-        slope = dg_v
-        xbase = x
-        step0 = min(LS_STEP_MAX, max(carried, LS_STEP_MIN) * LS_STEP_GROW)
-        accepted = False
-        gt = g
-        for attempt in range(2):
-            if attempt:
-                d, slope = g.neg(), -gg_v
-            step = step0
-            for _ in range(max_ls):
-                delta = step * d
-                if max_atom_step is not None:
-                    atom_norm = torch.sqrt(
-                        torch.sum(delta * delta, dim=-1, keepdim=True) + EPS
-                    )
-                    delta = delta * torch.clamp(max_atom_step / atom_norm, max=1.0)
-                xt = xbase + delta
-                gt, e = vg(xt)
-                stats = [
-                    e,
-                    torch.any(xt != xbase),
-                    torch.isfinite(xt).all() & torch.isfinite(gt).all(),
-                ]
-                if max_atom_step is not None:
-                    stats.append(torch.sum(g * delta))
-                values = torch.stack(stats).tolist()
-                f_new, moved, finite = values[:3]
-                predicted = values[3] if max_atom_step is not None else step * slope
-                if not moved:
-                    break
-                if (
-                    finite
-                    and math.isfinite(f_new)
-                    and f_new <= f + ARMIJO_C1 * predicted
-                ):
-                    accepted = True
-                    break
-                step *= BACKTRACK
-            if accepted:
-                break
-        if not accepted:  # both directions stalled; retain the last accepted point
-            x = xbase
-            break
-        carried = step
-        x = xt
-        gmax_v, pr_num_v = torch.stack(
-            (gt.abs().max(), torch.sum(gt * (gt - g)))
-        ).tolist()
-        converged = gmax_v < gtol
-        small_change = abs(f_new - f) < ftol * (1.0 + abs(f))
-        beta = max(0.0, pr_num_v / (gg_v + EPS))  # PR+ (gg_v = this iter's gg)
-        if small_change and not small_change_seen:
-            beta = 0.0
-        small_change_seen = small_change
-        d = gt.neg() + beta * d
-        f, g, gg = f_new, gt, torch.sum(gt * gt)
-        if converged:
-            break
-    else:
-        # ran out of iterations with the solver still live -> resumable
-        finished = False
-    if not torch.isfinite(x).all():
-        return (x0, None) if return_state else x0
+    out, result = torch_cg(
+        vg,
+        x0,
+        max_iter,
+        gtol=gtol,
+        max_atom_step=max_atom_step,
+        state=state,
+        **search_options,
+    )
     if return_state:
-        return x, (None if finished else (f, g, d, gg, carried, small_change_seen))
-    return x
+        return out, result
+    return (out, result.info) if return_info else out
 
 
 def gpu_cg(

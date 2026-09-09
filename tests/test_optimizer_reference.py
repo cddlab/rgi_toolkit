@@ -172,94 +172,48 @@ def test_solvers_match_scipy_and_analytic_solution(reference, backend, method):
 
 
 @pytest.mark.parametrize("backend", CG_BACKENDS)
-def test_small_change_restart_survives_block_boundaries(backend):
+def test_scipy_history_and_counts_survive_block_boundaries(backend):
     p = problem("rosenbrock")
-    # A large restart threshold enters the low-progress stretch immediately.
-    whole, _ = run_cg(backend, p.energy, p.initial, 60, ftol=1e6)
-    out, state = run_cg(backend, p.energy, p.initial, 1, ftol=1e6)
-    assert state is not None
-    assert bool(state[5]), "the restart latch must be part of resumable state"
+    whole, whole_state = run_cg(backend, p.energy, p.initial, 60)
+    out, state = run_cg(backend, p.energy, p.initial, 1)
     advance = (
-        jax.jit(
-            lambda x, s: _cg_minimize(
-                p.energy, x, 1, state=s, ftol=1e6, return_state=True
-            )
-        )
+        jax.jit(lambda x, s: _cg_minimize(p.energy, x, 1, state=s, return_state=True))
         if backend == "jax"
-        else lambda x, s: run_cg(backend, p.energy, x, 1, state=s, ftol=1e6)
+        else lambda x, s: run_cg(backend, p.energy, x, 1, state=s)
     )
     for _ in range(59):
+        if not bool(state.valid):
+            break
         out, state = advance(out, state)
     np.testing.assert_allclose(as_numpy(out), as_numpy(whole), rtol=0, atol=1e-9)
+    assert int(state.info.nit) == int(whole_state.info.nit)
+    assert int(state.info.nfev) == int(whole_state.info.nfev)
+    assert float(state.previous_f) == pytest.approx(float(whole_state.previous_f))
 
 
 @pytest.mark.parametrize("backend", CG_BACKENDS)
-def test_failed_conjugate_direction_retries_steepest_descent(backend):
-    p = problem("isotropic")
-    gradient = p.gradient(p.initial)
-    # A huge, still descending conjugate direction exhausts two trials. Its SD retry
-    # reaches the analytic solution in one trial, so a premature return is observable.
-    if backend == "jax":
-        jax.config.update("jax_enable_x64", True)
-        g = jnp.asarray(gradient)
-        state = (
-            jnp.asarray(p.value(p.initial)),
-            g,
-            -1e6 * g,
-            jnp.sum(g * g),
-            jnp.asarray(1.0),
-            jnp.asarray(False),
-            jnp.asarray(True),
-        )
-    else:
-        g = torch.tensor(gradient)
-        state = (p.value(p.initial), g, -1e6 * g, torch.sum(g * g), 1.0, False)
-    out, _ = run_cg(backend, p.energy, p.initial, 2, state=state, max_ls=2)
-    np.testing.assert_allclose(as_numpy(out), p.solution, rtol=0, atol=1e-12)
-
-
-@pytest.mark.parametrize("backend", CG_BACKENDS)
-def test_finite_energy_with_nonfinite_trial_gradient_is_rejected(backend):
+def test_nonfinite_trial_cannot_replace_last_accepted_point(backend):
     initial = np.array([1.0, 2.0, 3.0])
     sqrt = jnp.sqrt if backend == "jax" else torch.sqrt
 
-    def energy(x):
-        return sqrt(x[0])
-
-    # The first trial reaches sqrt(0): its energy passes Armijo, but its gradient
-    # is infinite. Backtracking must retain a finite-gradient accepted point.
-    if backend == "jax":
-        jax.config.update("jax_enable_x64", True)
-        g = jnp.array([0.5, 0.0, 0.0])
-        state = (
-            jnp.asarray(1.0),
-            g,
-            -2 * g,
-            jnp.sum(g * g),
-            jnp.asarray(1.0),
-            jnp.asarray(False),
-            jnp.asarray(True),
-        )
-    else:
-        g = torch.tensor([0.5, 0.0, 0.0], dtype=torch.float64)
-        state = (1.0, g, -2 * g, torch.sum(g * g), 1.0, False)
-    out, state = run_cg(backend, energy, initial, 1, state=state)
-    np.testing.assert_array_equal(as_numpy(out), [0.5, 2.0, 3.0])
-    assert np.isfinite(as_numpy(state[1])).all()
+    # On sqrt(x), every feasible descending step increases the slope magnitude:
+    # strong Wolfe is impossible. The singular/negative trials must not be accepted.
+    out, state = run_cg(backend, lambda x: sqrt(x[0]), initial, 10)
+    np.testing.assert_array_equal(as_numpy(out), initial)
+    assert not bool(state.valid)
+    assert int(state.info.nit) == 0
+    assert np.isfinite(as_numpy(state.g)).all()
 
 
 @pytest.mark.parametrize("backend", CG_BACKENDS)
 def test_unrepresentable_step_returns_last_point(backend):
     initial = np.full(3, 1e16)
-    # The supplied derivative is finite and nonzero, but a unit update cannot move x.
-    if backend == "jax":
-        jax.config.update("jax_enable_x64", True)
-        energy = jnp.sum
-    else:
-        energy = torch.sum
+    # A constant nonzero slope cannot satisfy strong Wolfe, including rounded trials.
+    energy = jnp.sum if backend == "jax" else torch.sum
     out, state = run_cg(backend, energy, initial, 10)
     np.testing.assert_array_equal(as_numpy(out), initial)
-    assert (state is None) if backend != "jax" else not bool(state[-1])
+    assert not bool(state.valid)
+    assert int(state.info.nit) == 0
 
 
 @pytest.mark.gpu
@@ -270,8 +224,53 @@ def test_cuda_compiled_cg_matches_scipy():
     reference = minimize(
         p.value, p.initial, jac=p.gradient, method="CG", options={"gtol": 1e-9}
     )
-    compiled = torch.compile(torch.func.grad_and_value(p.energy), fullgraph=True)
-    out = _cg_minimize_torch(compiled, torch.tensor(p.initial, device="cuda"), MAX_ITER)
+    # Prepare constants before grad/compile, as the production energy adapters do.
+    # NumPy conversion inside a bound method trips Torch 2.8's grad-wrapper guards.
+    target = torch.tensor(p.solution, device="cuda")
+    matrix = torch.tensor(p.matrix, device="cuda")
+
+    def energy(x):
+        delta = x - target
+        return 0.5 * delta @ matrix @ delta + 0.25
+
+    compiled = torch.compile(
+        torch.func.grad_and_value(energy), fullgraph=True, dynamic=False
+    )
+    out, info = _cg_minimize_torch(
+        compiled, torch.tensor(p.initial, device="cuda"), MAX_ITER, return_info=True
+    )
     out = as_numpy(out)
     np.testing.assert_allclose(out, reference.x, rtol=0, atol=1e-3)
     assert np.max(np.abs(p.gradient(out))) < 1e-6
+    assert float(info.grad_norm) == pytest.approx(
+        np.max(np.abs(p.gradient(out))), abs=1e-10
+    )
+
+
+@pytest.mark.gpu
+def test_jax_gpu_scan_cg_matches_scipy():
+    jax.config.update("jax_enable_x64", True)
+    if not any(d.platform == "gpu" for d in jax.devices()):
+        pytest.skip("requires JAX GPU")
+    from rgi_toolkit import CGStatus
+
+    p = problem("coupled256")
+    reference = minimize(
+        p.value, p.initial, jac=p.gradient, method="CG", options={"gtol": 1e-7}
+    )
+
+    @jax.jit
+    def scan(x):
+        return jax.lax.scan(
+            lambda x, _: _cg_minimize(p.energy, x, MAX_ITER, return_info=True),
+            x,
+            None,
+            length=2,
+        )
+
+    out, infos = scan(jnp.asarray(p.initial))
+    out.block_until_ready()
+    np.testing.assert_allclose(out, reference.x, rtol=0, atol=1e-3)
+    assert np.max(np.abs(p.gradient(np.asarray(out)))) < 1e-6
+    np.testing.assert_array_equal(infos.status, CGStatus.CONVERGED)
+    assert int(infos.nit[1]) == 0 and int(infos.nfev[1]) == 1

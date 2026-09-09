@@ -67,6 +67,8 @@ def test_solver_objective_tracks_new_contacts(backend, method, dynamic):
 
     spec = _distance_objective()
     spec.vdw_neighbor_skin = 0.0
+    # Isolate scoring from the strict step-bound failure policy tested below.
+    spec.vdw_max_atom_step = 20.0
     coords = np.array(
         [[0.0, 0.0, 0.0], [12.0, 0.0, 0.0], [10.0, 0.0, 0.0], [14.0, 0.0, 0.0]]
     )
@@ -217,6 +219,7 @@ def test_torch_scatter_accepts_autograd_leaf_and_fixed_background():
     from rgi_toolkit.spec import VdwConfig
 
     spec = _distance_objective()
+    spec.vdw_max_atom_step = 2.0
     spec.vdw_config = VdwConfig(
         weight=1.0,
         ligand_local=np.array([0]),
@@ -932,7 +935,10 @@ def test_torch_vdw_pushes_ligand_off_fixed_protein():
     elements[n] = 6  # a carbon protein atom (heavy -> VdW background)
 
     spec = build_spec(
-        [lc], [], {"vdw": {"weight": 1.0, "scale": 0.9}}, elements=elements
+        [lc],
+        [],
+        {"vdw": {"weight": 1.0, "scale": 0.9, "max_atom_step": 10.0}},
+        elements=elements,
     )
     assert spec.vdw_config is not None
     assert n in set(int(x) for x in spec.vdw_config.background_global)
@@ -986,7 +992,7 @@ def test_jax_vdw_pushes_ligand_off_fixed_protein():
     spec = build_spec(
         [lc],
         [],
-        {"vdw": {"weight": 1.0, "scale": 0.9}},
+        {"vdw": {"weight": 1.0, "scale": 0.9, "max_atom_step": 10.0}},
         elements=elements,
         conf_start_sigma=1e30,
     )
@@ -1033,7 +1039,9 @@ def test_torch_interligand_vdw_separates_two_ligands():
     lcB = LigandConf(
         mol=m, conf_coords=c, global_indices=np.arange(n) + n, conformer_restraints=True
     )
-    spec = build_spec([lcA, lcB], [], {"vdw": {"weight": 1.0, "scale": 0.9}})
+    spec = build_spec(
+        [lcA, lcB], [], {"vdw": {"weight": 1.0, "scale": 0.9, "max_atom_step": 10.0}}
+    )
     assert spec.vdw is not None and spec.vdw.idx.shape[0] == n * n
     assert spec.vdw_config is None  # no elements -> inter-ligand only
 
@@ -1077,7 +1085,10 @@ def test_jax_interligand_vdw_separates_two_ligands():
         mol=m, conf_coords=c, global_indices=np.arange(n) + n, conformer_restraints=True
     )
     spec = build_spec(
-        [lcA, lcB], [], {"vdw": {"weight": 1.0, "scale": 0.9}}, conf_start_sigma=1e30
+        [lcA, lcB],
+        [],
+        {"vdw": {"weight": 1.0, "scale": 0.9, "max_atom_step": 10.0}},
+        conf_start_sigma=1e30,
     )
     assert spec.vdw is not None and spec.vdw_config is None
 
@@ -1646,7 +1657,10 @@ def test_dynamic_vdw_pair_energy_matches_optimizer():
         elements[i] = atom.GetAtomicNum()
     elements[n] = 6  # a heavy "protein" background atom
     spec = build_spec(
-        [lc], [], {"vdw": {"weight": 1.0, "scale": 0.9}}, elements=elements
+        [lc],
+        [],
+        {"vdw": {"weight": 1.0, "scale": 0.9, "max_atom_step": 10.0}},
+        elements=elements,
     )
     assert spec.vdw_config is not None  # dynamic fixed-background VdW
 
@@ -2073,7 +2087,7 @@ def test_gpu_cg_matches_cpu_minimum():
 
 
 @pytest.mark.parametrize("weight", [1.0, 32.0])
-def test_torch_vdw_cg_step_cap_prevents_overshoot(weight):
+def test_torch_vdw_cg_step_cap_without_wolfe_point_stops(weight):
     torch = pytest.importorskip("torch")
     from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
     from rgi_toolkit.spec import RestraintSpec, VdwArrays
@@ -2092,14 +2106,23 @@ def test_torch_vdw_cg_step_cap_prevents_overshoot(weight):
     )
     coords = torch.tensor([[0.0, 0.0, 0.0], [0.5, 0.0, 0.0]], dtype=torch.float64)
 
-    TorchRestraintOptimizer(spec, max_iter=100, method="CG").minimize(coords)
+    _, info = TorchRestraintOptimizer(spec, max_iter=100, method="CG").minimize(
+        coords, return_info=True
+    )
     distance = float(torch.linalg.norm(coords[0] - coords[1]))
 
-    assert 2.5 <= distance <= 2.75
+    from rgi_toolkit import CGStatus
+
+    # Each atom can move only .1 A, reducing the overlap from 2.05 to >=1.85 A.
+    # Its slope magnitude stays >=1.85/2.05 > c2=.4: no Wolfe step exists.
+    assert 1.85 / 2.05 > 0.4
+    assert distance == 0.5
+    assert int(info.status) == CGStatus.LINE_SEARCH_FAILED
+    assert int(info.nit) == 0
 
 
 @pytest.mark.parametrize("weight", [1.0, 32.0])
-def test_jax_vdw_cg_step_cap_prevents_overshoot(weight):
+def test_jax_vdw_cg_step_cap_without_wolfe_point_stops(weight):
     jax = pytest.importorskip("jax")
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
@@ -2121,10 +2144,19 @@ def test_jax_vdw_cg_step_cap_prevents_overshoot(weight):
     )
     coords = jnp.asarray([[0.0, 0.0, 0.0], [0.5, 0.0, 0.0]])
 
-    coords = make_minimizer(spec, max_iter=100, method="CG")(coords, 0.0)
+    coords, info = make_minimizer(spec, max_iter=100, method="CG", return_info=True)(
+        coords, 0.0
+    )
     distance = float(jnp.linalg.norm(coords[0] - coords[1]))
 
-    assert 2.5 <= distance <= 2.75
+    from rgi_toolkit import CGStatus
+
+    # Each atom can move only .1 A, reducing the overlap from 2.05 to >=1.85 A.
+    # Its slope magnitude stays >=1.85/2.05 > c2=.4: no Wolfe step exists.
+    assert 1.85 / 2.05 > 0.4
+    assert distance == 0.5
+    assert int(info.status) == CGStatus.LINE_SEARCH_FAILED
+    assert int(info.nit) == 0
 
 
 def test_torch_dynamic_vdw_rebuilds_before_new_contact():
@@ -2162,16 +2194,14 @@ def test_torch_dynamic_vdw_rebuilds_before_new_contact():
             max_neighbors=4,
         ),
         conf_start_sigma=float("inf"),
-        vdw_max_atom_step=0.1,
-        vdw_neighbor_rebuild_interval=4,
-        # Pinned, not inherited: the fixture depends on the pair at 5.3 A being OUTSIDE the
-        # built list (dmax 5.0, r_min 2.55, movement 0.4 -> cutoff max(5.0, 4.95) = 5.0). A
-        # larger default skin would list it from the first build and the test would pass
-        # vacuously, verifying nothing about the rebuild.
-        vdw_neighbor_skin=2.0,
+        vdw_max_atom_step=10.0,
+        vdw_neighbor_rebuild_interval=1,
+        # Initial distance 15 A exceeds cutoff 2.55 + 10 = 12.55 A.
+        # The first accepted move triggers a rebuild before the contact turns on.
+        vdw_neighbor_skin=0.0,
     )
     coords = torch.tensor(
-        [[5.3, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+        [[15.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
         dtype=torch.float64,
     )
 
@@ -2218,15 +2248,13 @@ def test_jax_dynamic_vdw_rebuilds_before_new_contact():
             max_neighbors=4,
         ),
         conf_start_sigma=float("inf"),
-        vdw_max_atom_step=0.1,
-        vdw_neighbor_rebuild_interval=4,
-        # Pinned, not inherited: the fixture depends on the pair at 5.3 A being OUTSIDE the
-        # built list (dmax 5.0, r_min 2.55, movement 0.4 -> cutoff max(5.0, 4.95) = 5.0). A
-        # larger default skin would list it from the first build and the test would pass
-        # vacuously, verifying nothing about the rebuild.
-        vdw_neighbor_skin=2.0,
+        vdw_max_atom_step=10.0,
+        vdw_neighbor_rebuild_interval=1,
+        # Initial distance 15 A exceeds cutoff 2.55 + 10 = 12.55 A.
+        # The first accepted move triggers a rebuild before the contact turns on.
+        vdw_neighbor_skin=0.0,
     )
-    coords = jnp.asarray([[5.3, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+    coords = jnp.asarray([[15.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
 
     coords = make_minimizer(spec, max_iter=100, method="CG")(coords, 0.0)
     fresh_distance = float(jnp.linalg.norm(coords[0] - coords[2]))
@@ -2273,82 +2301,17 @@ def test_torch_dynamic_vdw_stops_rebuilding_after_convergence(monkeypatch):
     assert calls == 1
 
 
-def test_cg_warm_start_cuts_line_search_evals():
-    """Regression pin for the line-search warm start (see optim/_cg_config.py).
-
-    ``e(x) = 0.5 * sum(k_i * x_i**2)`` with a 16:1 curvature ratio: a unit step along
-    ``-grad`` overshoots the stiff axis, so Armijo accepts only around 2**-4 and the FIRST
-    iteration pays 5 evaluations getting there. Every later iteration needs the same scale.
-    A cold start re-derives it every time (~5 x 20 = ~100 evaluations); carrying the step
-    costs 5 + ~2 per iteration (measured 42). The bound below separates the two.
-
-    The curvature ratio is deliberately moderate. At 64:1 this solver does not converge at
-    all — Armijo only asks for *sufficient* decrease, so a step that reflects the stiff
-    coordinate from +1 to -1 is accepted on the strength of the soft axes alone. That is
-    ordinary steepest-descent behaviour, unrelated to the warm start, and it would make the
-    energy assertion below untestable.
-    """
-    torch = pytest.importorskip("torch")
-    from rgi_toolkit.optim._torch_cg_gpu import _cg_minimize_torch
-
-    k = torch.tensor([16.0, 1.0, 1.0], dtype=torch.float64)
-
-    def energy(x):
-        return 0.5 * torch.sum(k * x * x)
-
-    calls = 0
-
-    def vg(x):
-        nonlocal calls
-        calls += 1
-        return torch.func.grad_and_value(energy)(x)
-
-    x = _cg_minimize_torch(vg, torch.ones(3, dtype=torch.float64), 20)
-    assert calls <= 60, f"line search cost {calls} evaluations (cold start costs ~100)"
-    # keeps a solver that "saves" evaluations by stopping early from passing
-    assert float(energy(x)) < 0.01, "warm start must still reach the minimum"
-
-
-def test_cg_warm_start_recovers_after_shrinking():
-    """The carried step must be able to grow back, not ratchet monotonically down.
-
-    Optimising the stiff quadratic drives the accepted step to ~2**-6; the returned point
-    is then used as the start of a run on an ISOTROPIC quadratic, where step 1.0 is
-    optimal. With growth capped at one backtrack per iteration the solver climbs back
-    within a few iterations, so a handful of iterations suffices to converge. Without any
-    growth the step would stay at 2**-6 forever and this would not converge.
-    """
-    torch = pytest.importorskip("torch")
-    from rgi_toolkit.optim._torch_cg_gpu import _cg_minimize_torch
-
-    def easy(x):
-        return 0.5 * torch.sum(x * x)
-
-    def vg(x):
-        return torch.func.grad_and_value(easy)(x)
-
-    x0 = torch.full((3,), 0.5, dtype=torch.float64)
-    x = _cg_minimize_torch(vg, x0, 8)
-    assert float(easy(x)) < 1e-12, (
-        "isotropic quadratic must converge in a few iterations"
-    )
-
-
 @pytest.mark.parametrize(
     "skin,expect_rebuilds",
-    [(2.0, 1), (0.5, 3)],  # travel is 1.5 A: under a 2.0 skin, over a 0.5 one
+    [(2.0, 1), (0.5, 2)],  # travel is 1.5 A: under a 2.0 skin, over a 0.5 one
 )
 def test_torch_dynamic_vdw_rebuild_follows_measured_displacement(
     monkeypatch, skin, expect_rebuilds
 ):
-    """The neighbour list is rebuilt on MEASURED displacement, not every N iterations.
+    """A 1.5 A translation takes two Wolfe steps under a 1 A per-step bound.
 
-    A distance restraint drags the ligand atom 1.5 A while ``max_atom_step=0.1`` forces at
-    least 15 iterations, i.e. at least 4 staleness checks at ``interval=4``. With a 2.0 A
-    skin the atom never travels far enough and the initial list stands; with a 0.5 A skin it
-    crosses the budget repeatedly. The background atom is parked 20 A away so VdW never
-    interferes with the motion, and the movement assertion stops a solver that simply
-    stalls from satisfying the ``calls == 1`` case for the wrong reason.
+    Check after every accepted step. A 2 A skin retains the initial list; a .5 A
+    skin requires rebuilding after the first 1 A step. Both runs must converge.
     """
     torch = pytest.importorskip("torch")
     from rgi_toolkit.optim import _torch_cg_gpu
@@ -2394,8 +2357,8 @@ def test_torch_dynamic_vdw_rebuild_follows_measured_displacement(
             max_neighbors=4,
         ),
         conf_start_sigma=float("inf"),
-        vdw_max_atom_step=0.1,
-        vdw_neighbor_rebuild_interval=4,
+        vdw_max_atom_step=1.0,
+        vdw_neighbor_rebuild_interval=1,
         vdw_neighbor_skin=skin,
     )
     coords = torch.tensor(

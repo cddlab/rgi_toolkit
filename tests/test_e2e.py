@@ -620,7 +620,7 @@ def test_intramolecular_vdw_matches_dense_scipy(solver, capsys):
         {
             "conformer_restraints_config": {
                 "relax_force_field": {"ligand": "none"},
-                "vdw": {"mode": "intramolecular", "weight": 0.04},
+                "vdw": {"mode": "intramolecular", "weight": 0.04, "max_atom_step": 2.0},
             }
         },
         solver,
@@ -649,7 +649,7 @@ def test_dynamic_vdw_new_contacts_match_dense_scipy(solver, capsys):
     ids = (1, 3, 5)
     coords = np.full((6, 3), 20.0)
     # Initial energy lies below the far-side stationary point. All monotone solvers
-    # can therefore be compared in the same basin, with no contact initially listed.
+    # can therefore be compared in the same basin, with no initial clash.
     coords[list(ids)] = [[1, 0, 0], [8, 0, 0], [15, 0, 0]]
     elements = np.zeros(6, dtype=int)
     elements[list(ids)] = 6
@@ -681,7 +681,8 @@ def test_dynamic_vdw_new_contacts_match_dense_scipy(solver, capsys):
                     "weight": 0.04,
                     "dmax": 0.5,
                     "neighbor_skin": 0.0,
-                    "neighbor_rebuild_interval": 4,
+                    "neighbor_rebuild_interval": 1,
+                    "max_atom_step": 4.0,
                 },
             },
             "custom_restraints_config": [{"fn": pull}],

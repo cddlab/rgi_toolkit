@@ -523,7 +523,8 @@ def _typed_optimizer_spec(custom=False):
         get_elements=lambda: np.array([30, 8, 6]),
     )
     config = {
-        "conformer_restraints_config": {"vdw": {}},
+        # This fixture checks typed scoring and caches, independently of cap failure.
+        "conformer_restraints_config": {"vdw": {"max_atom_step": 2.0}},
         "distance_restraints_config": [
             {
                 "atom_selection1": "index 0",

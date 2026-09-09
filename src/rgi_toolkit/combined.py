@@ -63,6 +63,7 @@ class CombinedRestraints:
         self._backend = None
         self._optimizer = None
         self._minimize_fn = None
+        self._minimize_info_fn = None
         # custom restraints added in code via add_custom() (the throwaway / Pythonic path).
         # Kept separate from config so set_config does not wipe them; setup() merges them
         # into cfg.custom_data before resolving + building the spec.
@@ -152,6 +153,7 @@ class CombinedRestraints:
         self.spec = None
         self._optimizer = None
         self._minimize_fn = None
+        self._minimize_info_fn = None
         if config is not None:
             self.set_config(config)
         cfg = self.config
@@ -503,30 +505,60 @@ class CombinedRestraints:
     def is_active(self) -> bool:
         return self.spec is not None and self.spec.is_active()
 
-    def get_minimizer(self):
+    def _validate_return_info(self, return_info):
+        if return_info and (self.config.method or "cg").lower() not in (
+            "cg",
+            "ncg",
+            "nonlinear-cg",
+            "nonlinearcg",
+        ):
+            raise ValueError("return_info is supported only for method='cg'")
+
+    def get_minimizer(self, *, return_info=False):
         """Return the pure ``(coords, sigma, step) -> coords`` jax minimizer. Calling
         this selects the jax backend (AF3 runs it inside ``jax.lax.scan``) and builds
         the minimizer lazily. ``step`` is the diffusion step index (for the step-window
         gate); a JAX tool that does not thread a step counter can pass a constant (e.g.
-        0). Returns ``None`` for an inactive spec (no restraints)."""
+        0). Returns ``None`` for an inactive spec (no restraints). With
+        ``return_info=True``, return a function producing ``(coords, CGInfo)``;
+        this fixed output structure is compatible with JIT and scan (CG only)."""
+        self._validate_return_info(return_info)
         if not self.is_active():
             return self._minimize_fn
         self._ensure_backend("jax")
+        if return_info:
+            if self._minimize_info_fn is None:
+                from rgi_toolkit.optim.jax_optim import make_minimizer
+
+                self._minimize_info_fn = make_minimizer(
+                    self.spec,
+                    max_iter=self.config.max_iter,
+                    method=self.config.method,
+                    return_info=True,
+                )
+            return self._minimize_info_fn
         return self._minimize_fn
 
-    def minimize(self, coords, istep: int = 0, sigma=None):
+    def minimize(self, coords, istep: int = 0, sigma=None, *, return_info=False):
         """Optimize coordinates for one denoising step. Returns the (possibly new)
         coordinate object. torch mutates in place; jax returns a new array. ``istep`` is
         the diffusion step index, threaded to the optimizer for the step-window gate
-        (alongside ``sigma`` for the sigma-window gate)."""
+        (alongside ``sigma`` for the sigma-window gate). ``return_info=True``
+        returns ``(coords, CGInfo)`` for CG, with one diagnostic record for the
+        whole batch. Failed searches retain the last accepted coordinates."""
+        self._validate_return_info(return_info)
         if not self.is_active():
+            if return_info:
+                from rgi_toolkit.optim.info import inactive_info
+
+                return coords, inactive_info()
             return coords
         # Infer the backend from the coords type and build the optimizer lazily on the
         # first call (jax array -> jax; torch tensor / numpy array -> torch).
         self._ensure_backend(self._infer_backend(coords))
         # Per-restraint gating lives in the energy (active sigma window AND active step
-        # window per term); each optimizer additionally skips the whole step when sigma
-        # exceeds every restraint's start_sigma (spec.max_start_sigma()).
+        # window per term); the host-spec window table skips the whole step when all
+        # terms are inactive, without reading prepared device tensors.
         if self._backend == "jax":
             if sigma is None:
                 # The jax per-restraint gate is `stop_sigma <= sigma <= start_sigma`, so NO
@@ -542,10 +574,10 @@ class CombinedRestraints:
                     "the torch path). Pass the schedule sigma, or drive the pure minimizer "
                     "via get_minimizer()/ScanMinimizer as AF3 does."
                 )
-            return self._minimize_fn(coords, sigma, istep)
-        return self._minimize_torch(coords, sigma, istep)
+            return self.get_minimizer(return_info=return_info)(coords, sigma, istep)
+        return self._minimize_torch(coords, sigma, istep, return_info=return_info)
 
-    def _minimize_torch(self, coords, sigma=None, step=None):
+    def _minimize_torch(self, coords, sigma=None, step=None, *, return_info=False):
         """Run the torch optimizer (the only CPU/GPU restraint optimizer — the
         numpy/scipy backend was removed).
 
@@ -557,23 +589,33 @@ class CombinedRestraints:
           place (the torch optimizer replaces the old scipy path for array callers)."""
         import torch
 
+        info = None
+
+        def run(tensor):
+            nonlocal info
+            result = self._optimizer.minimize(
+                tensor, sigma=sigma, step=step, return_info=return_info
+            )
+            if return_info:
+                _, info = result
+
         if isinstance(coords, torch.Tensor):
             if not self.config.gpu and coords.device.type != "cpu":
                 cpu_coords = coords.detach().to("cpu")
-                self._optimizer.minimize(cpu_coords, sigma=sigma, step=step)
+                run(cpu_coords)
                 with torch.no_grad():
                     coords.copy_(
                         cpu_coords.to(device=coords.device, dtype=coords.dtype)
                     )
             else:
-                self._optimizer.minimize(coords, sigma=sigma, step=step)
-            return coords
+                run(coords)
+            return (coords, info) if return_info else coords
 
         import numpy as np
 
         arr = np.asarray(coords)
         t = torch.as_tensor(arr, dtype=torch.float64)
-        self._optimizer.minimize(t, sigma=sigma, step=step)
+        run(t)
         out = t.detach().cpu().numpy()
         if (
             isinstance(arr, np.ndarray)
@@ -581,8 +623,8 @@ class CombinedRestraints:
             and arr.flags.writeable
         ):
             arr[...] = out  # update the caller's array in place
-            return arr
-        return out
+            return (arr, info) if return_info else arr
+        return (out, info) if return_info else out
 
     def finalize(self, coords, istep: int = 0) -> None:
         if not self.is_active() or not self.config.verbose:

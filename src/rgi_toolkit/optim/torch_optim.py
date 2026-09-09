@@ -2,8 +2,8 @@
 
 Minimizes the restraint energy on active-site coordinates using autograd for
 gradients. ``method`` selects the solver: ``"CG"`` (default) -> a nonlinear
-conjugate-gradient solver (Polak-Ribiere+ with a backtracking Armijo line search),
-matching the jax backend's pure-jax CG (a port of this solver); ``"l-bfgs"`` ->
+conjugate-gradient solver following SciPy 1.17.1 (PR+, DCSRCH/Wolfe2, strict strong
+Wolfe), shared with the JAX backend through ``optim/_cg.py``; ``"l-bfgs"`` ->
 ``torch.optim.LBFGS`` (strong-Wolfe). Operates in-place on the coordinate tensor
 and stays on whatever device the coordinates live on, so ``gpu: true`` runs
 entirely on GPU.
@@ -27,7 +27,6 @@ displacement budget.
 from __future__ import annotations
 
 import logging
-import math
 import os
 
 import torch
@@ -39,18 +38,7 @@ from rgi_toolkit._config_util import (
 )
 from rgi_toolkit.energy import torch_energy
 from rgi_toolkit.energy._terms import CONF_KEYS, PER_ENTRY_KEYS, TERM_BY_KEY
-from rgi_toolkit.optim._cg_config import (
-    ARMIJO_C1,
-    BACKTRACK,
-    EPS,
-    FTOL,
-    GG_FLOOR,
-    GTOL,
-    LS_STEP_GROW,
-    LS_STEP_MAX,
-    LS_STEP_MIN,
-    MAX_LS,
-)
+from rgi_toolkit.optim._cg_config import GTOL
 
 logger = logging.getLogger(__name__)
 
@@ -394,14 +382,28 @@ class TorchRestraintOptimizer:
             v["chemistry"],
         )
 
-    def minimize(self, coords, sigma=None, step=None, start_sigma=None, max_iter=None):
+    def minimize(
+        self,
+        coords,
+        sigma=None,
+        step=None,
+        start_sigma=None,
+        max_iter=None,
+        *,
+        return_info=False,
+    ):
         """Optimize ``coords`` (..., n_atom, 3) in-place. Each restraint is gated on its
         active sigma window AND its active step window (``step`` = diffusion step index)
-        inside the energy; the whole step is skipped only when ``sigma`` exceeds every
-        restraint's start_sigma (a step-windowed restraint keeps start_sigma=+inf, so it
-        is never whole-step-skipped — its step gate handles activation)."""
+        inside the energy. If every window is inactive, no objective is evaluated.
+        ``return_info=True`` returns ``(coords, CGInfo)`` for CG only."""
+        from rgi_toolkit.optim._gates import active_windows, window_on
+        from rgi_toolkit.optim.info import inactive_info
+
+        if return_info and not self._is_cg():
+            raise ValueError("return_info is supported only for method='cg'")
+        info = inactive_info()
         if not self.spec.is_active():
-            return coords
+            return (coords, info) if return_info else coords
         # sigma is the per-step scalar noise level. Coerce to a python float: the skip
         # test below and the GPU pre-gate (which builds the rmsd-gate tuple from it) both
         # assume a scalar; a stray multi-element tensor would otherwise fail GPU-only.
@@ -411,8 +413,8 @@ class TorchRestraintOptimizer:
         # in the eager CG / GPU pre-gate behave (a tensor step would break the GPU path).
         if step is not None:
             step = int(step)
-        if sigma is not None and sigma > self.spec.max_start_sigma():
-            return coords
+        if not window_on(active_windows(self.spec), sigma, step):
+            return (coords, info) if return_info else coords
         # Optimize in fp32 even when the model runs the diffusion in bf16/fp16: a
         # half-precision CG line search + autograd gradient is too coarse, so the
         # restraint could silently fail to converge. Work in fp32 and cast the result
@@ -614,7 +616,7 @@ class TorchRestraintOptimizer:
                     return vdw, active_args
 
                 def run_cg(block_iters, state):
-                    """Run one block and return the resumable CG state (None = done)."""
+                    """Run one block; an invalid returned state terminates this call."""
                     vdw, active_args = dynamic_args()
                     if active.is_cuda and has_custom:
                         ok, out_state = self._minimize_custom_gpu(
@@ -670,7 +672,7 @@ class TorchRestraintOptimizer:
                     # pointless rebuilds of it.
                     fixed_ref = active_ref = None
                     cg_state = None
-                    while remaining > 0:
+                    while remaining > 0 or cg_state is None:
                         rebuilt = False
                         if bg_pos is not None:
                             lig = active.detach()[..., self._vdw["lig_local"], :]
@@ -694,13 +696,14 @@ class TorchRestraintOptimizer:
                             # clamped beyond contact), but `max_neighbors` truncation can
                             # break that premise, so pay one evaluation per REBUILD rather
                             # than rely on it. Rebuilds are now rare, so this is cheap.
-                            cg_state = None
+                            if cg_state is not None:
+                                cg_state = cg_state._replace(valid=False)
                         block_iters = min(check, remaining)
-                        before_block = active.detach().clone()
                         cg_state = run_cg(block_iters, cg_state)
                         remaining -= block_iters
-                        if torch.equal(active.detach(), before_block):
+                        if not cg_state.valid:
                             break
+                    info = cg_state.info
                 else:
                     opt = torch.optim.LBFGS(
                         [active], max_iter=mi, line_search_fn="strong_wolfe"
@@ -731,11 +734,11 @@ class TorchRestraintOptimizer:
                 "(input_finite=%s)",
                 input_finite,
             )
-            return coords
+            return (coords, info) if return_info else coords
         # The optimizer is an in-place correction, including for autograd leaf inputs.
         with torch.no_grad():
             coords[..., self._active_idx, :] = new_active.to(out_dtype)
-        return coords
+        return (coords, info) if return_info else coords
 
     def _is_cg(self) -> bool:
         return (self.method or "cg").lower() in (
@@ -750,137 +753,38 @@ class TorchRestraintOptimizer:
         active,
         energy_fn,
         max_iter,
-        max_ls: int = MAX_LS,
-        gtol: float = GTOL,
-        ftol: float = FTOL,
+        gtol=GTOL,
         max_atom_step=None,
         state=None,
+        **search_options,
     ):
-        """In-place nonlinear conjugate gradient (Polak-Ribiere+, backtracking
-        Armijo line search). Matches the jax backend's pure-jax CG (a port of this
-        solver), so ``method='CG'`` is the same algorithm on both backends. ``active``
-        is a leaf tensor (requires_grad=True); ``energy_fn()`` returns the scalar
-        energy with ``active`` in its graph. Stops early on convergence
-        (``max|grad| < gtol``) or when the line search stalls. Small energy changes
-        restart the direction once per low-progress stretch; they do not establish
-        stationarity. See ``_cg_config`` for the shared stopping contract.
+        """Adapt an in-place eager objective to the shared strict-Wolfe solver."""
+        from rgi_toolkit.optim._cg import torch_cg
 
-        ``state`` mirrors ``_torch_cg_gpu._cg_minimize_torch``: it lets the caller run the
-        CG in blocks (to re-check a dynamic neighbour list) without paying a re-entry
-        evaluation or throwing away the conjugate direction. Always returns the live state,
-        or ``None`` once the solver has terminated and there is nothing to resume."""
+        def value_grad(x):
+            with torch.no_grad():
+                active.copy_(x)
+            active.grad = None
+            energy = energy_fn()
+            if energy.requires_grad:
+                energy.backward()
+                gradient = active.grad.detach().clone()
+            else:
+                gradient = torch.zeros_like(active)
+            return gradient, energy.detach()
 
-        # GPU note: every float()/.item() on a device scalar is a blocking
-        # device->host sync that serialises the GPU; for this tiny CG that dominates
-        # the runtime. value_grad returns the energy as a TENSOR and the loop BATCHES
-        # the per-iteration scalar reads into one .tolist() each, keeping the maths
-        # identical to a plain CG.
-        def value_grad():
-            if active.grad is not None:
-                active.grad = None
-            e = energy_fn()
-            if not e.requires_grad:
-                # The objective is a constant w.r.t. `active` (nothing to optimise): return
-                # a zero gradient so the CG converges on the first iteration, leaving the
-                # coords untouched. Mirrors the jax backend, whose `jnp.where` gate yields a
-                # 0 gradient rather than crashing `backward()` with "does not require grad".
-                # This arises only via the CUSTOM closure path: a gated-off custom term is
-                # DROPPED (`_custom_energy` returns None), unlike the array terms whose gate
-                # is a multiplicative 0 inside `total_energy` (graph stays connected, grad
-                # 0). So it needs a custom-only spec (or custom + closed-form distance, which
-                # never feeds the CG) whose step window is currently closed — the sigma
-                # whole-step skip does not fire there (a step-windowed term keeps
-                # start_sigma=+inf). Regression: tests/test_custom.py::test_custom_gate_*.
-                return e.detach(), torch.zeros_like(active)
-            e.backward()
-            return e.detach(), active.grad.detach().clone()
-
-        if state is None:
-            e_t, g = value_grad()
-            f = float(e_t)  # the line search needs the scalar energy
-            if float(g.abs().max()) < gtol:
-                return None
-            d = g.neg()
-            gg = torch.sum(g * g)
-            carried = LS_STEP_MAX  # warm-started trial step (see _cg_config)
-            small_change_seen = False
-        else:
-            f, g, d, gg, carried, small_change_seen = state
-        finished = True  # cleared only if the iteration budget runs out with work left
-        for _ in range(max_iter):
-            # one host read for both top-of-iteration scalars (gg + descent slope)
-            dg = torch.sum(d * g)
-            gg_v, dg_v = torch.stack((gg, dg)).tolist()
-            if not math.isfinite(gg_v) or gg_v <= GG_FLOOR:
-                break
-            if dg_v >= 0.0:  # not a descent direction -> restart (rare)
-                d = g.neg()
-                dg_v = float(torch.sum(d * g))
-            slope = dg_v
-            x0 = active.detach().clone()
-            step0 = min(LS_STEP_MAX, max(carried, LS_STEP_MIN) * LS_STEP_GROW)
-            accepted = False
-            for attempt in range(2):
-                if attempt:
-                    d, slope = g.neg(), -gg_v
-                step = step0
-                for _ in range(max_ls):
-                    with torch.no_grad():
-                        delta = step * d
-                        if max_atom_step is not None:
-                            atom_norm = torch.sqrt(
-                                torch.sum(delta * delta, dim=-1, keepdim=True) + EPS
-                            )
-                            delta = delta * torch.clamp(
-                                max_atom_step / atom_norm, max=1.0
-                            )
-                        active.copy_(x0 + delta)
-                    e_t, g_new = value_grad()
-                    stats = [
-                        e_t,
-                        torch.any(active.detach() != x0),
-                        torch.isfinite(active).all() & torch.isfinite(g_new).all(),
-                    ]
-                    if max_atom_step is not None:
-                        stats.append(torch.sum(g * delta))
-                    values = torch.stack(stats).tolist()
-                    f_new, moved, finite = values[:3]
-                    predicted = values[3] if max_atom_step is not None else step * slope
-                    if not moved:
-                        break  # smaller trials cannot restore representable movement
-                    if (
-                        finite
-                        and math.isfinite(f_new)
-                        and f_new <= f + ARMIJO_C1 * predicted
-                    ):
-                        accepted = True
-                        break
-                    step *= BACKTRACK
-                if accepted:
-                    break
-            if not accepted:  # both directions stalled; retain the last accepted point
-                with torch.no_grad():
-                    active.copy_(x0)
-                break
-            carried = step
-            # one host read for the post-step scalars (grad-max + PR+ numerator)
-            gmax_v, pr_num_v = torch.stack(
-                (g_new.abs().max(), torch.sum(g_new * (g_new - g)))
-            ).tolist()
-            converged = gmax_v < gtol
-            small_change = abs(f_new - f) < ftol * (1.0 + abs(f))
-            beta = max(0.0, pr_num_v / (gg_v + EPS))  # gg_v = this iter's gg
-            if small_change and not small_change_seen:
-                beta = 0.0
-            small_change_seen = small_change
-            d = g_new.neg() + beta * d  # Polak-Ribiere+ (auto-restart when beta<0)
-            f, g, gg = f_new, g_new, torch.sum(g_new * g_new)
-            if converged:
-                break
-        else:
-            # ran out of iterations with the solver still live -> resumable
-            finished = False
-        return None if finished else (f, g, d, gg, carried, small_change_seen)
+        out, result = torch_cg(
+            value_grad,
+            active.detach(),
+            max_iter,
+            gtol=gtol,
+            max_atom_step=max_atom_step,
+            state=state,
+            **search_options,
+        )
+        with torch.no_grad():
+            active.copy_(out)
+        return result
 
     def energy(self, coords) -> float:
         """Current restraint energy (for verbose stats / finalize)."""

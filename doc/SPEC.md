@@ -68,6 +68,41 @@ Torch explicitly enables autograd for this correction inside host inference mode
 This API is a coordinate correction, not a promise of differentiation through the
 optimizer into the predictor.
 
+For CG, opt in to termination diagnostics without changing coordinate semantics:
+
+```python
+from rgi_toolkit import CGStatus
+
+coords, info = restraints.minimize(coords, sigma=sigma, return_info=True)
+converged = info.status == CGStatus.CONVERGED
+# A JAX factory fixes its output structure at construction, including inside scan.
+minimize_with_info = jax_restraints.get_minimizer(return_info=True)
+```
+
+The two calls illustrate separate Torch/NumPy and JAX instances, respectively;
+one instance still cannot switch backends. `CGInfo` is a framework-independent
+named tuple and a native JAX pytree. Its scalar fields are `status`, `nit`
+(accepted iterations), `nfev`, `njev`, `fun`, and `grad_norm` (infinity norm of the
+gradient actually used, including RGI gradient modifications). One record covers
+the **entire batch** and all neighbor blocks. JAX returns traced scalar arrays;
+decode the integer status on the host or compare it within JAX control flow.
+
+| `CGStatus` | Meaning |
+| --- | --- |
+| `INACTIVE` (0) | No active restraint window; no evaluations, with zero counters/value/norm |
+| `CONVERGED` (1) | Initial or accepted gradient meets `gtol` |
+| `MAX_ITER` (2) | The iteration budget ended before gradient convergence |
+| `LINE_SEARCH_FAILED` (3) | No acceptable strong-Wolfe step within the search/bound budget |
+| `NONFINITE` (4) | A nonfinite initial evaluation or the final failed search trial/slope |
+| `NO_PROGRESS` (5) | The final failed trial cannot change representable coordinates |
+
+Failure diagnostics describe the last accepted point, or the initial evaluation
+when none was accepted. Rejected trial calls still count. An initially nonfinite
+value/norm remains nonfinite in the report. Empty specs retain `get_minimizer() is
+None`, including with the flag; direct `minimize` reports `INACTIVE`. Re-setup
+clears both JAX factories. Requesting diagnostics with L-BFGS raises `ValueError`;
+its existing coordinate-only behavior is unchanged.
+
 `finalize` is an optional verbose diagnostic, not another minimization. It reports
 ungated energies at the supplied coordinates, including custom terms and static
 and dynamic VdW, without moving atoms. Its failures are reported as warnings and
@@ -331,59 +366,88 @@ Torch energy compilation explicitly uses `dynamic=False`: each artifact speciali
 the spec and neighbor-list shapes. This also avoids automatic symbolic-shape
 generalization across different structures or VdW modes.
 
-This is nonlinear Polak-Ribiere+ CG, not the linear-system CG algorithm. Its
-mathematical references are [Polak and Ribiere (1969)](https://numdam.org/item/M2AN_1969__3_1_35_0/),
-[Armijo (1966)](https://msp.org/pjm/1966/16-1/pjm-v16-n1-p01-s.pdf), and the nonlinear-CG
-analysis of [Gilbert and Nocedal (1992)](https://epubs.siam.org/doi/10.1137/0802003).
-These identify the method's components; they do not establish historical source
-provenance or a convergence theorem for the complete RGI implementation.
+All three forms call the shared PR+ loop in
+[`optim/_cg.py`](../src/rgi_toolkit/optim/_cg.py) and the shared scalar line-search
+transitions in [`optim/_cg_linesearch.py`](../src/rgi_toolkit/optim/_cg_linesearch.py).
+The reference is **SciPy 1.17.1**, specifically
+[`_minimize_cg`](https://github.com/scipy/scipy/blob/v1.17.1/scipy/optimize/_optimize.py),
+[Wolfe1/Wolfe2 searches](https://github.com/scipy/scipy/blob/v1.17.1/scipy/optimize/_linesearch.py),
+and [`DCSRCH`/`dcstep`](https://github.com/scipy/scipy/blob/v1.17.1/scipy/optimize/_dcsrch.py).
+The adapted code retains the SciPy BSD notice in [`LICENSES/scipy.txt`](../LICENSES/scipy.txt),
+shipped in source and wheel distributions, and the MINPACK attribution in the source.
+SciPy remains a pinned development oracle; runtime minimization imports no SciPy.
 
-For objective `f`, autodiff vector `g`, and current direction `d`, the update is:
+For objective `f`, autodiff vector `g`, and search direction `d`:
 
 ```text
 d0 = -g0
-beta = max(0, dot(g_new, g_new - g) / (dot(g, g) + EPS))
+previous_f0 = f0 + norm(g0, 2) / 2
+alpha0 = min(1, 1.01 * 2 * (f - previous_f) / dot(g, d))
+beta = max(0, dot(g_new, g_new - g) / dot(g, g))
 d_new = -g_new + beta * d
 ```
 
-Before a line search, a non-descending direction (`dot(d, g) >= 0`) restarts as
-`-g`. Backtracking starts at
-`min(1, max(previous_accepted_step, 2**-20) * 2)`; the initial carried step is one.
-Each rejection halves the trial step. Acceptance requires finite coordinates,
-energy, and gradient, a representable coordinate change, and Armijo decrease:
+A negative initial step guess is replaced by one, following SciPy; the applicable
+step bounds then limit it. The previous accepted objective, rather than the previous
+step length, supplies the next initial guess. No epsilon is added to the PR+
+denominator: a nonfinite or nonpositive squared gradient cannot start a search.
+
+The first search uses More--Thuente DCSRCH with its four safeguarded `dcstep`
+interpolation cases. If it fails or its candidate fails the prospective PR+
+sufficient-descent check, the solver invokes SciPy's Wolfe2 bracketing/zoom
+procedure. Both require strong Wolfe (`c1=1e-4`, `c2=0.4`):
 
 ```text
-f(x + delta) <= f(x) + 1e-4 * dot(g, delta)
+f(x + alpha*d) <= f(x) + c1 * alpha * dot(g, d)
+abs(dot(g_new, d)) <= -c2 * dot(g, d)
 ```
 
-Without a displacement cap, `delta = step * d` and the slope is `step * dot(g, d)`.
-With VdW, each atom's displacement is clipped and Armijo uses that clipped delta.
-There are at most 20 trials per direction. On failure the solver retries once
-with `-g` and the original trial-step seed. If both searches fail it returns the
-last accepted point. A trial identical to the current floating-point coordinates
-ends that search because further halving cannot restore movement.
+An accepted candidate additionally satisfies
+`dot(g_new, d_new) <= -0.01 * dot(g_new, g_new)`, unless its gradient already meets
+`gtol`. That exception bypasses only the prospective-direction check, never Wolfe.
+DCSRCH permits 100 iterations and uses `xtol=1e-14`; the Wolfe2 expansion budget is
+10, and its zoom loop follows SciPy's `i > 10` exhaustion rule (up to 11 trials).
+The current trial's value and gradient are cached across search phases. Evaluation
+counters count actual combined value/gradient calls, including rejected trials.
+Constants live in [`optim/_cg_config.py`](../src/rgi_toolkit/optim/_cg_config.py).
 
-Only `max(abs(g)) < 1e-7` establishes gradient convergence, including at the initial
-point. An accepted decrease smaller than `1e-9 * (1 + abs(f_old))` restarts with
-`beta = 0` once on entering a contiguous stretch of small changes. Further small
-changes preserve conjugacy; a larger decrease clears the latch. Small energy
-change alone does not establish convergence. Nonfinite or underflowed squared
-gradient norm (`<= 1e-20`), exhausted searches, and iteration limits can also stop
-execution, but are not stationarity certificates. `EPS = 1e-12` guards the PR+
-denominator. Constants are centralized in
-[`optim/_cg_config.py`](../src/rgi_toolkit/optim/_cg_config.py).
+Only `max(abs(g)) <= 1e-7` reports gradient convergence. There is no energy-change
+stop or restart latch, no accepted-step doubling, and no steepest-descent retry
+after failed searches. Failure returns the last accepted coordinates and terminates
+that minimization, even if earlier iterations moved atoms. The next denoising
+invocation starts a fresh CG search.
 
-CG state carries `(f, g, d, dot(g,g), step, small_change_seen)` across neighbor
-checks; JAX adds a traced validity flag. It is reusable only for unchanged
-coordinates and objective. Completed or stalled Torch calls return no live
-state; JAX marks it invalid. State never carries across denoising invocations.
-Public calls return coordinates rather than a SciPy-style termination report,
-so callers needing stationarity must measure the final objective and gradient.
+Strict RGI acceptance differs from SciPy's exceptional exits: Wolfe2's unverified
+last trial on iteration exhaustion is rejected, and nonfinite coordinates, values,
+gradients, or a step with no representable movement cannot be accepted. Invalid
+DCSRCH trials trigger Wolfe2; invalid high-bracket trials are bisected toward the
+last finite lower endpoint. Scalar bounds `1e-100..1e100` are restricted to the
+working dtype's representable range (upper bound at most `finfo.max / 8`). These
+safeguards and different floating-point evaluation orders preclude a promise of
+bitwise agreement on every objective.
 
-Warm-starting, the small-change latch, failed-search retry, representability
-checks, displacement caps, and resumable neighbor blocks are RGI implementation
-choices. SciPy CG uses a different line search and restart logic; equality of
-iterations, line-search evaluations, or intermediate coordinates is not required.
+When VdW is active, every trial stays on one straight line. A single scalar bound
+`alpha_max = max_atom_step / max_i(norm(d_i, 2))` limits all atoms together; no
+per-atom clipping bends the direction. If no point within the bound satisfies
+Wolfe, the invocation fails without an Armijo fallback. For example, minimizing
+`(x-1)**2` from zero with an absolute step bound of `0.1` cannot reduce the slope
+magnitude to `0.4` of its initial value. Increasing `max_iter` cannot resolve that
+infeasible line search. RGI's modified gradients (centroid rescaling, pinned atoms,
+and stop-gradient fits) can also make strong Wolfe harder or impossible to satisfy;
+convergence of ordinary smooth SciPy objectives does not certify those cases.
+
+The state carries `f`, `g`, `d`, `dot(g,g)`, the previous objective, a validity flag,
+and cumulative `CGInfo` across neighbor-list blocks. Only block-budget exhaustion
+is resumable; convergence or failure ends the whole call. An actual neighbor
+rebuild invalidates search history and recomputes value/gradient while retaining
+the aggregate counters. Unchanged lists retain the state without another initial
+evaluation. Coordinates and the objective must remain unchanged to reuse a state.
+
+The mathematical references are [Polak and Ribiere (1969)](https://numdam.org/item/M2AN_1969__3_1_35_0/)
+and [Gilbert and Nocedal (1992)](https://epubs.siam.org/doi/10.1137/0802003), with the
+More--Thuente and bracketing algorithms documented in the pinned SciPy sources.
+Their smooth-objective assumptions do not establish a convergence theorem for
+RGI's capped, sometimes modified-gradient molecular objective.
 
 ### L-BFGS
 
@@ -405,7 +469,7 @@ of final solutions and residuals, not a claim of identical implementations.
 
 ## Verification contract
 
-The two new comparison modules require SciPy, Torch, JAX, and JAXopt on CPU;
+The optimizer comparison modules require SciPy 1.17.1, Torch, JAX, and JAXopt on CPU;
 missing dependencies fail collection rather than silently skipping a backend.
 Fixtures are small, deterministic, offline, and generated in memory or pytest
 temporary directories. They do not require an external monomer library or
@@ -425,9 +489,16 @@ iterations. For these unique solutions, the acceptance limits are:
 - Independent gradient maximum absolute value below `1e-6` for CG or `1e-3`
   for the existing L-BFGS settings.
 
-The same module checks restart-state preservation, failed-direction retry,
-nonfinite trial gradients, and unrepresentable updates. A separately marked CUDA test compiles the functional
-gradient/value path and compares it with SciPy.
+The same module checks previous-objective/state preservation across blocks,
+nonfinite trial gradients, and unrepresentable updates. Separately marked GPU
+tests check the compiled Torch path and JAX CG inside JIT/scan against SciPy.
+[`test_cg_linesearch.py`](../tests/test_cg_linesearch.py) compares safeguarded
+interpolation cases, search-phase transitions and representative accepted
+trajectories with the pinned SciPy implementation, using the same tolerance and
+iteration budget. It independently checks Wolfe and prospective descent.
+[`test_optimizer_info.py`](../tests/test_optimizer_info.py) verifies the public
+diagnostics, inactive windows, batch aggregation, reset, JAX scan output, strict
+bounded failure, and termination/counter preservation across neighbor blocks.
 
 [`test_e2e.py`](../tests/test_e2e.py) follows config parsing, adapter selections,
 spec construction, minimization, and verbose finalization. It drives Torch's
@@ -438,7 +509,9 @@ unequal centroid groups and move modes, noncontiguous atom rows, batch inputs,
 sigma/step boundaries, repeated setup, group geometry, conformer geometry,
 PDB/mmCIF RMSD, custom formulas/callables, and static/dynamic VdW. Dynamic contacts
 are compared with direct dense evaluation at both the energy and stationarity
-levels. Nonunique geometric solutions are compared through energy, measured
+levels. Their convergence fixtures use a nonbinding displacement cap; separate
+fixtures prove that an infeasible cap returns failure and retains coordinates.
+Nonunique geometric solutions are compared through energy, measured
 geometry, rigid-group motion, and pins instead of arbitrary Cartesian equality.
 Nonconvex fixtures keep starts in the same basin; these tests do not certify a
 global minimum for general molecular objectives.
@@ -452,7 +525,7 @@ global minimum for general molecular objectives.
 | Chemical targets, relaxation, stereochemistry | [`test_featurizer.py`](../tests/test_featurizer.py), [`test_conformer_chemistry.py`](../tests/test_conformer_chemistry.py), [`test_relax_force_field.py`](../tests/test_relax_force_field.py), [`test_ideal_conformer.py`](../tests/test_ideal_conformer.py) |
 | Dictionary targets, links, ESDs, cache publication | [`test_monlib_geom.py`](../tests/test_monlib_geom.py), [`test_monlib_dictionary.py`](../tests/test_monlib_dictionary.py), [`test_monlib_esd.py`](../tests/test_monlib_esd.py), [`test_monlib_cache.py`](../tests/test_monlib_cache.py) |
 | Standalone geometry, macro expansion, custom move/gradient rules | [`test_group_geom_data.py`](../tests/test_group_geom_data.py), [`test_improper.py`](../tests/test_improper.py), [`test_plane_restr_data.py`](../tests/test_plane_restr_data.py), [`test_base_pair.py`](../tests/test_base_pair.py), [`test_custom.py`](../tests/test_custom.py), [`test_custom_move.py`](../tests/test_custom_move.py) |
-| Warm starts, dtype/device caches, VdW lists, compiled objectives | [`test_optim.py`](../tests/test_optim.py) |
+| Dtype/device caches, VdW lists, compiled objectives | [`test_optim.py`](../tests/test_optim.py) |
 
 Run the mandatory CPU suite and code checks with:
 

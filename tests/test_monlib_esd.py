@@ -278,6 +278,8 @@ def test_minimize_freezes_state_across_searches_and_vdw_blocks_then_reselects(
             n=6,
         ).custom
     spec.vdw_neighbor_rebuild_interval = 2
+    # Allow Wolfe steps while testing frozen state selection across neighbor blocks.
+    spec.vdw_max_atom_step = 2.0
     spec.vdw_config = VdwConfig(
         weight=1,
         ligand_local=np.arange(6),

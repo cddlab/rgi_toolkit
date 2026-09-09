@@ -271,7 +271,8 @@ d = \lVert c_2 - c_1 \rVert, \qquad c_k = \frac{1}{|G_k|}\sum_{a \in G_k} x_a
 ```
 
 (a plain masked-mean centroid), shaped by one of the penalty blocks below (see Penalty shapes).
-`harmonic` drives the target distance ($d = t$) to CG convergence (within `gtol`/`ftol`).
+`harmonic` drives the distance toward $d = t$ with CG (gradient tolerance `gtol`;
+see [termination semantics](SPEC.md#nonlinear-conjugate-gradient)).
 
 | key | type | default | meaning |
 |---|---|---|---|
@@ -1040,8 +1041,14 @@ For both solvers and energy diagnostics, the search radius is at least the large
 distance `scale * R_ij`, even when `dmax` is smaller.
 
 `max_atom_step` (default 0.1 Å) caps each atom's accepted displacement in one CG iteration whenever
-VdW is active. The line search uses the capped displacement in its Armijo test, so increasing
-`weight` or the number of contacts cannot produce a large accepted overshoot. The fixed-background
+VdW is active. It bounds the common line-search scalar by
+`alpha <= max_atom_step / max_i(norm(direction_i))`, preserving a straight search path.
+Every accepted step must satisfy strong Wolfe (`c1=1e-4`, `c2=0.4`). If the bound excludes
+all Wolfe points, CG retains the last accepted coordinates and stops with
+`LINE_SEARCH_FAILED`; it never falls back to Armijo. A larger iteration budget does not
+resolve this failure. Request `return_info=True` through the [Python API](SPEC.md#public-lifecycle)
+to distinguish failure from convergence. Increasing `weight` or the number of contacts
+cannot bypass the displacement bound. The fixed-background
 search cutoff is at least `max_r_min + M + neighbor_skin` and the active-active cutoff at least
 `max_r_min + 2M + neighbor_skin`, which is what guarantees that a pair able to become a contact
 before the next rebuild is already listed.

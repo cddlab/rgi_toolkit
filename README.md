@@ -185,6 +185,13 @@ spec outside the scan and grab the pure closure with `restr.get_minimizer()`
 (`(flat_coords, sigma) -> flat_coords`), then call it inside the compiled loop instead
 of `minimize`.
 
+The default CG follows SciPy 1.17.1 PR+ with strong-Wolfe searches. Set
+`return_info=True` on `minimize` or `get_minimizer` to obtain `(coords, CGInfo)`
+and distinguish gradient convergence from search failure or an iteration limit.
+A VdW displacement bound can exclude every acceptable Wolfe step; CG then keeps
+the last accepted coordinates. See the [solver specification](doc/SPEC.md#nonlinear-conjugate-gradient)
+and [diagnostic fields](doc/SPEC.md#public-lifecycle).
+
 ### Atom selection syntax
 
 Distance restraints use a selection DSL to specify atom groups. Its keyword / range /

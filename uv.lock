@@ -603,7 +603,7 @@ dev = [
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pyyaml", specifier = ">=6" },
     { name = "ruff", specifier = ">=0.15.7" },
-    { name = "scipy" },
+    { name = "scipy", specifier = "==1.17.1" },
 ]
 
 [[package]]

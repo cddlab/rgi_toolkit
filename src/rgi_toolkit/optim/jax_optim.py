@@ -1,20 +1,13 @@
 """GPU restraint optimizer for JAX tools (alphafold3).
 
-Builds a JIT/scan/vmap-compatible minimizer over an analytic ``jax.grad`` energy,
-gated on the noise level with ``jax.lax.cond``. ``method='CG'`` (the default, shared
-with torch) runs ``_cg_minimize`` — a pure-jax port of the torch nonlinear CG
-(``lax.while_loop``); ``method='l-bfgs'`` uses ``jaxopt.LBFGS`` (lazily imported).
-There is NO ``pure_callback`` and NO scipy, so the whole optimization runs inside XLA
-on the accelerator. The custom CG is the SAME algorithm + constants as the torch CG and
-converges the RMSD energy (whose fixed-rotation gradient stalls jaxopt's NonlinearCG +
-backtracking line search). Note: it is not bit-identical to torch — XLA float-op
-reordering inside ``lax.while_loop`` can make the jax minimum differ from torch's by a
-small, input-dependent amount, and on some inputs at high ``max_iter`` (>~300) the
-backtracking line search can stall a little earlier than the eager torch loop; at the
-default ``max_iter=100`` they agree on the standard fixtures. (That stall caveat was
-measured against the cold-start line search, which restarted every iteration at step 1.0
-and so exhausted ``MAX_LS`` more readily; the warm start makes it rarer, but the caveat
-is kept until it is re-measured.)
+Builds a pure JIT/scan/vmap-compatible minimizer over an autodiff energy.
+The default CG follows SciPy 1.17.1 PR+ with DCSRCH/Wolfe2 strong Wolfe through
+``optim/_cg.py`` and ``_cg_linesearch.py``, shared with Torch. Failed searches
+retain the last accepted point. ``return_info=True`` exposes traced CG diagnostics.
+``method='l-bfgs'`` uses ``jaxopt.LBFGS`` (lazily imported). No callback or runtime
+SciPy is used; optimization remains inside XLA on the selected device. Backend
+floating-point evaluation orders can produce different search decisions near a
+condition boundary; ordinary scalar objectives are checked against SciPy.
 
 The dynamic VdW neighbour lists are rebuilt on measured displacement against a Verlet
 skin, not on a fixed cadence. ``lax.fori_loop`` needs a static trip count, so the number
@@ -46,18 +39,7 @@ from rgi_toolkit.optim._cell_list import (
     CELL_HASH_PRIMES,
     CELL_OFFSETS,
 )
-from rgi_toolkit.optim._cg_config import (
-    ARMIJO_C1,
-    BACKTRACK,
-    EPS,
-    FTOL,
-    GG_FLOOR,
-    GTOL,
-    LS_STEP_GROW,
-    LS_STEP_MAX,
-    LS_STEP_MIN,
-    MAX_LS,
-)
+from rgi_toolkit.optim._cg_config import EPS, GTOL
 from rgi_toolkit.spec import check_active_vdw_int32_safe
 
 logger = logging.getLogger(__name__)
@@ -77,141 +59,28 @@ def _cg_minimize(
     energy_fn,
     x0,
     max_iter,
-    max_ls=MAX_LS,
     gtol=GTOL,
-    ftol=FTOL,
     max_atom_step=None,
     state=None,
     return_state=False,
+    return_info=False,
+    **search_options,
 ):
-    """Pure-jax nonlinear conjugate gradient (Polak-Ribiere+, backtracking Armijo line
-    search, restart on non-descent) — a port of the torch ``TorchRestraintOptimizer.
-    _minimize_cg`` built from ``jax.lax.while_loop`` so it stays JIT/scan/vmap-able.
-    ``x0`` is the active-site coords; ``energy_fn(x) -> scalar`` is the restraint energy.
-    Returns the optimized coords. Same algorithm + constants as the torch backend (so
-    ``method='CG'`` means CG everywhere) and (unlike jaxopt NonlinearCG) it converges the
-    RMSD energy — though XLA float reordering in ``lax.while_loop`` can make its minimum
-    differ from torch's by a small, input-dependent amount (see the module docstring)."""
-    vg = jax.value_and_grad(energy_fn)
+    """Pure JAX entry to the shared SciPy-style strict-Wolfe CG solver."""
+    from rgi_toolkit.optim._cg import jax_cg
 
-    def line_search(x_base, d, f, g_proto, slope, step0):
-        def cond(s):
-            _step, accepted, _x, _f, _g, i = s
-            return jnp.logical_and(jnp.logical_not(accepted), i < max_ls)
-
-        def body(s):
-            step, _acc, _x, _f, _g, i = s
-            delta = step * d
-            if max_atom_step is not None:
-                atom_norm = jnp.sqrt(
-                    jnp.sum(delta * delta, axis=-1, keepdims=True) + EPS
-                )
-                delta = delta * jnp.minimum(1.0, max_atom_step / atom_norm)
-            xt = x_base + delta
-            ft, gt = vg(xt)
-            predicted = (
-                step * slope if max_atom_step is None else jnp.sum(g_proto * delta)
-            )
-            moved = jnp.any(xt != x_base)
-            finite = (
-                jnp.isfinite(ft) & jnp.all(jnp.isfinite(xt)) & jnp.all(jnp.isfinite(gt))
-            )
-            ok = moved & finite & (ft <= f + ARMIJO_C1 * predicted)
-            # Shrinking an unrepresentable update cannot restore movement.
-            next_i = jnp.where(moved, i + 1, max_ls)
-            return (jnp.where(ok, step, step * BACKTRACK), ok, xt, ft, gt, next_i)
-
-        init = (
-            step0,
-            jnp.asarray(False),
-            x_base,
-            f,
-            g_proto,
-            jnp.asarray(0),
-        )
-        # On acceptance `body` leaves the slot at the accepted step; on exhaustion it holds
-        # the already-shrunk `step * BACKTRACK`. The caller only carries it when `accepted`.
-        s, accepted, xt, ft, gt, _i = jax.lax.while_loop(cond, body, init)
-        return xt, ft, gt, accepted, s
-
-    def _fresh():
-        f_, g_ = vg(x0)
-        return (
-            f_,
-            g_,
-            -g_,
-            jnp.sum(g_ * g_),
-            jnp.asarray(LS_STEP_MAX),
-            jnp.asarray(False),  # low-progress restart latch
-            jnp.max(jnp.abs(g_)) < gtol,
-        )
-
-    if state is None:
-        f0, g0, d0, gg0, s0, small0, stop0 = _fresh()
-    else:
-        # Resume a previous block. `lax.cond` EXECUTES only the taken branch, so a carried
-        # block genuinely pays no re-entry evaluation. Mirrors the torch `state` argument;
-        # the caller must pass None after a neighbour rebuild (the objective changed).
-        f_c, g_c, d_c, gg_c, s_c, small_c, valid = state
-        f0, g0, d0, gg0, s0, small0, stop0 = jax.lax.cond(
-            valid,
-            lambda: (f_c, g_c, d_c, gg_c, s_c, small_c, jnp.asarray(False)),
-            _fresh,
-        )
-
-    def cond(st):
-        _x, _f, _g, _d, _gg, it, stop, _step, _small_seen = st
-        return jnp.logical_and(jnp.logical_not(stop), it < max_iter)
-
-    def body(st):
-        x, f, g, d, gg, it, _stop, carried, small_seen = st
-        bad = jnp.logical_or(jnp.logical_not(jnp.isfinite(gg)), gg <= GG_FLOOR)
-        d = jnp.where(jnp.sum(d * g) >= 0.0, -g, d)  # restart if not a descent dir
-        # A degenerate iteration evaluates one unrepresentable zero step and stops.
-        d = jnp.where(bad, jnp.zeros_like(d), d)
-        slope = jnp.sum(d * g)
-        step0 = jnp.minimum(
-            LS_STEP_MAX, jnp.maximum(carried, LS_STEP_MIN) * LS_STEP_GROW
-        )
-        trial = line_search(x, d, f, g, slope, step0)
-        xt, ft, gt, accepted, acc_step, d = jax.lax.cond(
-            jnp.logical_and(jnp.logical_not(trial[3]), jnp.logical_not(bad)),
-            lambda: (*line_search(x, -g, f, g, -gg, step0), -g),
-            lambda: (*trial, d),
-        )
-        conv = jnp.max(jnp.abs(gt)) < gtol
-        small = jnp.abs(ft - f) < ftol * (1.0 + jnp.abs(f))
-        beta = jnp.maximum(0.0, jnp.sum(gt * (gt - g)) / (gg + EPS))  # PR+
-        beta = jnp.where(small & ~small_seen, 0.0, beta)
-        use = jnp.logical_and(accepted, jnp.logical_not(bad))
-        nx = jnp.where(use, xt, x)
-        nf = jnp.where(use, ft, f)
-        ng = jnp.where(use, gt, g)
-        nd = jnp.where(use, -gt + beta * d, d)
-        ngg = jnp.where(use, jnp.sum(gt * gt), gg)
-        # Carry the accepted step only on a real iteration: on a `bad` one `d` was zeroed so
-        # the step is meaningless, and on exhaustion the slot holds the shrunk trial value.
-        nstep = jnp.where(use, acc_step, carried)
-        stop_next = jnp.logical_or(bad, jnp.logical_or(jnp.logical_not(accepted), conv))
-        return (
-            nx,
-            nf,
-            ng,
-            nd,
-            ngg,
-            it + 1,
-            stop_next,
-            nstep,
-            jnp.where(use, small, small_seen),
-        )
-
-    init = (x0, f0, g0, d0, gg0, jnp.asarray(0), stop0, s0, small0)
-    xf, ff, gf, df, ggf, _it, stopf, sf, smallf = jax.lax.while_loop(cond, body, init)
+    out, result = jax_cg(
+        energy_fn,
+        x0,
+        max_iter,
+        gtol=gtol,
+        max_atom_step=max_atom_step,
+        state=state,
+        **search_options,
+    )
     if return_state:
-        # `stop` is False exactly when the loop exited on the iteration budget, i.e. the
-        # solver is still live and the next block can resume it.
-        return xf, (ff, gf, df, ggf, sf, smallf, jnp.logical_not(stopf))
-    return xf
+        return out, result
+    return (out, result.info) if return_info else out
 
 
 def _cell_hash_jax(cells):
@@ -579,6 +448,8 @@ def make_minimizer(
     spec,
     max_iter: int = 100,
     method: str = "cg",
+    *,
+    return_info=False,
 ):
     """Return ``minimize(coords, sigma, step) -> coords``.
 
@@ -587,13 +458,29 @@ def make_minimizer(
     is pure and JIT/vmap-able, so it runs inside the diffusion loop's ``hk.scan``/``hk.vmap``
     (``step`` is a traced scalar there). ``method='cg'`` (the default) runs the pure-jax
     ``_cg_minimize``; any other value uses ``jaxopt.LBFGS`` (lazily imported). Per-restraint
-    gating uses ``spec.max_start_sigma()`` and the per-term masks baked into the spec, so
-    there is no ``start_sigma`` arg.
+    gating uses the host-spec window table and per-term masks. There is no
+    ``start_sigma`` arg. ``return_info=True`` fixes the output as ``(coords, CGInfo)``
+    with scalar JAX-array diagnostics; this is supported only for CG.
     """
     active_idx = jnp.asarray(spec.active_sites, dtype=jnp.int32)
     prepared = jax_energy.prepare_spec(spec)
-    max_ss = spec.max_start_sigma()
     is_cg = (method or "cg").lower() in ("cg", "ncg", "nonlinear-cg", "nonlinearcg")
+    if return_info and not is_cg:
+        raise ValueError("return_info is supported only for method='cg'")
+    from rgi_toolkit.optim._gates import active_windows, window_on
+    from rgi_toolkit.optim.info import CGInfo, inactive_info
+
+    windows = jnp.asarray(active_windows(spec))
+
+    def result(coords, info):
+        if not return_info:
+            return coords
+        dtype = jnp.result_type(coords.dtype, jnp.asarray(0.0).dtype)
+        return coords, CGInfo(
+            *(jnp.asarray(v, dtype=jnp.int32) for v in info[:4]),
+            *(jnp.asarray(v, dtype=dtype) for v in info[4:]),
+        )
+
     has_builtin = spec.has_conformer() or spec.has_per_entry()
     # custom restraints -> jnp closures (active_coords) -> scalar (weight folded);
     # selections baked as static jnp index arrays, so they trace inside lax.scan. Added to
@@ -658,6 +545,7 @@ def make_minimizer(
 
     def _descend(coords, sigma, step):
         active = coords[..., active_idx, :]
+        info = inactive_info()
         prepared_step = jax_energy.bind_peptide_states(active, prepared)
         # Distance + conformer + RMSD + group restraints all minimise ONE objective via the
         # CG (total_energy sums every active term; distance is now an autodiff CG term whose
@@ -805,7 +693,9 @@ def make_minimizer(
                 return e
 
             if is_cg and (has_vdw or has_active_vdw):
-                n_blocks = (max_iter + vdw_rebuild_interval - 1) // vdw_rebuild_interval
+                n_blocks = max(
+                    1, (max_iter + vdw_rebuild_interval - 1) // vdw_rebuild_interval
+                )
                 # `movement` is the worst-case travel between two staleness CHECKS, so it
                 # uses the CONSTANT interval, not the traced per-block count: a list now
                 # survives many blocks and the bound must cover one unchecked stretch.
@@ -846,9 +736,10 @@ def make_minimizer(
                 carry = {
                     "x": active,
                     "stopped": jnp.asarray(False),
-                    # CG state carried across blocks; the trailing flag marks it invalid
-                    # until a block has actually produced one.
-                    "cg": tuple(jnp.zeros(s.shape, s.dtype) for s in _probe[1]),
+                    # Preserve the named-tuple pytree, including aggregate diagnostics.
+                    "cg": jax.tree.map(
+                        lambda s: jnp.zeros(s.shape, s.dtype), _probe[1]
+                    ),
                 }
                 if has_vdw:
                     carry["fn"], carry["fm"] = _n0, _m0
@@ -925,8 +816,10 @@ def make_minimizer(
                         # a rebuild changed the objective -> the carried state describes the
                         # OLD pair list, so invalidate it (one evaluation per REBUILD, which
                         # is now rare, instead of one per block)
-                        cg_in = c["cg"][:-1] + (
-                            jnp.logical_and(c["cg"][-1], jnp.logical_not(rebuilt)),
+                        cg_in = c["cg"]._replace(
+                            valid=jnp.logical_and(
+                                c["cg"].valid, jnp.logical_not(rebuilt)
+                            )
                         )
                         updated, cg_out = _cg_minimize(
                             lambda x: energy_fn(x, *pairs),
@@ -938,18 +831,20 @@ def make_minimizer(
                         )
                         new["x"] = updated
                         new["cg"] = cg_out
-                        new["stopped"] = jnp.all(updated == a)
+                        new["stopped"] = jnp.logical_not(cg_out.valid)
                         return new
 
                     return jax.lax.cond(c["stopped"], lambda c: c, run_block, c)
 
-                opt = jax.lax.fori_loop(0, n_blocks, block_body, carry)["x"]
+                final = jax.lax.fori_loop(0, n_blocks, block_body, carry)
+                opt, info = final["x"], final["cg"].info
             elif is_cg:
-                opt = _cg_minimize(
+                opt, info = _cg_minimize(
                     lambda a: energy_fn(a, None, None, None, None),
                     active,
                     max_iter,
                     max_atom_step=step_cap,
+                    return_info=True,
                 )
             else:
                 import jaxopt  # only the non-default l-bfgs method needs jaxopt
@@ -974,19 +869,16 @@ def make_minimizer(
                     .params
                 )
             active = jnp.where(jnp.all(jnp.isfinite(opt)), opt, active)
-        return coords.at[..., active_idx, :].set(active)
+        return result(coords.at[..., active_idx, :].set(active), info)
 
     def minimize(coords, sigma, step=0):
         if not spec.is_active():
-            return coords
-        # Skip the whole step only when sigma exceeds every restraint's start_sigma. A
-        # step-windowed restraint keeps start_sigma=+inf -> max_ss=+inf -> never skipped
-        # here; its step gate (inside _descend) handles activation. The per-restraint
-        # sigma+step gates inside the energy still zero anything out of its window.
+            return result(coords, inactive_info())
+        # Use the same host-spec window table as Torch, with traced scalar gates.
         return jax.lax.cond(
-            jnp.asarray(sigma) <= max_ss,
+            window_on(windows, sigma, step, jnp),
             lambda c: _descend(c, sigma, step),
-            lambda c: c,
+            lambda c: result(c, inactive_info()),
             coords,
         )
 

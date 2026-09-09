@@ -67,14 +67,16 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
 
 3. **Optim layer** (`optim/{torch,jax}_optim.py`,
    GPU-complete): optimize only `active_sites` coords, scatter back. Default
-   `method='CG'`: torch = a hand-rolled nonlinear CG (Polak-Ribiere+, backtracking
-   Armijo); jax = a pure-jax port of it (`lax.while_loop`, JIT-able inside `lax.scan`).
-   The Armijo trial step is **warm-started** — carried across iterations and grown by one
-   backtrack, floored so it cannot ratchet to a no-op — because the accepted step is
-   typically far below 1 and restarting at 1.0 every iteration re-derived it (~6
-   energy+grad evaluations per iteration instead of ~2). All three implementations
-   (`torch_optim._minimize_cg`, `_torch_cg_gpu._cg_minimize_torch`, `jax_optim._cg_minimize`)
-   must move together — see `optim/_cg_config.py`.
+   `method='CG'` follows SciPy 1.17.1 PR+ and strong Wolfe (`c1=1e-4`, `c2=0.4`):
+   More--Thuente DCSRCH first, then Wolfe2 bracket/zoom, including the prospective
+   sufficient-descent check. `optim/_cg.py` and `_cg_linesearch.py` share the algorithm
+   across eager/compiled Torch and JAX `lax.while_loop`; constants are in `_cg_config.py`.
+   Runtime CG never imports SciPy. There is no Armijo-only fallback, energy-change stop,
+   or failed-search steepest-descent retry. VdW bounds one scalar step without clipping
+   atoms independently; an infeasible Wolfe search retains the last accepted coordinates
+   and ends the invocation. `return_info=True` on `minimize`/`get_minimizer` exposes
+   `CGInfo`/`CGStatus` (CG only). Neighbor blocks retain previous objective and counters;
+   rebuilds invalidate search history, while convergence/failure terminates all blocks.
    `method='l-bfgs'` is opt-in (torch `LBFGS` strong-Wolfe / `jaxopt.LBFGS`, lazily
    imported). Distance is CG-minimised like every other restraint (the old closed-form
    `distance_shift.py` was removed); to stop the `1/N` centroid-gradient dilution from
@@ -90,8 +92,8 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
    per-entry sigma/step gates are evaluated against the **host-side numpy spec arrays**
    (`getattr(self.spec, TERM_BY_KEY[gk].spec_attr)`), never the prepared device tensors — the
    latter costs one device-to-host sync per per-entry term per diffusion step on CUDA
-   (`on.tolist()`). RMSD needs the hand-rolled CG on BOTH backends (jaxopt NonlinearCG stalls on
-   RMSD's fixed-rotation `stop_gradient` gradient). There is **no numpy
+   (`on.tolist()`). Modified/stop-gradient objectives can fail strict Wolfe; inspect
+   diagnostics rather than assuming every returned point converged. There is **no numpy
    optimizer backend** (the old scipy path was removed); `numpy_energy` remains only as
    the pure-numpy energy reference for `tests/test_backend_parity.py`. Optimization
    requires torch or jax.
