@@ -6,7 +6,7 @@ only **(a) the file format, (b) where the config sits, (c) how an entity opts in
 restraints, and (d) the run command**. Get (b) and (c) right or the restraint silently does
 nothing.
 
-Each tool also has a full, every-variable example in the repo: `doc/<tool>.md` ("Full
+Each tool also has a full, every-variable example in the repo: `docs/<tool>.md` ("Full
 config"), and known-good fixtures at the repo root (`bench_in_<tool>_*`, `bench_m_<tool>_*`,
 `bench_side_chai_*`). Prefer copying the **newer `bench_m_*`** fixtures — some older
 `bench_in_*` ones predate the per-ligand conformer opt-in and carry a latent no-op.
@@ -88,11 +88,11 @@ in the config is inert (run the process on the JAX CPU platform to use CPU).
 | chai | `python -m chai_lab.main fold input.fasta out --restraints-config-path sidecar.yaml --num-diffn-timesteps 200 --num-diffn-samples 2 --seed 0 --use-msa-server --use-templates-server --no-use-esm-embeddings` (FASTA + out_dir are **positional**) |
 | alphafold3 | AF3's `run_alphafold.py` with `--json_path input.json` (+ `--model_dir`); MSA via local genetic search, no server |
 | openfold-3 | `pixi run -e openfold3-cuda12 run_openfold predict --query-json query.json --output-dir out --num-diffusion-samples 2 --use-msa-server false --use-templates false` |
-| esmfold2 | a Python script (see `esm_restr/restr_example.py` + `sbatch_esm_example.sh`); single-sequence, no MSA. Note the esmfold2 copy-over gotcha in `doc/esmfold2_restr.md` — without it the per-step hook is silently absent |
+| esmfold2 | a Python script (see `esm_restr/restr_example.py` + `sbatch_esm_example.sh`); single-sequence, no MSA. Note the esmfold2 copy-over gotcha in `docs/esmfold2_restr.md` — without it the per-step hook is silently absent |
 
 GPU work goes through `sbatch` on a compute node, never the login node. See the workspace
 `AGENTS.md` (also exposed as `CLAUDE.md`; "GPU work goes through sbatch") and each
-`doc/<tool>.md` for the full, copy-pasteable run script.
+`docs/<tool>.md` for the full, copy-pasteable run script.
 
 ## Which Python runs the validator
 

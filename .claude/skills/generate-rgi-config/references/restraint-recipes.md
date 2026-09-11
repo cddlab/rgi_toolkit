@@ -2,7 +2,7 @@
 
 This is the interview's hardest step: turn a plain-language goal into the right restraint
 type, penalty shape, and a concrete config block. Each recipe below is a *starting point* —
-copy it, swap the selections/targets, and confirm against `doc/config.md` for any key you
+copy it, swap the selections/targets, and confirm against `docs/config.md` for any key you
 change. Blocks are shown in YAML; for JSON tools (protenix/OpenDDE/AF3/openfold) it is the same
 structure in JSON.
 
@@ -290,7 +290,7 @@ other built-in geometry. No conformer entity opt-in is needed.
 Custom formulas use `harmonic(chiral(A,B,C,D), 2.0)`; Python functions use
 `ctx.harmonic(ctx.chiral("A", "B", "C", "D"), 2.0)`. Both accept references and custom
 `move` by selection name. Custom centroid gradients are ordinary mean derivatives;
-built-in group gradients include the group-size rescaling. See `doc/config.md` for
+built-in group gradients include the group-size rescaling. See `docs/config.md` for
 complete group/reference examples and sign conventions.
 
 ---
@@ -298,7 +298,7 @@ complete group/reference examples and sign conventions.
 ## Combining restraints
 
 All blocks compose — a single config can carry a distance restraint, a conformer block, and
-an RMSD restraint at once (see the repo's `bench_in_<tool>_distconf*` and `doc/<tool>.md`
+an RMSD restraint at once (see the repo's `bench_in_<tool>_distconf*` and `docs/<tool>.md`
 "Full config" examples, which exercise every block together). Add `verbose: true` so the
 setup log reports the per-type counts and the user can confirm each block built what they
 expect.

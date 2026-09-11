@@ -60,5 +60,5 @@ count must be non-zero, and for a distance restraint the log also reports the tw
 sizes (e.g. `938 / 690`), which you can sanity-check against the residue ranges. This is why
 SKILL.md insists on `verbose: true` and the spec-count check.
 
-Full grammar and the polymer-type semantics of `backbone`/`sidechain`: `doc/config.md`,
+Full grammar and the polymer-type semantics of `backbone`/`sidechain`: `docs/config.md`,
 "Atom-selection DSL".

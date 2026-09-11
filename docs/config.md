@@ -101,8 +101,8 @@ For Python input, use `resolve_restraints_config(config, base_dir=...)` or
 working directory. Resolution returns a new mapping without changing the caller's
 dictionary. YAML is loaded safely and lazily. Inline-only parsing performs no file I/O.
 
-Runnable examples: [whole config](../example/distance/alphafold3/qbp_25.00.json)
-and [one section](../example/distance/boltz-2/qbp_25.00.yaml).
+Runnable examples: [whole config](../examples/distance/alphafold3/qbp_25.00.json)
+and [one section](../examples/distance/boltz-2/qbp_25.00.yaml).
 
 ## Top-level keys
 

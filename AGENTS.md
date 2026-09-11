@@ -30,8 +30,8 @@ esmfold2 / opendde (torch) and alphafold3 (jax), covering 9 model variants (bolt
 protenix v1+v2 each share one adapter). The end-to-end guide for integrating a new tool is the
 `implement-rgi` skill, shared from `.claude/skills/` to `.agents/skills/` (alongside
 `generate-rgi-config` for authoring a config, `sync-upstream`, `create-github-release`).
-Per-tool as-built integration write-ups live in `doc/<tool>.md` (one per tool); the shared
-config + selection-DSL surface is `doc/config.md`. `example/` holds ready-to-run samples —
+Per-tool as-built integration write-ups live in `docs/<tool>.md` (one per tool); the shared
+config + selection-DSL surface is `docs/config.md`. `examples/` holds ready-to-run samples —
 4 restraint types × 7 predictors, each with a `run.sh` — so reuse those fixtures instead of
 authoring new ones.
 
@@ -190,7 +190,7 @@ medians): clashscore 4.81 unrestrained, 5.94 RMSD-only, **27.58 conformer-only, 
 conformer+RMSD** — i.e. it made stereochemistry worse on a predictor that already emits
 idealised geometry. That is why `7ee8123` stripped the polymer conformer layer (the
 `conformer_restraints_config` block AND the per-chain opt-in in its seven tool-specific
-shapes) out of every `example/rmsd/` fixture, using `stop_sigma: 1.0` to heal strain instead.
+shapes) out of every `examples/rmsd/` fixture, using `stop_sigma: 1.0` to heal strain instead.
 **Scope carefully: those arms used the DEFAULT reference-conformer targets, with no
 `monomer_library` key** — the ablation says nothing about library-derived targets, which are
 this section's whole point. Consequence for verification: the usual "a count must be non-zero
@@ -514,7 +514,7 @@ energy `energy(ctx) -> scalar`. Two authoring paths, ONE mechanism:
   A selection value may be reference-backed as `refN and <selection>` with an entry-local
   `refs.refN` definition; the same geometry vocabulary consumes it (`distance`/`angle`/`dihedral`/`improper`/`chiral`/
   `centroid`/`rg`/`norm`/`dot`/`coords`/`kabsch`/`rmsd`/`plane` + penalties + math incl.
-  periodicity-safe `wrap`; full table in `doc/config.md`). External-reference RMSD is `rmsd(A,B)`
+  periodicity-safe `wrap`; full table in `docs/config.md`). External-reference RMSD is `rmsd(A,B)`
   (prediction A, reference-backed B); rigid superposition is `kabsch(A,B)`; best-fit-plane flatness is
   `plane(A)` (own plane) / `plane(A,B)` (A into B's plane, either argument reference-backable).
   (There is no `ref(sel,r)` function — reference-backing is the `refN and <selection>` string form.)
@@ -563,7 +563,7 @@ must never be evaluated and multiplied by zero, because an undefined value would
 compile failure still degrades to the eager CG, which sums the identical terms. `import
 rgi_toolkit` stays numpy-only (torch/jax pulled lazily per backend by `get_ops`). Harness:
 `tests/test_custom.py` + `tests/test_custom_move.py` (both paths × 3-backend energy/grad
-parity + move pinning + jax-scan + torch minimize + DSL safety). Full config surface: `doc/config.md`.
+parity + move pinning + jax-scan + torch minimize + DSL safety). Full config surface: `docs/config.md`.
 
 ### Base-pair restraints (nucleic-acid Watson-Crick — a config-time macro)
 
@@ -590,7 +590,7 @@ pins the other base in the plane fit). `coplanar_slack` maps onto the shared fou
 `0` → `harmonic{target_plane: 0}`, `>0` → `flat-bottomed2{target_plane2: slack}` — numerically
 identical to the old one-sided `max(0, rms - slack)`. Verbose setup logs a
 SEPARATE line `base_pair=P pairs -> H h-bonds + C coplanar groups` (the generated restraints also
-show up in the `distances=` / `n_group_plane=` counts). Full field surface: `doc/config.md`.
+show up in the `distances=` / `n_group_plane=` counts). Full field surface: `docs/config.md`.
 
 ### Key design points
 

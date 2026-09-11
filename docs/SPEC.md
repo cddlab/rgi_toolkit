@@ -3,7 +3,7 @@
 This document describes the toolkit's implemented contracts and their verification.
 The [configuration reference](config.md) defines accepted keys, defaults, selection
 syntax, and complete examples. The [predictor guides](README.md) describe where each
-host invokes RGI; the maintained [example workflows](../example/README.md) are the
+host invokes RGI; the maintained [example workflows](../examples/README.md) are the
 starting point for predictor runs. Tests here exercise the shared toolkit without
 loading predictor weights or running a complete structure predictor.
 

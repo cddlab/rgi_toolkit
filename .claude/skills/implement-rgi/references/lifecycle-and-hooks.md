@@ -101,7 +101,7 @@ restraints_config:
       #        is their sole mover (settles w1:w2 between the targets). Not a soft-pull knob.
       # ref-anchored: optional; replace ONE group with "ref1 and <selection>" and define it under
       #        refs.ref1 (a fixed external PDB/mmCIF) — the other group moves toward it. angle/dihedral
-      #        allow up to 2/3 refs. Reference groups are permanently fixed. See doc/config.md.
+      #        allow up to 2/3 refs. Reference groups are permanently fixed. See docs/config.md.
       harmonic: {target_distance: 25.0}
       # alternatives: flat-bottomed {target_distance1, target_distance2},
       #               flat-bottomed1 {target_distance1}, flat-bottomed2 {target_distance2}
@@ -167,7 +167,7 @@ restraints_config:
       # weight: 1.0       # scale of the H-bonds AND the coplanarity plane
       # move: both        # both / 1 / 2 — 1 docks residue1 onto a fixed residue2
       # start_sigma / stop_sigma (or start_step / stop_step): gate the H-bond distances
-  custom_restraints_config:         # define your OWN restraint (not a built-in) — see doc/config.md
+  custom_restraints_config:         # define your OWN restraint (not a built-in) — see docs/config.md
     - energy: "(distance(A,B) - distance(C,D))**2"   # a math formula (expression DSL) over...
       selections: {A: "...", B: "...", C: "...", D: "..."}   # ...named atom selections
       weight: 1.0                   # or: use: "<registered name>"  (a @custom_restraint fn)
@@ -177,7 +177,7 @@ The `custom` restraint is the extension point: define an original restraint as a
 `energy` formula (the DSL — geometry/penalty/math vocabulary over named `selections`) or a
 Python `energy(ctx)` function (`@custom_restraint` / `CombinedRestraints.add_custom`). It needs
 no tool-side change (same `restraints_config` + `CombinedRestraints`) and runs on every backend.
-Full vocabulary + examples: `doc/config.md` (the `custom_restraints_config` section).
+Full vocabulary + examples: `docs/config.md` (the `custom_restraints_config` section).
 
 The `cistrans` term needs the ligand mol to carry real bond ORDERS (it keys on
 `BondType.DOUBLE`). boltz (CCD mol), protenix/openfold (biotite BondList), AF3

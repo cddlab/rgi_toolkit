@@ -11,8 +11,8 @@ This guide is for people **hacking on the engine itself**. Start here, then:
 - [`README.md`](README.md) — user-facing usage and the restraint catalogue.
 - [`AGENTS.md`](AGENTS.md) (= `CLAUDE.md`) — the deep architecture reference and full list of
   design invariants.
-- [`doc/config.md`](doc/config.md) — the complete `restraints_config` schema and selection DSL.
-- [`doc/`](doc/) — one per-tool integration write-up (`boltz_restr.md`, `alphafold3_restr.md`, …).
+- [`docs/config.md`](docs/config.md) — the complete `restraints_config` schema and selection DSL.
+- [`docs/`](docs/) — one per-tool integration write-up (`boltz_restr.md`, `alphafold3_restr.md`, …).
 
 Adding RGI support to a **new** predictor is a different task — use the `implement-rgi` skill
 (under `.claude/skills/` / `.agents/skills/`), not this doc.
@@ -97,7 +97,7 @@ The rule: a **new energy term** ⇒ implement it in all three backends **and** a
 key in the torch GPU pre-gate (`optim/torch_optim.py` `_gated_prepared`) — CPU CI cannot catch a
 term that silently goes ungated on the compiled GPU path. Then:
 
-- Config-surface changes ⇒ update [`doc/config.md`](doc/config.md).
+- Config-surface changes ⇒ update [`docs/config.md`](docs/config.md).
 - User-facing changes ⇒ update [`README.md`](README.md).
 
 ## Adding a new predictor
@@ -121,6 +121,6 @@ drift out of parity.
 | Doc                                    | Covers                                          |
 | -------------------------------------- | ----------------------------------------------- |
 | [`README.md`](README.md)               | user-facing usage, restraint catalogue          |
-| [`doc/config.md`](doc/config.md)       | full `restraints_config` schema + selection DSL |
-| [`doc/`](doc/) `*_restr.md`            | per-tool integration notes                      |
+| [`docs/config.md`](docs/config.md)       | full `restraints_config` schema + selection DSL |
+| [`docs/`](docs/) `*_restr.md`            | per-tool integration notes                      |
 | [`AGENTS.md`](AGENTS.md) / `CLAUDE.md` | deep architecture + invariants                  |

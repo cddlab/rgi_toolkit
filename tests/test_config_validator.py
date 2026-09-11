@@ -193,7 +193,7 @@ def test_validator_checks_base_triple_and_empty_windows(validator):
 EXAMPLES = sorted(
     path
     for pattern in ("*/*/*", "custom/*/*/*")
-    for path in (ROOT / "example").glob(pattern)
+    for path in (ROOT / "examples").glob(pattern)
     if path.suffix in {".json", ".yaml", ".yml", ".py"} and path.is_file()
 )
 

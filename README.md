@@ -7,27 +7,27 @@ Restraint-Guided Inference (RGI) toolkit for diffusion-based structure predictor
 
 | Model           | Integration | Backend | Details                                              |
 | --------------- | ----------- | ------- | ---------------------------------------------------- |
-| **Boltz-1**     | boltz       | torch   | [`doc/boltz_restr.md`](doc/boltz_restr.md)           |
-| **Boltz-2**     | boltz       | torch   | [`doc/boltz_restr.md`](doc/boltz_restr.md)           |
-| **AlphaFold3**  | alphafold3  | jax     | [`doc/alphafold3_restr.md`](doc/alphafold3_restr.md) |
-| **Protenix v1** | protenix    | torch   | [`doc/protenix_restr.md`](doc/protenix_restr.md)     |
-| **Protenix v2** | protenix    | torch   | [`doc/protenix_restr.md`](doc/protenix_restr.md)     |
-| **ESMFold2**    | esmfold2    | torch   | [`doc/esmfold2_restr.md`](doc/esmfold2_restr.md)     |
-| **OpenFold-3**  | openfold-3  | torch   | [`doc/openfold-3_restr.md`](doc/openfold-3_restr.md) |
-| **Chai-1**      | chai-lab    | torch   | [`doc/chai-lab_restr.md`](doc/chai-lab_restr.md)     |
-| **OpenDDE v1**  | opendde     | torch   | [`doc/opendde_restr.md`](doc/opendde_restr.md)       |
+| **Boltz-1**     | boltz       | torch   | [`docs/boltz_restr.md`](docs/boltz_restr.md)           |
+| **Boltz-2**     | boltz       | torch   | [`docs/boltz_restr.md`](docs/boltz_restr.md)           |
+| **AlphaFold3**  | alphafold3  | jax     | [`docs/alphafold3_restr.md`](docs/alphafold3_restr.md) |
+| **Protenix v1** | protenix    | torch   | [`docs/protenix_restr.md`](docs/protenix_restr.md)     |
+| **Protenix v2** | protenix    | torch   | [`docs/protenix_restr.md`](docs/protenix_restr.md)     |
+| **ESMFold2**    | esmfold2    | torch   | [`docs/esmfold2_restr.md`](docs/esmfold2_restr.md)     |
+| **OpenFold-3**  | openfold-3  | torch   | [`docs/openfold-3_restr.md`](docs/openfold-3_restr.md) |
+| **Chai-1**      | chai-lab    | torch   | [`docs/chai-lab_restr.md`](docs/chai-lab_restr.md)     |
+| **OpenDDE v1**  | opendde     | torch   | [`docs/opendde_restr.md`](docs/opendde_restr.md)       |
 
-See each tool's guide in [`doc/`](doc/) for install / run details, and
-[`doc/config.md`](doc/config.md) for the full `restraints_config` schema. For common failure modes
-and troubleshooting guidance, see the [`FAQ`](doc/FAQ.md).
-The [`implementation specification`](doc/SPEC.md) covers API contracts, energy and
+See each tool's guide in [`docs/`](docs/) for install / run details, and
+[`docs/config.md`](docs/config.md) for the full `restraints_config` schema. For common failure modes
+and troubleshooting guidance, see the [`FAQ`](docs/FAQ.md).
+The [`implementation specification`](docs/SPEC.md) covers API contracts, energy and
 gradient conventions, optimizer references, and independent SciPy/E2E validation.
 
-**Ready-to-run samples live in [`example/`](example/)** — 4 restraint types (`distance/`,
+**Ready-to-run samples live in [`examples/`](examples/)** — 4 restraint types (`distance/`,
 `angle/`, `rmsd/`, `custom/dist-diff/`) × 7 predictors, each a real system with a `run.sh`
 that finds the matching fork's env and folds. Start there rather than from the snippets
-below: `bash example/distance/boltz-2/run.sh`. It needs the matching fork checked out as a
-sibling of `RGI-toolkit/` and a GPU node; see [`example/README.md`](example/README.md) for the
+below: `bash examples/distance/boltz-2/run.sh`. It needs the matching fork checked out as a
+sibling of `RGI-toolkit/` and a GPU node; see [`examples/README.md`](examples/README.md) for the
 per-tool prerequisites.
 
 > **Stuck writing a config?** Run the `generate-rgi-config` skill in Claude Code
@@ -81,7 +81,7 @@ target). Each restraint is gated by an optional `start_sigma` (active once
 
 RGI-toolkit is the shared engine; each integrated tool **declares it as a dependency**, so installing
 a tool (`uv pip install -e .` / `pixi install`) pulls it automatically — see the tool's guide in
-[`doc/`](doc/). To hack on the engine itself, in this checkout:
+[`docs/`](docs/). To hack on the engine itself, in this checkout:
 
 ```bash
 uv sync          # dev environment for this repo
@@ -176,7 +176,7 @@ restr.finalize(coords, step)
 
 Use `{"config_path": "configs/restraints.yaml"}` at the root or in an individual
 restraint section to load a JSON/YAML configuration. Includes resolve relative to
-their containing file; see [external configuration files](doc/config.md#external-configuration-files).
+their containing file; see [external configuration files](docs/config.md#external-configuration-files).
 
 For a **JAX** tool whose loop runs inside `lax.scan` (no Python callbacks), build the
 spec outside the scan and grab the pure closure with `restr.get_minimizer()`
@@ -187,8 +187,8 @@ The default CG follows SciPy 1.17.1 PR+ with strong-Wolfe searches. Set
 `return_info=True` on `minimize` or `get_minimizer` to obtain `(coords, CGInfo)`
 and distinguish gradient convergence from search failure or an iteration limit.
 A VdW displacement bound can exclude every acceptable Wolfe step; CG then keeps
-the last accepted coordinates. See the [solver specification](doc/SPEC.md#nonlinear-conjugate-gradient)
-and [diagnostic fields](doc/SPEC.md#public-lifecycle).
+the last accepted coordinates. See the [solver specification](docs/SPEC.md#nonlinear-conjugate-gradient)
+and [diagnostic fields](docs/SPEC.md#public-lifecycle).
 
 ### Atom selection syntax
 
@@ -265,7 +265,7 @@ chiral_restraints_config:
 Choose the sign for the ordered selections; swapping two groups reverses it.
 Custom formulas provide `chiral(A,B,C,D)`, for example `harmonic(chiral(A,B,C,D), 2.0)`;
 Python callables provide `ctx.chiral("A", "B", "C", "D")`. See
-[`doc/config.md`](doc/config.md#chiral_restraints_config-list) for group and reference examples.
+[`docs/config.md`](docs/config.md#chiral_restraints_config-list) for group and reference examples.
 
 ### Plane restraints
 
@@ -291,7 +291,7 @@ always 0); targets are in **Angstrom** (`target_plane` / `target_plane1` / `targ
 defaults to every group free — a plane has no anchor to pin. Writing one group as
 `refN and <selection>` switches the meaning: the plane is taken from the **reference** structure and
 held fixed, so the prediction group is pulled *onto* it. See
-[`doc/config.md`](doc/config.md#plane_restraints_config-list).
+[`docs/config.md`](docs/config.md#plane_restraints_config-list).
 
 ### Base-pair restraints
 
@@ -313,7 +313,7 @@ base_pair_restraints_config:
 
 The sigma/step window and `move` apply to the generated H-bond distances **and** to the coplanarity
 plane (which is emitted as a `plane_restraints_config` restraint, so `stop_sigma` releases both
-together). See [`doc/config.md`](doc/config.md#base_pair_restraints_config-list) for atom pairs,
+together). See [`docs/config.md`](docs/config.md#base_pair_restraints_config-list) for atom pairs,
 validation rules, and gating details.
 
 ### Custom restraints
@@ -359,7 +359,7 @@ of names; omitted/`all`/`both` moves every prediction selection, while ref-backe
 `eval`). A custom selection can use
 `refN and <selection>`; all geometry functions accept it, and `rmsd(A,B)` requires prediction
 selection A and reference-backed selection B. Full reference:
-[`doc/config.md`](doc/config.md) (the `custom_restraints_config` section).
+[`docs/config.md`](docs/config.md) (the `custom_restraints_config` section).
 
 ### Implementing a framework adapter
 

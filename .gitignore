@@ -207,7 +207,7 @@ marimo/_lsp/
 __marimo__/
 
 # Regenerable example predictions and downloaded RMSD references
-/example/**/out/
-/example/**/out_*.cif
-/example/rmsd/*/1GGG.cif
-/example/rmsd/*/1WDN.cif
+/examples/**/out/
+/examples/**/out_*.cif
+/examples/rmsd/*/1GGG.cif
+/examples/rmsd/*/1WDN.cif

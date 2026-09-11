@@ -28,7 +28,7 @@ Each `run.sh` locates the workspace root, activates/uses the matching fork's env
 
 - **The matching fork must exist as a sibling of `RGI-toolkit/`** (e.g. `../boltz_restr`,
   `../esm_restr`) with its venv/pixi env built. `run.sh` finds it automatically. See each
-  fork's `RGI-toolkit/doc/<tool>.md` for install steps.
+  fork's `RGI-toolkit/docs/<tool>.md` for install steps.
 - **Run on a GPU compute node** — not a shared login node. GPU generations: RTX 4090 (sm_89)
   and Blackwell (sm_120).
 - **protenix runs on sm_89 only** (Blackwell emits silent all-NaN). The default esm/chai torch
@@ -42,7 +42,7 @@ Each `run.sh` locates the workspace root, activates/uses the matching fork's env
 
 ## Notes
 
-- For conformer settings beyond these examples, see [the configuration guide](../doc/config.md#conformer_restraints_config-single-dict).
+- For conformer settings beyond these examples, see [the configuration guide](../docs/config.md#conformer_restraints_config-single-dict).
   `cistrans` covers protein chi, peptide omega and acyclic sp2 torsions as well as ligand E/Z.
   A configured monomer library supplies dictionary targets; otherwise the new polymer torsions
   use documented RDKit-based approximations without downloading a dictionary. VdW now uses
@@ -63,7 +63,7 @@ Each `run.sh` locates the workspace root, activates/uses the matching fork's env
   ligand or multiple chains, qualify each group with `chain A and (...)`** or the bare `resid`
   range will also sweep in the ligand's atoms.
 - `resid` is the per-chain 1-based ordinal (not the author residue number). Full schema:
-  `../doc/config.md`.
+  `../docs/config.md`.
 - Set `verbose: true` (already on) and check the `setup` log line `built spec: ... distances=..
   group_angle=.. rmsd=..` — the count must be non-zero, or the restraint silently did nothing.
   The `rmsd/` example inverts this for the conformer half: its correct signal is an **absence**

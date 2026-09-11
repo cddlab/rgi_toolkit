@@ -42,7 +42,7 @@ DSL) or a Python `energy(ctx)` function — both run on every backend. Likewise,
 angle / dihedral / custom group can be **reference-anchored** to an external PDB/mmCIF via the
 `refN and <selection>` + `refs.refN` syntax. Both need **no tool-side change** (they flow
 through the same `restraints_config` + `CombinedRestraints`).
-See `references/lifecycle-and-hooks.md` and `doc/config.md`.
+See `references/lifecycle-and-hooks.md` and `docs/config.md`.
 
 ## Core principle: rgi_toolkit does the heavy lifting
 

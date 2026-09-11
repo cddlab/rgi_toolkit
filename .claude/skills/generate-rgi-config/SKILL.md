@@ -39,7 +39,7 @@ custom one:
 
 Full mapping + worked phrasings: **`references/restraint-recipes.md`** (read it when you
 are unsure which type a goal needs). Full schema (every key, default, allowed value):
-the repo's **`doc/config.md`** — it is the source of truth; do not guess defaults.
+the repo's **`docs/config.md`** — it is the source of truth; do not guess defaults.
 
 ## The audience is a beginner — interview, then translate
 
@@ -110,26 +110,26 @@ silent failures:
   conformer terms). Setting one at the top level is an error.
 - **Weight**: default `1.0` is right for almost everything. For a single distance restraint
   `weight` is a *no-op* (it reaches the target exactly regardless) — don't present it as a
-  strength knob there. See `doc/config.md` for the exact semantics.
+  strength knob there. See `docs/config.md` for the exact semantics.
 - **Polymer dictionary geometry**: `conformer_restraints_config.monomer_library: true`
   acquires and caches the public CCP4 library when setup needs it. Use a path for an existing
   snapshot; `{on_missing: error}` requests the automatic cache with strict coverage. Keep
   the entity opt-in explicit. An empty conformer block enables bond/angle/chiral/cistrans/vdw at weight 1; plane requires an explicit positive weight. Dictionary bond/angle/chiral/plane and
   chi/omega/sp2 torsions use ESD-based inverse-variance weights automatically, with default
   slack zero. ESD is relative strength, not a tolerance band. Do not copy ESD into `slack`;
-  consult `doc/config.md` for units, peptide state selection and offline cache behavior.
+  consult `docs/config.md` for units, peptide state selection and offline cache behavior.
 - **Without a dictionary**: protein chi/omega and acyclic sp2 torsions use documented
   RDKit-based approximations; omitting `monomer_library` never acquires a dictionary.
   VdW uses chemical contact rules and ESD 0.2 A (dummy atoms 0.3 A), with `scale` default
   1.0. Existing VdW weights may need retuning against unnormalized reference geometry;
-  do not assume the former 0.75-scale objective. Read `doc/config.md` before migrating one.
+  do not assume the former 0.75-scale objective. Read `docs/config.md` before migrating one.
 
 ### 5. Write the config in the right place
 
 - If the user **already has an input file**, inject the `restraints_config` (and the
   per-entity opt-in flag if conformer is used) into it.
 - If they **don't**, scaffold a minimal runnable input from the closest example in the
-  repo (`example/<type>/<tool>/`, `bench_in_<tool>_*`, or the `doc/<tool>.md` "Full config"
+  repo (`examples/<type>/<tool>/`, `bench_in_<tool>_*`, or the `docs/<tool>.md` "Full config"
   example) and fill in
   their sequences/ligand. Tell them which fields are theirs to replace.
 - For **chai**, write the sidecar YAML *and* remind them it pairs with a FASTA.
@@ -138,7 +138,7 @@ silent failures:
 Use `config_path` to reuse the entire restraints config or one whole section. The
 reference wrapper contains only this key; never merge local overrides into it. JSON/YAML
 paths are relative to their containing file, including external reference structures.
-The validator resolves the same files as inference. Read `doc/config.md` under
+The validator resolves the same files as inference. Read `docs/config.md` under
 *External configuration files* for the file shapes and examples.
 
 ### 6. CONFORMER OPT-IN — the #1 silent no-op
@@ -202,5 +202,5 @@ plainly what validation does **not** prove:
 - `references/selection-dsl.md` — the atom-selection language, beginner-first, with the
   `resid` / `chain` gotcha and ready-made patterns.
 - `references/tools.md` — per-tool placement, file format, conformer opt-in, run command.
-- the repo's `doc/config.md` — the full, authoritative schema (every key/default/value).
+- the repo's `docs/config.md` — the full, authoritative schema (every key/default/value).
   Always defer to it for anything not spelled out above.
