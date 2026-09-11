@@ -68,10 +68,8 @@ def _make_spec(
         weight=np.array([0.1, 0.1]),
         mask=np.array([1.0, 1.0]),
     )
-    # plane: best-fit-plane over padded atom GROUPS (variable size). Random positions
-    # make each group non-planar so energy > 0. Three rows exercise every path: a 5-atom
-    # group, a 4-atom group padded to width 5 (col idx 0 / grp_mask 0), and a masked-out
-    # padding restraint (mask 0). Its plane normal is stop-gradient'd (like rmsd/group).
+    # Plane rows cover a full five-atom group, a four-atom padded group, and
+    # a masked-out restraint. Random coordinates give nonzero energy.
     plane = (
         None
         if not include_plane
@@ -91,11 +89,8 @@ def _make_spec(
             mask=np.array([1.0, 1.0, 0.0]),
         )
     )
-    # group_plane: the STANDALONE plane term (plane_restraints_config). Same measured
-    # quantity + stop-gradient normal as `plane`, so it shares the include_plane flag and
-    # the numpy-FD grad carve-out; it differs in carrying the four distance-style types, a
-    # per-ATOM `free` (move) mask, and a per-entry gate. Rows: a full 5-atom group with a
-    # pinned atom, a padded 4-atom flat-bottomed2 group, and a masked-out padding row.
+    # Standalone planes additionally exercise per-atom move masks, restraint types
+    # and per-entry gates. Include a pinned atom, padding and a masked-out row.
     group_plane = (
         None
         if not include_plane
@@ -168,11 +163,8 @@ def _make_spec(
         weight=np.array([0.2, 0.2, 0.2]),
         mask=np.array([1.0, 1.0, 0.0]),
     )
-    # group-centroid angle: 2 restraints (vertex = group 2), exercising the harmonic + flat-
-    # bottomed types (geom_type 0/1). Row 1 uses groups of 1 (intra-group padding).
-    # move_free all 1 (every group free) so the numpy-FD gradient parity below holds
-    # (a pinned group diverges from FD; tested torch-vs-jax in test_optim). start_sigma
-    # [100, 5] keeps the gating-test invariants.
+    # Angle rows cover harmonic/flat-bottomed types and intra-group padding.
+    # Keep sigma windows [100, 5] for the gating tests.
     group_angle = (
         None
         if not include_groups
@@ -186,7 +178,7 @@ def _make_spec(
             target1=np.array([1.2, 2.0]),  # harmonic target / flat-bottomed lower
             target2=np.array([0.0, 2.4]),  # flat-bottomed upper (unused for harmonic)
             geom_type=np.array([0, 1], dtype=np.int64),  # harmonic + flat-bottomed
-            move_free=np.ones((2, 3)),  # all groups free (FD-grad parity needs it)
+            move_free=np.ones((2, 3)),  # all groups free
             weight=np.array([1.0, 0.5]),
             mask=np.array([1.0, 1.0]),
             start_sigma=np.array([100.0, 5.0]),  # different per-restraint start_sigma
@@ -283,7 +275,7 @@ def test_energy_parity():
         jax_energy.total_energy(jnp.asarray(pos), jax_energy.prepare_spec(spec))
     )
 
-    assert e_np > 0.0  # sanity: restraints are violated
+    assert e_np > 0.0
     assert abs(e_np - e_t) < 1e-6, f"numpy={e_np} torch={e_t}"
     assert abs(e_np - e_j) < 1e-6, f"numpy={e_np} jax={e_j}"
 
@@ -305,7 +297,6 @@ def test_grad_parity():
     spec = _make_spec(include_groups=False, include_distance=False, include_plane=False)
     pos = _positions()
 
-    # numpy finite-difference gradient (ground truth for autodiff)
     prep_np = numpy_energy.prepare_spec(spec)
 
     def f(x):
@@ -313,7 +304,6 @@ def test_grad_parity():
 
     g_fd = _fd_grad(f, pos.flatten()).reshape(N_ACTIVE, 3)
 
-    # torch autograd
     pt = torch.tensor(pos, dtype=torch.float64, requires_grad=True)
     e_t = torch_energy.total_energy(
         pt, torch_energy.prepare_spec(spec, dtype=torch.float64)
@@ -321,7 +311,6 @@ def test_grad_parity():
     e_t.backward()
     g_t = pt.grad.numpy()
 
-    # jax grad
     prep_j = jax_energy.prepare_spec(spec)
     g_j = np.asarray(
         jax.grad(lambda x: jax_energy.total_energy(x, prep_j))(jnp.asarray(pos))
@@ -379,7 +368,7 @@ def test_interligand_vdw_energy_parity():
     e_j = float(
         jax_energy.total_energy(jnp.asarray(pos), jax_energy.prepare_spec(spec))
     )
-    assert e_np > 0.0  # the overlap is penalised
+    assert e_np > 0.0
     assert abs(e_np - e_t) < 1e-6, f"numpy={e_np} torch={e_t}"
     assert abs(e_np - e_j) < 1e-6, f"numpy={e_np} jax={e_j}"
 
@@ -408,7 +397,6 @@ def test_sigma_gating_parity():
             float(jax_energy.total_energy(pj, prep_j, sigma)),
         )
 
-    # cross-backend agreement at several noise levels
     for sigma in (200.0, 50.0, 8.0, 3.0):
         en, et, ej = e_all(sigma)
         assert abs(en - et) < 1e-6 and abs(en - ej) < 1e-6, f"sigma={sigma}"
@@ -458,7 +446,6 @@ def test_cistrans_degenerate_gradient_parity():
     prep_j = jax_energy.prepare_spec(spec)
     for name, p in cases.items():
         pos = np.array(p, dtype=np.float64)
-        # energy: finite and equal across backends
         e_np = float(numpy_energy.total_energy(pos, prep_np))
         e_t = float(
             torch_energy.total_energy(torch.tensor(pos, dtype=torch.float64), prep_t)
@@ -853,13 +840,8 @@ def test_jax_torch_cg_same_minimum_at_default_iters():
     from rgi_toolkit.optim._torch_cg_gpu import _cg_minimize_torch
     from rgi_toolkit.optim.jax_optim import _cg_minimize
 
-    # conformer + vdw only (no rmsd, group, plane, OR distance); the CG handles conf
-    # here. This test originally excluded distance via include_distance=False (distance was
-    # closed-form); with that flag gone, distance is dropped from the spec instead — its
-    # reduced-mass centroid_eff rescale shifts the fixed-iteration CG minimum past this fuzzy
-    # tolerance (same reason groups/plane are excluded — plane's stop-gradient normal
-    # likewise). Distance CG-convergence parity is covered directly in test_optim; group
-    # convergence parity likewise.
+    # Isolate ordinary-gradient conformer/VdW convergence. Distance, group and
+    # RMSD convergence have separate tests for their modified gradients.
     spec = _make_spec(include_groups=False, include_plane=False, include_distance=False)
     pos = _positions(0)
     prep_t = torch_energy.prepare_spec(spec, dtype=torch.float64)
@@ -1101,10 +1083,7 @@ def test_step_window_gating_parity():
 
 
 def test_chiral_flat_bottom_zero_at_reference():
-    """chiral_energy is flat-bottomed around vol0: ZERO within ±slack (so the
-    reference geometry has zero energy), quadratic outside, equal across backends.
-    Regression for the old vol0∓slack shifted harmonic (nonzero floor at the
-    reference + a minimum biased toward chiral inversion)."""
+    """Chiral energy is zero within slack of vol0 and quadratic outside across backends."""
     torch = pytest.importorskip("torch")
     jax = pytest.importorskip("jax")
     jax.config.update("jax_enable_x64", True)
@@ -1129,8 +1108,7 @@ def test_chiral_flat_bottom_zero_at_reference():
         conf_start_sigma=10.0,
     )
     prep_np = numpy_energy.prepare_spec(spec)
-    # at the reference geometry vol == vol0 -> inside the band -> ZERO (old code
-    # returned weight*slack**2 = 2.5e-4 here)
+    # At the reference geometry, the chiral volume lies inside the slack band.
     assert float(numpy_energy.total_energy(pos, prep_np)) == pytest.approx(
         0.0, abs=1e-12
     )

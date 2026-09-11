@@ -29,13 +29,8 @@ _LIGAND_ENTITY = 3  # chai EntityType.LIGAND
 _TENSORCODE_PAD = 255  # chai TENSORCODE_PAD_TOKEN
 
 
-# chai EntityType -> normalized polymer string for AtomRecord.mol_type. EntityType is
-# PROTEIN=0/RNA=1/DNA=2/LIGAND=3/POLYMER_HYBRID=4/WATER=5/UNKNOWN=6/MANUAL_GLYCAN=7
-# (RNA BEFORE DNA, so the shared MOLTYPE_BY_ID — DNA=1/RNA=2 — can't be reused).
-# get_entity_type derives it per-entity from gemmi polymer_type, so a MODIFIED residue in
-# a protein chain stays PROTEIN -> forwarding it powers protein/dna/rna +
-# backbone/sidechain selectors and RMSD align pairing for modified residues. Non-polymer
-# kinds (hybrid/water/unknown) map to None.
+# Chai uses RNA=1 and DNA=2, unlike the shared boltz/ESM enum. Entity types
+# preserve polymer identity for modified residues.
 _MOLTYPE_BY_ID_CHAI = {0: "protein", 1: "rna", 2: "dna", 3: "ligand", 7: "ligand"}
 
 
@@ -62,10 +57,8 @@ class ChaiStructureAdapter:
     ) -> None:
         self.sc = structure_context
         self._n_atom = int(num_atoms)
-        # {subchain_id -> SMILES} for ligand chains (chai drops bond ORDERS at every layer,
-        # so the conformer mol is otherwise perceived all-single and can't be UFF-relaxed to
-        # the aromatic-ideal target). Structure-context heavy atoms can be reordered;
-        # _mol_from_smiles maps them by atom name.
+        # Source SMILES provide bond orders missing from the structure context.
+        # _mol_from_smiles aligns the reordered heavy atoms by name.
         self._smiles_by_subchain = dict(smiles_by_subchain or {})
         # {subchain_id -> bool} per-chain conformer-restraints opt-in. Chai's FASTA
         # cannot carry this flag, so it comes from the sidecar map keyed by chain id.
@@ -76,7 +69,6 @@ class ChaiStructureAdapter:
         sub = np.asarray(self.sc.subchain_id)  # (n_tokens, 4) uint8
         return [_decode_tensorcode(sub[t]) for t in range(sub.shape[0])]
 
-    # --- FrameworkAdapter -----------------------------------------------------
     def iter_atoms(self) -> Iterator[AtomRecord]:
         sc = self.sc
         if sc is None:
@@ -85,20 +77,12 @@ class ChaiStructureAdapter:
         exists = np.asarray(sc.atom_exists_mask, dtype=bool)
         names = getattr(sc, "atom_ref_name", None)  # list[str], per-atom
         token_chain = self._token_chains()
-        # per-token 3-letter residue name (sc.residue_names is a cached_property, NOT a
-        # method); powers AtomRecord.resname -> pairing="align" RMSD restraints.
+        # residue_names is a cached property, not a method.
         resn = getattr(sc, "residue_names", None)
-        # per-token entity type -> AtomRecord.mol_type (normalized polymer string);
-        # absent -> None.
         ent = getattr(sc, "token_entity_type", None)
         ent = np.asarray(ent) if ent is not None else None
-        # per-chain 1-based PER-TOKEN ordinal (the cross-tool convention shared by
-        # boltz/protenix/esmfold2): a standard polymer residue is one token, so all
-        # its atoms share an ordinal (= residue ordinal); a ligand atom and each atom
-        # of a NON-standard residue is its own token, so it gets its own ordinal.
-        # (Previously chai grouped non-standard residues by token_residue_index, which
-        # gave them ONE ordinal and diverged from the other tools for that edge case;
-        # standard residues + ligands are unaffected by this change.)
+        # Per-chain token ordinals: one per standard residue, one per atom for
+        # ligands and non-standard residues.
         chain_seen: dict[str, dict[int, int]] = {}
         chain_counter: dict[str, int] = {}
         for i in range(len(atom_token)):
@@ -125,7 +109,6 @@ class ChaiStructureAdapter:
                 ),
             )
 
-    # --- ConformerAdapter -----------------------------------------------------
     def num_atoms(self) -> int:
         return self._n_atom
 
@@ -162,9 +145,8 @@ class ChaiStructureAdapter:
 
         chai names a SMILES ligand's atoms
         ``element+counter`` over the AddHs atom order, uppercased; we replicate that
-        naming on a fresh ``MolFromSmiles`` and map it to chai's atoms BY NAME --
-        chai reorders ligand atoms, so a positional map is wrong (verified: by-order RMS
-        came out WORSE than perceive).
+        naming on a fresh ``MolFromSmiles`` and map it to chai's atoms by name because
+        Chai may reorder ligand atoms.
 
         Renumber the source graph itself: rebuilding from elements and bond orders
         loses formal charges, isotopes and explicit H counts. That can make charged
@@ -194,10 +176,7 @@ class ChaiStructureAdapter:
             return None, None
 
         def _norm(nm: object) -> str:
-            # chai atom names are <elem><counter>_<copy> (C1_1); drop the trailing
-            # _<digits> copy index to match build_ligand_mol's <elem><counter> (C1).
-            # else the by-name map fails and chai falls back to perception, which
-            # fragments on large ligands -> incomplete restraint (n_active<natoms).
+            # Drop Chai's copy suffix (C1_1 -> C1) before matching source atom names.
             s = str(nm).strip().upper()
             base, _, suf = s.rpartition("_")
             return base if (base and suf.isdigit()) else s
@@ -243,16 +222,8 @@ class ChaiStructureAdapter:
             [int(token_entity[int(t)]) == _LIGAND_ENTITY for t in atom_token]
         )
         lig_mask = is_lig & exists
-        # IMPORTANT: chai's ``atom_covalent_bond_indices`` holds ONLY inter-residue
-        # links (glycan inter-sugar bonds + user COVALENT-constraint bonds); for a
-        # normal small-molecule ligand it is EMPTY (intra-ligand connectivity lives
-        # in the per-residue reference ConformerData, which is dropped during
-        # tokenization). So we do NOT source the conformer mol's bonds from it —
-        # instead we perceive connectivity from the reference conformer geometry
-        # (atom_ref_pos) via build_ligand_mol(perceive_bonds=True). That topology is
-        # self-consistent with the conformer, so the bond/angle/chiral restraints
-        # keep the ligand at its ideal geometry. (Without this, conformer restraints
-        # were a silent no-op on chai ligands.)
+        # atom_covalent_bond_indices contains inter-residue links only. Without
+        # source SMILES, infer intra-ligand connectivity from reference geometry.
         for ch in np.unique(per_atom_chain[lig_mask]):
             idxs = np.where((per_atom_chain == ch) & lig_mask)[0]
             coords = ref_pos[idxs]
@@ -275,14 +246,8 @@ class ChaiStructureAdapter:
                         "stereochemistry to the model atom order"
                     )
             if mol is not None:
-                # Replace the target geometry with a stereo-correct ETKDG ideal conformer
-                # (mirrors protenix): chai's atom_ref_pos can carry the WRONG enantiomer
-                # (e.g. 6fck) and the chiral restraint then faithfully enforces it --
-                # finalize chiral=0 yet the prediction's CIP disagrees with the SMILES.
-                # stereo_mol holds the intended stereo in chai atom order. Rebuild the
-                # topology on the ideal coords so the featurizer sees matching geometry.
-                # The featurizer validates source stereo if embedding falls back to
-                # the model conformer.
+                # Embed source stereo to repair inverted model references. Featurizer
+                # validation also covers fallback to model coordinates.
                 ideal = (
                     _generate_ideal_conformer(stereo_mol)
                     if stereo_mol is not None

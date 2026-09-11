@@ -2,9 +2,7 @@
 
 This is the single place where conformer restraints (bond/angle/chiral/cistrans/
 plane) are derived from RDKit mols. Each ligand supplies its own
-``global_indices``, so multiple ligands produce non-colliding restraints — there is
-no per-batch state and no hard-coded ligand index (the multi-ligand bug in the old
-code).
+``global_indices``, so multiple ligands produce non-colliding restraints.
 
 Flow:
   1. extract bond/angle/chiral/cistrans/plane restraints per ligand in GLOBAL atom
@@ -63,11 +61,9 @@ _CHIRAL_TAGS = (
     Chem.ChiralType.CHI_TETRAHEDRAL_CW,
     Chem.ChiralType.CHI_TETRAHEDRAL_CCW,
 )
-# A candidate plane group (ring / sp2 functional group) is kept only if its reference
-# conformer is coplanar to within this max out-of-plane deviation (Angstrom). Aromatic /
-# conjugated rings are flat (<0.05 A); a puckered saturated ring (cyclohexane chair)
-# deviates ~0.25 A, so 0.1 A cleanly selects planar groups WITHOUT trusting the
-# (SanitizeMol-dependent, unreliable) RDKit aromaticity flag.
+# Maximum reference out-of-plane deviation (Angstrom). The 0.1 A threshold
+# separates flat aromatic/conjugated rings from puckered saturated rings
+# without relying on RDKit aromaticity flags.
 _PLANE_TOL = 0.1
 
 
@@ -153,29 +149,15 @@ def _extract_conformer(
         stereo_topology = stereo_mol if stereo_mol is not None else mol
         crds = np.asarray(lc.conf_coords, dtype=np.float64)
         gidx = np.asarray(lc.global_indices, dtype=np.int64)
-        # Derive the bond/angle/chiral/cistrans TARGETS from a force-field-relaxed copy of
-        # the tool's conformer. Each tool's cached conformer carries its own idiosyncrasies
-        # (the boltz v2 ~/.boltz/mols cache Kekule-localizes aromatic rings ~1.34/1.48;
-        # other tools' ref_pos has non-ideal bond/angle lengths), so without this the
-        # restraint just reproduces them and is a no-op vs the force-field-ideal the emb
-        # metric measures against. ff_relax KEEPS the fold (local minimisation from the
-        # existing conformer) -- unlike a from-scratch ETKDG embed, which mis-folds
-        # big/flexible/phosphate ligands -- and brings bonds/angles onto the shared
-        # force-field ideal. Falls back to the cached coords if UFF fails (an explicitly
-        # requested MMFF raises instead -- see ff_relax).
-        # Guard: only when the mol has REAL bond orders (an aromatic or double bond).
-        # chai/esmfold2 expose no bond orders -> their mol is all-single, so the relax would
-        # localize aromatic rings to single-bond lengths (~1.5), corrupting the target;
-        # for those tools the cached conformer holds the real reference geometry.
+        # Relax locally to avoid using distorted cached geometry as the target.
+        # Only aromatic/double bonds establish reliable bond orders; relaxing an
+        # all-single perceived graph would distort aromatic bond lengths.
+        # UFF may fall back to cached coordinates; an explicit MMFF request raises.
         has_orders = any(
             b.GetIsAromatic() or b.GetBondType() == Chem.BondType.DOUBLE
             for b in mol.GetBonds()
         )
         if do_relax and not has_orders and ff != "uff":
-            # An explicitly requested MMFF that would silently not run at all. Raise rather
-            # than skip -- "I set relax_force_field.ligand: mmff94s and got
-            # un-relaxed targets" is exactly the invisible outcome the explicit setting
-            # is meant to rule out.
             _at = f"global atom index {int(gidx[0])}, " if len(gidx) else ""
             raise ValueError(
                 "conformer_restraints_config.relax_force_field."
@@ -244,10 +226,7 @@ def _extract_conformer(
                     )
                 )
 
-        # cis/trans (E/Z): hold each acyclic, non-aromatic double bond at its
-        # reference-conformer dihedral. Detection uses only bond ORDER (DOUBLE)
-        # + connectivity, both consistent across tools; `not IsInRing()` excludes
-        # aromatic/ring double bonds (incl. Kekule rings) which cannot isomerise.
+        # Acyclic double bonds supply E/Z torsions; ring bonds cannot isomerise.
         try:
             Chem.FastFindRings(stereo_topology)  # ensure IsInRing() has ring info
         except Exception:
@@ -278,18 +257,9 @@ def _extract_conformer(
                         )
                     )
 
-        # plane: hold each planar atom GROUP coplanar (servalcat-style best-fit plane).
-        # Two group sources, each CONFIRMED planar in the reference conformer
-        # (_max_plane_dev < _PLANE_TOL) rather than trusting GetIsAromatic():
-        #   (a) rings — whole SSSR ring as one group (GetRingInfo). Aromatic/conjugated
-        #       rings are flat and kept; saturated (puckered) rings deviate and are
-        #       dropped. Ring topology is bond-order-independent, so this fires even for
-        #       tools whose mol lost bond orders (chai/esmfold2 geometry-perceived path).
-        #   (b) non-ring sp2 groups — each acyclic (`not IsInRing()`) non-aromatic DOUBLE
-        #       bond centre + its heavy neighbours (mol is H-removed): carbonyl / carboxyl
-        #       / amide / trisubstituted-alkene centres form a >=4-atom coplanar group. A
-        #       2-heavy-neighbour alkene centre gives only 3 atoms (trivially planar, no
-        #       restraint force) and is skipped by the len>=4 filter.
+        # Plane candidates are whole rings and non-ring sp2 centres with their
+        # heavy neighbours. Require reference coplanarity and at least four atoms;
+        # ring membership also works for geometry-perceived, all-single graphs.
         candidates = [tuple(r) for r in mol.GetRingInfo().AtomRings()]
         for b in mol.GetBonds():
             if (
@@ -506,7 +476,6 @@ def _build_vdw_config(
     ):
         return None
 
-    # ligand atoms + per-atom radii from the mols (global index -> radius)
     lig_radius: dict[int, float] = {}
     for lc in ligand_confs:
         gidx = np.asarray(lc.global_indices, dtype=np.int64)
@@ -806,12 +775,7 @@ def build_spec(
     distance_restraints: list | None = None,
     conformer_config: dict | None = None,
     elements: np.ndarray | None = None,
-    # Omitted start_sigma -> +inf = active at EVERY diffusion step (the documented
-    # contract; the gate is `sigma <= start_sigma` and sigma >= 0, so the old -1.0
-    # default silently disabled the conformer AND any distance/rmsd/group entry whose
-    # start_sigma falls back to this value). config.py mirrors this default; the only
-    # production caller (combined.setup) passes it explicitly, so this just makes direct
-    # build_spec() callers agree with the config path.
+    # Omitted start_sigma activates restraints at every diffusion step.
     conf_start_sigma: float = float("inf"),
     conf_stop_sigma: float = -1.0,
     conf_start_step: float = float("-inf"),
@@ -828,24 +792,21 @@ def build_spec(
 ) -> RestraintSpec:
     """Build a RestraintSpec. ``distance_restraints`` are DistanceData with
     ``target_sites1``/``target_sites2`` already resolved to global indices;
-    ``rmsd_restraints`` are RmsdData with ``target_sites``/``ref_coords`` resolved;
+    ``rmsd_restraints`` are RmsdData with fit/calc target sites and paired reference
+    coordinates resolved;
     ``angle_restraints``/``dihedral_restraints``/``improper_restraints`` carry
-    resolved group ``target_sites{1..N}`` global indices (N=3 for angle, N=4 for
+    resolved per-group global indices (N=3 for angle, N=4 for
     dihedral/improper). ``plane_restraints`` are
     PlaneRestraintData with ``target_sites`` (a LIST of per-group global-index lists)
     resolved — the standalone ``plane_restraints_config`` term, which is independent of
     the conformer ``plane`` sub-block (its own weight/type/gate per entry). The base-pair
-    coplanarity macro also arrives here (combined.setup hands over pre-resolved
-    PlaneRestraintData), which is why there is no longer an ``extra_plane_groups``
-    back-door into the conformer plane arrays."""
+    coplanarity macro also arrives here as pre-resolved PlaneRestraintData.
+    """
     ligand_confs = ligand_confs or []
     cfg = conformer_config or {}
     validate_vdw_config(cfg)
-    # Conformer restraints are OPT-IN -- this is the single enforcement point for every
-    # tool: (1) with no conformer_restraints_config (e.g. a distance-only run) build no
-    # conformer at all; (2) otherwise restrain only ligand conformers whose chain opted
-    # in. Every tool defaults the per-chain flag to False.
-    # An empty mapping explicitly requests the five default-on terms.
+    # Both a conformer config and per-chain opt-in are required. An empty config
+    # requests the five default-on terms.
     cfg_present = conformer_config is not None
     if not cfg_present:
         ligand_confs = []
@@ -854,14 +815,8 @@ def build_spec(
     ligand_confs = [
         lc for lc in ligand_confs if getattr(lc, "conformer_restraints", False)
     ]
-    # Loud signal for the silent no-op: conformer_restraints_config is present and ligands
-    # exist, but none opted in -> zero conformer restraints built (NOT "satisfied"). A
-    # finalize term reading 0.00000 because the spec has 0 of that restraint is a no-op.
     if cfg_present and _n_before and not ligand_confs and polymer_geometry is None:
-        # print() (not just logger.warning, which the package NullHandler mutes) so this
-        # misconfiguration alert survives host logging configs -- the same reasoning as
-        # the "NO ACTIVE RESTRAINTS" print in combined.setup. Fires only on the genuine
-        # footgun (conformer config + ligands present, but none opted in), so it is rare.
+        # Print as well as log so the warning survives host logging configurations.
         msg = (
             "conformer_restraints_config present but no ligand opted in "
             "(set conformer_restraints: true on the ligand) -- no conformer restraints built"
@@ -902,9 +857,7 @@ def build_spec(
     pw = _conf_weight(conformer_config, "plane")
     psl = _conf_slack(cfg, "plane", 0.0)
 
-    # Which force field idealises the reference conformer before the targets are measured
-    # off it. LIGANDS only -- the polymer call below stays relax=False (monomer-library
-    # residues are never relaxed), so this can never fire there.
+    # Force-field relaxation applies to ligands; polymer calls use relax=False.
     relax_ff = parse_relax_force_field(cfg)
     ligand_torsions = [] if dw > 0 else None
     bonds, angles, chirals, cistrans, planes = _extract_conformer(
@@ -916,11 +869,8 @@ def build_spec(
         pb, pa, pc, _pd, pp = _extract_conformer(
             polymer_geometry.residue_confs, relax=False
         )
-        # Monomer-library targets REPLACE the reference-conformer ones residue by
-        # residue (`monomer_library` config; see monlib_geom). Every conformer-derived
-        # tuple is intra-residue, so "all its atoms are in a covered residue" identifies
-        # exactly the tuples the library re-states -- drop those and keep the rest, so a
-        # partially covered structure mixes sources per residue and never doubles up.
+        # Library targets replace reference-derived tuples within each covered residue.
+        # Keep uncovered residues' targets without duplicating covered geometry.
         library = polymer_geometry.library
         lib_atoms = library.atoms
         if lib_atoms:
@@ -946,12 +896,8 @@ def build_spec(
                 )
         pc = [t for t in pc if t[0] not in library.chiral_centers]
         chirals.extend(pc)  # residue-local stereocentres (Calpha) only
-        # Polymer planarity: residue-local aromatic rings (His/Phe/Tyr/Trp side chains,
-        # nucleic-acid bases) from _extract_conformer -- or the library's named plane
-        # groups, which put a whole nucleobase (ring + exocyclic atoms + C1') in ONE
-        # group where SSSR perception splits a purine into two fused rings -- plus the
-        # canonical peptide plane (a 4-atom group in global indices; appended directly,
-        # bypassing the residue-local coplanarity check like link_bonds/link_angles).
+        # Library planes may cover fused rings as one group. Append inter-residue
+        # link planes directly; residue-local coplanarity checks do not apply to them.
         planes.extend(pp)
         planes.extend(polymer_geometry.link_planes)
         polymer_atoms = np.asarray(polymer_geometry.atom_indices, dtype=np.int64)
@@ -965,9 +911,7 @@ def build_spec(
     exclusion_bonds.extend((*idx, 0.0, None) for idx in library.bond_pairs)
     exclusion_angles.extend((*idx, 0.0, None) for idx in library.angle_tuples)
     exclusion_planes = list(planes)
-    # weight<=0 means "disable": drop the term BEFORE the active_sites union so its
-    # atoms do not become optimisable and it is never iterated — uniform across all
-    # conformer terms. Plane alone defaults to zero.
+    # Drop disabled terms before collecting active atoms.
     if bw <= 0:
         bonds = []
     if aw <= 0:
@@ -977,7 +921,7 @@ def build_spec(
     if dw <= 0:
         cistrans = []
     if pw <= 0:
-        planes = []  # OFF by default (pw defaults to 0): opt-in plane term
+        planes = []
 
     # Disabled energies must not add active atoms; topology survives for VdW.
     library = replace(
@@ -991,7 +935,6 @@ def build_spec(
     )
     planes, plane_conditions, library = prefer_cistrans(planes, cistrans, library)
 
-    # ---- collect every referenced global atom -> active_sites -----------------
     active: set[int] = set()
     for g0, g1, *_ in bonds:
         active.update((g0, g1))
@@ -1028,21 +971,9 @@ def build_spec(
 
     active_sites = np.array(sorted(active), dtype=np.int64)
     g2l = {int(g): i for i, g in enumerate(active_sites)}
-    # custom restraints: remap each resolved selection to LOCAL indices (CustomSpec).
     custom_specs = [cr.build_spec(g2l) for cr in custom_restraints]
-    # VdW has two CATEGORIES, set by conformer_config['vdw']['mode']:
-    #   - "intramolecular": clashes WITHIN one ligand (static VdwArrays -> energy layer).
-    #   - "intermolecular": clashes between that ligand and EVERY OTHER molecule. This is
-    #     itself two pieces sharing one category: (a) vs the FIXED background — every heavy
-    #     atom not in active_sites, i.e. protein/DNA/RNA/non-restrained ligand — built as
-    #     VdwConfig and run in the torch/jax optimizer (the background needs no gradient);
-    #     (b) vs OTHER RESTRAINED ligands — both move, so it is a static VdwArrays scored in
-    #     the energy layer with the inter-ligand pairs CONCATENATED onto the intramolecular
-    #     rows (same energy term, same conformer gate, all backends).
-    #   - "both" (DEFAULT): intramolecular + intermolecular.
-    # The old "ligand_protein" value (the fixed-background piece only) is REMOVED -> raise a
-    # migration hint, mirroring the rejected `backend:` key. Both halves run on torch AND
-    # jax; on numpy (energy reference only) the optimizer fixed-background half is inert.
+    # Intramolecular and inter-ligand pairs use static energy arrays.
+    # Intermolecular contacts against fixed background use dynamic optimizer lists.
     vdw_mode = (cfg.get("vdw", {}) or {}).get("mode", "both")
     if vdw_mode == "ligand_protein":
         raise ValueError(
@@ -1106,15 +1037,14 @@ def build_spec(
         ligand_confs,
     )
 
-    # ---- conformer arrays (local indices) -------------------------------------
     bond = None
     if bonds:
         idx = np.array([[g2l[g0], g2l[g1]] for g0, g1, *_ in bonds], dtype=np.int64)
         bond = BondArrays(
             idx=idx,
             r0=np.array([r for _, _, r, _ in bonds]),
-            # Built-in link tolerances retain their historical flat bottom. Library
-            # ESDs are packed separately as inverse-variance weights below.
+            # Built-in link tolerances are flat-bottom slack; dictionary ESDs instead
+            # enter the inverse-variance weights below.
             slack=np.array([bsl if e is None else float(e) for *_, e in bonds]),
             weight=np.full(len(bonds), bw),
             half=np.zeros(len(bonds)),
@@ -1160,9 +1090,8 @@ def build_spec(
             mask=np.ones(len(cistrans)),
         )
     plane = None
-    # conformer/polymer planes all carry the shared conformer weight/slack (pw/psl) and the
-    # shared conformer gate. Selection-driven planes are NOT here — they are the standalone
-    # `group_plane` term below, with their own per-entry type/weight/gate.
+    # Conformer planes share a weight, slack and gate. Selection-driven planes
+    # use the separate group_plane arrays below.
     plane_groups = list(planes)
     if plane_groups:
         # variable group size -> pad to the widest group; padding columns hold local
@@ -1183,14 +1112,12 @@ def build_spec(
             mask=np.ones(n_plane),
         )
 
-    # ---- distance arrays (padded, local indices) ------------------------------
     distance = (
         _build_distance_arrays(distance_restraints, g2l, conf_start_sigma)
         if distance_restraints
         else None
     )
 
-    # ---- RMSD arrays (padded; fit = superposition atoms, calc = measured atoms) --
     rmsd = None
     if rmsd_restraints:
         n = len(rmsd_restraints)
@@ -1226,10 +1153,7 @@ def build_spec(
             target1[ri] = float(rr.target1)
             target2[ri] = float(rr.target2)
             geom_type[ri] = DIST_TYPE_CODES[rr.rmsd_type]
-            # rr.weight is already normalized in set_config (None -> 1.0); pass it
-            # through verbatim so an explicit weight: 0 yields a zero-energy term
-            # (do NOT coerce a falsy 0 to 1.0 like the conformer terms, which instead
-            # drop weight<=0 entries before the active_sites union).
+            # set_config normalizes the default weight; preserve an explicit zero.
             rmsd_weight[ri] = float(rr.weight)
         rmsd = RmsdArrays(
             fit_idx=fit_idx,
@@ -1249,7 +1173,6 @@ def build_spec(
             mask=np.ones(n),
         )
 
-    # ---- group-centroid angle / torsion arrays -------------------------------
     group_angle = (
         _build_group_geom_arrays(
             angle_restraints, 3, GroupAngleArrays, g2l, conf_start_sigma
@@ -1272,7 +1195,6 @@ def build_spec(
         else None
     )
 
-    # ---- standalone best-fit-plane arrays (padded, local indices) -------------------
     group_plane = None
     if plane_restraints:
         n = len(plane_restraints)

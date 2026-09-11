@@ -25,7 +25,7 @@ def used_peptides(targets, extra_conditions=()):
 
 
 def append_library_arrays(spec, targets, config, g2l, *, reference_plane_conditions=()):
-    """Append effective inverse-variance weights, preserving every legacy row."""
+    """Append dictionary rows with inverse-variance weights, preserving existing rows."""
     chosen = used_peptides(targets, reference_plane_conditions)
     selector_map = {g: i for i, g in enumerate(chosen)}
     condition_rows = {"plane": list(reference_plane_conditions)}
@@ -56,8 +56,7 @@ def append_library_arrays(spec, targets, config, g2l, *, reference_plane_conditi
             for i, atoms in enumerate(idx):
                 padded[i, : len(atoms)] = atoms
                 group_mask[i, : len(atoms)] = 1
-            # N * RMS^2 = sum of per-atom squared plane residuals. User slack
-            # still applies to the RMS, so the standalone plane APIs do not change.
+            # N * RMS^2 equals the sum of per-atom squared residuals; slack stays in RMS units.
             common["weight"] = weights * group_mask.sum(axis=-1)
             array = PlaneArrays(idx=padded, grp_mask=group_mask, **common)
         else:

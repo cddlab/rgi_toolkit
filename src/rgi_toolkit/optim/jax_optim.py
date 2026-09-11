@@ -482,17 +482,13 @@ def make_minimizer(
         )
 
     has_builtin = spec.has_conformer() or spec.has_per_entry()
-    # custom restraints -> jnp closures (active_coords) -> scalar (weight folded);
-    # selections baked as static jnp index arrays, so they trace inside lax.scan. Added to
-    # the CG objective with a per-entry sigma gate (jnp.where).
+    # Custom closures use static selection indices so they trace inside lax.scan.
     has_custom = spec.has_custom()
     from rgi_toolkit.custom.closure import build_terms
 
     custom_terms = build_terms(spec.custom, "jax") if has_custom else []
-    # dynamic fixed-background VdW (formerly torch-only; now jax too). The fixed
-    # background is read from the FULL coords at minimize time (it moves per diffusion
-    # step), so it is NOT baked into the spec -- only the indices/radii are. Gated on
-    # conf_start_sigma like the other conformer terms.
+    # Read fixed-background positions at minimize time; they change each diffusion
+    # step. Only indices and chemistry belong to the prepared spec.
     _vc = getattr(spec, "vdw_config", None)
     has_vdw = _vc is not None and _vc.weight > 0
     if has_vdw:
@@ -508,8 +504,7 @@ def make_minimizer(
     _ac = getattr(spec, "active_vdw_config", None)
     has_active_vdw = _ac is not None and _ac.weight > 0
     if has_active_vdw:
-        # int32 pair-code encoding: fail loudly above the JAX-safe active-atom count
-        # rather than silently corrupting the covalent-pair exclusion (see spec.py).
+        # Pair-code encoding must fit in int32 (see spec.py).
         check_active_vdw_int32_safe(int(_ac.radii.shape[0]))
         active_vdw_radii = jnp.asarray(_ac.radii)
         active_vdw_polymer = jnp.asarray(_ac.polymer_mask, dtype=bool)
@@ -526,8 +521,7 @@ def make_minimizer(
     vdw_step_limit = float(
         getattr(spec, "vdw_max_atom_step", VDW_MAX_ATOM_STEP_DEFAULT)
     )
-    # How often a dynamic list is CHECKED for staleness; the rebuild itself is triggered by
-    # measured displacement against `vdw_skin` (see torch_optim, kept deliberately in step).
+    # Check staleness at this interval; measured displacement triggers rebuilds.
     vdw_rebuild_interval = int(
         getattr(
             spec,
@@ -539,7 +533,6 @@ def make_minimizer(
     if has_any_vdw:
         conf_ss = jnp.asarray(float(spec.conf_start_sigma))
         conf_stop = jnp.asarray(float(getattr(spec, "conf_stop_sigma", -1.0)))
-        # conformer STEP window (the alternative gate axis; ANDed with the sigma window).
         conf_sstep = jnp.asarray(float(getattr(spec, "conf_start_step", float("-inf"))))
         conf_estep = jnp.asarray(float(getattr(spec, "conf_stop_step", float("inf"))))
 
@@ -547,12 +540,6 @@ def make_minimizer(
         active = coords[..., active_idx, :]
         info = inactive_info()
         prepared_step = jax_energy.bind_peptide_states(active, prepared)
-        # Distance + conformer + RMSD + group restraints all minimise ONE objective via the
-        # CG (total_energy sums every active term; distance is now an autodiff CG term whose
-        # reduced-mass-rescaled centroid gradient translates each group rigidly — no
-        # closed-form shift), plus the fixed-background VdW term (gated on conf_start_sigma —
-        # the `jnp.where` zeroes its weight AND gradient above the gate). has_conf is already
-        # True when vdw_config is set.
         if has_builtin or has_vdw or has_active_vdw or has_custom:
             if has_any_vdw:
                 _s = jnp.asarray(sigma)
@@ -696,11 +683,8 @@ def make_minimizer(
                 n_blocks = max(
                     1, (max_iter + vdw_rebuild_interval - 1) // vdw_rebuild_interval
                 )
-                # `movement` is the worst-case travel between two staleness CHECKS, so it
-                # uses the CONSTANT interval, not the traced per-block count: a list now
-                # survives many blocks and the bound must cover one unchecked stretch.
-                # Keep this expression identical to torch_optim's, including the 1x / 2x
-                # asymmetry (only the ligand moves against the fixed background).
+                # Bound unchecked travel using the constant check interval, not a traced
+                # block length. Active-active pairs need twice the fixed-background allowance.
                 movement = vdw_step_limit * vdw_rebuild_interval
                 fixed_cutoff = None
                 active_cutoff = None
@@ -713,9 +697,8 @@ def make_minimizer(
                         active_vdw_dmax, _mr + 2.0 * movement + vdw_skin
                     )
 
-                # Build once BEFORE the loop: the carry then has concrete shapes and there
-                # is no "block 0 must always build" special case. (Seeding the references
-                # with inf does not work -- inf - inf is nan and nan > T is False.)
+                # Initialize concrete carry shapes before the loop. Infinite reference
+                # coordinates cannot force a rebuild: inf - inf is NaN.
                 _n0, _m0, _a0, _f0 = initial_dynamic_pairs(
                     active, fixed_cutoff, active_cutoff
                 )
@@ -755,10 +738,8 @@ def make_minimizer(
                         rebuilt = jnp.asarray(False)
                         if has_vdw:
                             lig = a[..., vdw_lig_local, :]
-                            # `in_win` gate: outside the conformer window step_cap is inf,
-                            # so displacement is unbounded and every block would rebuild --
-                            # while the VdW weight is 0, so the list does not matter. torch
-                            # gets this structurally (no dynamic list => a single block).
+                            # Skip rebuilds outside the conformer window, where VdW has zero weight
+                            # and the infinite step cap would otherwise force every block to rebuild.
                             need = jnp.logical_and(
                                 in_win, _max_disp(lig, c["fref"]) > vdw_skin
                             )
@@ -813,9 +794,7 @@ def make_minimizer(
                             vdw_rebuild_interval,
                             max_iter - block_index * vdw_rebuild_interval,
                         )
-                        # a rebuild changed the objective -> the carried state describes the
-                        # OLD pair list, so invalidate it (one evaluation per REBUILD, which
-                        # is now rare, instead of one per block)
+                        # A rebuilt pair list invalidates the carried objective history.
                         cg_in = c["cg"]._replace(
                             valid=jnp.logical_and(
                                 c["cg"].valid, jnp.logical_not(rebuilt)

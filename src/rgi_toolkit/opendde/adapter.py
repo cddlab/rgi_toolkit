@@ -59,7 +59,6 @@ class OpenDDEAdapter:
             value = value[0]
         return value
 
-    # --- FrameworkAdapter -------------------------------------------------
     def iter_atoms(self) -> Iterator[AtomRecord]:
         aa = self.atom_array
         if aa is None:
@@ -98,7 +97,6 @@ class OpenDDEAdapter:
                 ),
             )
 
-    # --- ConformerAdapter -------------------------------------------------
     def num_atoms(self) -> int:
         return self._n_atom
 

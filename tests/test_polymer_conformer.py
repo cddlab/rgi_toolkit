@@ -93,10 +93,8 @@ _ALA_COORDS = np.array(
     ]
 )
 
-# A flat 6-membered carbon ring (regular hexagon in z=0, ~1.4 A bonds) stands in for a
-# planar aromatic side chain / nucleic-acid base. The names avoid every backbone-link
-# atom (C, N, CA, O, O3', P, ...) so no peptide/phosphodiester link is built and the
-# only planar group is the residue-local ring detected from its coplanar reference.
+# A flat six-carbon ring models a residue-local plane. Avoid backbone atom
+# names so the fixture cannot form peptide or phosphodiester links.
 _RING_NAMES = ["C1", "C2", "C3", "C4", "C5", "C6"]
 _RING_COORDS = np.array(
     [
@@ -172,18 +170,12 @@ def test_protein_builds_peptide_link_plane_and_vdw_exclusions():
     assert spec.angle is not None
     assert any(np.array_equal(row, [1, 2, 5]) for row in spec.angle.idx)
     assert any(np.array_equal(row, [2, 5, 6]) for row in spec.angle.idx)
-    # Residue-local Calpha stereocentres survive on the chiral term; the peptide-plane
-    # impropers no longer ride it (no zero signed-volume targets remain).
+    # Chiral targets represent Calpha stereocentres, not planar impropers.
     assert spec.chiral is not None and int(spec.chiral.mask.sum()) >= 2
     assert not (spec.chiral.vol0 == 0.0).any()
 
-    # The peptide plane is Refmac/servalcat's TRANS `plan-1`: the 4-atom sp2 group at the
-    # carbonyl carbon {CA,C,O(res1), N(res2)} = local indices {1, 2, 3, 5}. ALA has no
-    # aromatic ring, so it is the only plane. CA of the CURRENT residue (local 6) must NOT
-    # be in it: no library plane group spans both CA atoms, which is what leaves omega to
-    # the separate torsion restraint. Merging them into one 5-atom group pins omega ~30x
-    # tighter than any reference structure and wrecks packing (clashscore 8.8 -> 27.2 on
-    # QBP), so this is a regression guard, not a cosmetic assertion.
+    # TRANS plan-1 contains {CA,C,O}(residue 1) and N(residue 2). Exclude the
+    # second CA so planarity does not constrain the separate omega torsion.
     assert spec.plane is not None and int(spec.plane.mask.sum()) == 1
     group = {int(i) for i, m in zip(spec.plane.idx[0], spec.plane.grp_mask[0]) if m > 0}
     assert group == {1, 2, 3, 5}
@@ -213,9 +205,6 @@ def test_conformer_derived_targets_keep_the_configured_slack():
 
 
 def test_polymer_residue_local_aromatic_ring_builds_plane():
-    # (2b) A planar aromatic group inside a polymer residue (nucleic-acid base or a
-    # His/Phe/Tyr/Trp side chain) becomes a residue-local `plane` group, the ONLY plane
-    # path for nucleic acids (their inter-residue link carries no peptide plane).
     config = {
         "gpu": False,
         "max_iter": 100,
@@ -248,10 +237,8 @@ def test_reference_uid_groups_atom_tokenized_modified_residues():
 
 
 def test_phosphodiester_link_targets_are_present():
-    # OP1/OP2 are in the fixture because the built-in link restrains them: the two angles
-    # they make with the PREVIOUS residue's O3' used to be missing, which left the
-    # phosphate free to pivot about the backbone with only C3'-O3'-P and O5'-P-O3' to
-    # hold it. All four link angles now come from the CCP4 `p` entry.
+    # Include OP1/OP2 to cover all four CCP4 `p` link angles, including those
+    # involving the previous residue's O3'.
     names = ["P", "OP1", "OP2", "O5'", "C5'", "C3'", "O3'"]
     coords = np.array(
         [
@@ -490,7 +477,7 @@ def test_active_vdw_cell_list_matches_dense_reference():
     np.testing.assert_array_equal(np.asarray(neighbours_j), ref_neighbours)
     np.testing.assert_array_equal(np.asarray(factor_j), ref_factor)
 
-    # Non-positive dmax keeps the historical no-pair behaviour without unsafe division.
+    # Non-positive dmax yields no pairs without unsafe division.
     _neighbours_zero, factor_zero = build_jax(jnp.asarray(coords), jnp.asarray(0.0))
     assert not bool(jnp.any(factor_zero))
 

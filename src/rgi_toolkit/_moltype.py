@@ -48,13 +48,8 @@ RNA_RESIDUES = frozenset({"A", "C", "G", "U"})
 
 _POLYMER_MOL_TYPES = ("protein", "dna", "rna")
 
-# Framework molecule-type enum -> normalized string, for adapters whose enum uses
-# this ordering: boltz ``const.chain_types`` and esmfold2 ``constants`` both number
-# PROTEIN=0, DNA=1, RNA=2, NONPOLYMER=3. NOTE chai/openfold use RNA=1/DNA=2 (RNA and
-# DNA SWAPPED), so they keep their OWN dedicated tables (``_MOLTYPE_BY_ID_CHAI`` /
-# ``_MOLTYPE_BY_ID_OF3`` in their adapters), not this one — reusing this would swap
-# their DNA<->RNA. As of 2026-06 ALL adapters supply ``mol_type``; none leave a polymer
-# atom's mol_type None (protenix maps its biotite mol_type string directly).
+# Boltz/ESM enum order: protein=0, DNA=1, RNA=2, ligand=3. Chai/OpenFold use
+# RNA=1 and DNA=2, so their adapters require separate tables.
 MOLTYPE_BY_ID = {0: "protein", 1: "dna", 2: "rna", 3: "ligand"}
 
 
@@ -75,23 +70,13 @@ def moltype_from_resname(resname: str | None) -> str | None:
 
 
 def polymer_type(mol_type: str | None, resname: str | None) -> str | None:
-    """Effective polymer type of an atom, "protein"/"dna"/"rna" or None. Shared by the
-    backbone/sidechain selectors (selection.py) and RMSD align pairing
-    (rmsd_restr_data.py) so they classify polymers IDENTICALLY across tools.
+    """Return the effective polymer type for selection and RMSD pairing.
 
-    Three-way, order matters:
-    1. an explicit polymer ``mol_type`` is trusted as-is — ALL adapters now set it
-       (boltz/esm/AF3 from their PROTEIN=0/DNA=1/RNA=2 enum; chai/of3 from their own
-       RNA=1/DNA=2 tables; protenix from its biotite mol_type string);
-    2. any OTHER explicitly-set ``mol_type`` (e.g. "ligand") returns None -- a typed
-       non-polymer is never re-derived from its residue name;
-    3. only when ``mol_type`` is absent (e.g. a reference-PDB atom with no annotation)
-       is the type derived from the residue name via ``moltype_from_resname``.
-
-    Because every adapter supplies an entity-derived ``mol_type``, a MODIFIED residue
-    such as MSE classifies as "protein" in ALL tools (the framework/biotite entity type
-    keeps it a polymer). The earlier cross-tool divergence — MSE -> None in
-    chai/of3/protenix because they left mol_type unset — has been removed (2026-06)."""
+    Trust an explicit polymer ``mol_type`` and return None for an explicitly typed
+    non-polymer. Only an absent ``mol_type`` permits residue-name fallback. This
+    preserves modified residues' entity-derived polymer identity without
+    reclassifying a typed ligand from its residue name.
+    """
     if mol_type in _POLYMER_MOL_TYPES:
         return mol_type
     if mol_type is not None:

@@ -48,9 +48,7 @@ class PolymerGeometry:
     )
 
 
-# Side selectors: each link atom names its residue explicitly (previous / current)
-# rather than being inferred from the atom-name tuple, so the asymmetric peptide and
-# phosphodiester assignments read declaratively.
+# Each link atom explicitly selects the previous or current residue.
 _PREV, _CURR = 0, 1
 
 
@@ -71,11 +69,8 @@ class _LinkGeometry:
     planes: tuple = ()
 
 
-# Built-in link targets, used only when no `monomer_library` is configured. The two
-# polymers take them from DIFFERENT sources on purpose: the peptide link is Engh-Huber
-# (CA-C-N 116.2 and C-N-CA 121.7 match it exactly), which is also what MolProbity scores
-# against and which defines every angle the link needs; nucleic acids have no equivalent
-# tabulation, so the phosphodiester values below come from the CCP4 `p` link instead.
+# Fallback link geometry: Engh-Huber peptide targets and CCP4 `p` phosphodiester
+# targets. Used when no monomer library is configured.
 _PEPTIDE_BOND = 1.329
 _PEPTIDE_BOND_ESD = 0.011
 _LINK_ANGLE_ESD = 1.5
@@ -89,28 +84,12 @@ _PROTEIN_LINK = _LinkGeometry(
         (("O", _PREV), ("C", _PREV), ("N", _CURR), 122.7),
         (("C", _PREV), ("N", _CURR), ("CA", _CURR), 121.7),
     ),
-    # Peptide plane, following Refmac/servalcat's TRANS link (`_chem_link_plane`): the
-    # sp2 group at the carbonyl carbon, {CA, C, O of the previous residue; N of the
-    # current} = their `plan-1`. Their second group `plan-2` {CA(2), C(1), H(2), N(2)}
-    # degenerates to 3 atoms without hydrogens, so it is not modelled here.
-    #
-    # NOTE the atom that is deliberately ABSENT: CA of the CURRENT residue. No library
-    # plane group contains both CA atoms, so the plane restraints do NOT constrain omega
-    # — Refmac restrains that separately as `_chem_link_tor omega` (180 deg, esd 5 deg).
-    # This module used to merge the two groups into one 5-atom {C, CA, O, N, CA} plane on
-    # the theory that it was "the stronger restraint". It is, and that is the problem: a
-    # zero-tolerance plane over both CA atoms pins omega far tighter than any reference
-    # structure. Measured on QBP (boltz2, 3 seeds): the merged group held |omega - planar|
-    # at 0.11 deg where the crystal references 1GGG/1WDN sit at ~3.5 deg and Engh-Huber
-    # gives omega a 5.8 deg sigma. The rigidified backbone showed up as packing damage —
-    # MolProbity clashscore 8.8 (bond+angle+chiral) -> 27.2 once that plane was added.
+    # Refmac/servalcat TRANS plan-1. Exclude the current residue's CA so the
+    # plane does not constrain omega, which has its own torsion restraint.
+    # The second plane has only three heavy atoms and adds no flatness constraint.
     planes=((("C", _PREV), ("CA", _PREV), ("O", _PREV), ("N", _CURR)),),
 )
-# Phosphodiester link, from the CCP4 `p` link entry (the same source the library path
-# reads, so the two paths no longer disagree). The values this replaced were ~"textbook"
-# rather than library: C3'-O3'-P read 119.7 against the library's 121.082 and O3'-P-O5'
-# read 104.0 against 100.661 -- and the two angles at the phosphorus that involve the
-# PREVIOUS residue's O3' were missing entirely, leaving the phosphate free to pivot.
+# Phosphodiester geometry from the CCP4 `p` link.
 _NUCLEIC_LINK = _LinkGeometry(
     bond=(("O3'", _PREV), ("P", _CURR), _PHOSPHODIESTER_BOND),
     bond_esd=_PHOSPHODIESTER_BOND_ESD,
@@ -210,9 +189,7 @@ def build_polymer_geometry(
                 "adapter reference-space UID array is shorter than reference positions"
             )
     if ref_uid is None:
-        # Some framework adapters expose residue-local reference positions but not the
-        # framework's UID feature at their existing construction site.  Derive an
-        # equivalent stable grouping from normalized chain/residue/type records.
+        # Derive residue groups when the adapter provides no reference-space UID.
         ref_uid = np.full(n, -1, dtype=np.int64)
         uid_for_key = {}
         for record in records:

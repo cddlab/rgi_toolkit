@@ -49,10 +49,7 @@ class DistanceData:
     start_step: float  # step-window lower bound (-inf = always); XOR the sigma window
     stop_step: float  # step-window upper bound (+inf = always)
     move_mode: int  # 0=both / 1=grp1 only / 2=grp2 only (the 'move' config key)
-    # per-restraint least-squares weight (the CG jointly minimises Σ wᵢ·δᵢ²). A NO-OP
-    # for a single restraint / restraints with disjoint groups (each reaches its exact
-    # target regardless); only changes the outcome for OVER-CONSTRAINED coupled restraints
-    # whose shared atom is their sole mover, where it balances the competition (2:1 etc).
+    # Per-restraint least-squares weight, balancing competing distance targets.
     weight: float
 
     def __init__(self):
@@ -61,24 +58,17 @@ class DistanceData:
         self.target_distance = None
         self.target_distance1 = None
         self.target_distance2 = None
-        # the attribute actually read by set_config/featurizer; init to None so a
-        # config missing all type keys falls through to the clear
-        # ValueError("distance restraints not run") instead of an AttributeError.
         self.distance_restraint_type = None
         self.target_sites1 = None
         self.target_sites2 = None
         self.calc_method = None
         self.run_restr = None
-        self.start_sigma = (
-            None  # per-restraint; optional (from_dict defaults None -> +inf)
-        )
-        self.stop_sigma = -1.0  # per-restraint lower bound; -1 = never released (off)
-        # step-window: active for start_step <= step <= stop_step (omitted -> -inf/+inf =
-        # always). Mutually exclusive with the sigma window; ANDed with it in the gate.
+        self.start_sigma = None
+        self.stop_sigma = -1.0
         self.start_step = float("-inf")
         self.stop_step = float("inf")
-        self.move_mode = 0  # which group moves: 0=both (default) / 1=grp1 / 2=grp2
-        self.weight = 1.0  # relative strength (no-op unless over-constrained coupling)
+        self.move_mode = 0
+        self.weight = 1.0
 
     def set_config(self, config: dict):
         warn_unknown_keys(
@@ -87,18 +77,8 @@ class DistanceData:
         self.atom_selection1 = config.get("atom_selection1", None)
         self.atom_selection2 = config.get("atom_selection2", None)
         self.calc_method = config.get("calc_method", "unfixed-absolute")
-        # weight + the sigma/step gate windows: one shared parse (so the null/zero handling
-        # can't drift across distance/rmsd/angle/dihedral). weight default 1.0 is a no-op
-        # unless over-constrained coupling (see the field comment); the windows default to
-        # always-on (set in __init__), and start_sigma None -> +inf is filled by from_dict.
         apply_window_params(self, config, "distance_restraints_config entry")
-        # per-distance move mode (OPTIONAL; default "both"): which group(s) the centroid
-        # shift moves. The `move` vocabulary is parsed by the shared parse_move_indices so
-        # it stays in lockstep with the angle/dihedral `move` key; a 2-group distance maps
-        # the returned index set onto the 0/1/2 move_mode enum. Accepts both/all/omitted ->
-        # 0 (split, both move); 1 / [1] / "1" -> 1 (only atom_selection1's group); 2 / [2]
-        # -> 2 (only atom_selection2's group); [1, 2] / "1,2" -> 0. Out-of-range ([1, 3],
-        # 3) / empty raises (silent fallback would move wrong groups).
+        # Map the shared group-selection vocabulary onto the distance move-mode enum.
         idx = parse_move_indices(config.get("move"), 2)  # {1}, {2}, or {1, 2}
         if idx is not None:
             self.move_mode = {
@@ -106,14 +86,6 @@ class DistanceData:
                 frozenset({1}): 1,
                 frozenset({2}): 2,
             }[frozenset(idx)]
-        # Restraint type + target(s) via the shared helper — the SAME parse rmsd /
-        # angle / dihedral use, so the four type keys (harmonic / flat-bottomed /
-        # flat-bottomed1 / flat-bottomed2) and their error messages can't drift. It maps
-        # the returned (type, t1, t2) into distance's three target fields by type;
-        # `_dist_params` reads only the field belonging to the resolved type, so the
-        # unused ones stay at their __init__ defaults. conv=float (native Angstroms; the
-        # flat-bottomed t1<t2 check lives inside parse_geom_type). No type key present ->
-        # (None, None, None), which falls through to the run_restr=False raise below.
         gtype, t1, t2 = parse_geom_type(config, "target_distance", float)
         self.distance_restraint_type = gtype
         if gtype == "harmonic":

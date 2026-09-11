@@ -13,14 +13,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Force fields available to `ff_relax` /
-# `conformer_restraints_config.relax_force_field.ligand`. "none" is not a force field:
-# it disables the relax so the targets come straight off the tool's cached conformer.
+# "none" disables relaxation and uses the cached conformer targets.
 _RELAX_FORCE_FIELDS = ("uff", "mmff94", "mmff94s", "none")
 
-# A force-field minimum can rarely cross a stereochemical barrier (observed for one
-# long polyene). Retry from deterministic ETKDG embeddings only after that happens;
-# normal relaxations retain their existing start and never pay the embedding cost.
+# Retry deterministic embeddings only after a stereochemical mismatch.
 _STEREO_RETRY_SEEDS = tuple(range(0xF00D, 0xF011))
 
 
@@ -116,9 +112,7 @@ def build_ligand_mol(elements, coords, bonds_local, perceive_bonds=False):
     rw = Chem.RWMol()
     conf = Chem.Conformer(len(elements))
     for i, sym in enumerate(elements):
-        # accept an element symbol ("C") or an atomic number (6); the latter is
-        # what tools storing ref_element as Z provide (e.g. chai). RDKit's
-        # Chem.Atom() takes either, so int() decides which constructor to use.
+        # RDKit accepts either atomic numbers or element symbols.
         try:
             atom = Chem.Atom(int(sym))
         except (ValueError, TypeError):
@@ -142,34 +136,20 @@ def build_ligand_mol(elements, coords, bonds_local, perceive_bonds=False):
     mol = rw.GetMol()
     mol.AddConformer(conf, assignId=True)
     if perceive_bonds and not bonds_local and len(elements) > 1:
-        # Derive connectivity from the reference-conformer geometry (chai path).
-        # NOTE: only CONNECTIVITY is perceived, not bond ORDERS — chai exposes
-        # heavy atoms only (no H) and no bonds, so RDKit DetermineBonds cannot
-        # solve valences (it reads the H-less skeleton as highly charged and
-        # throws). Consequently every perceived bond is SINGLE, so the cistrans
-        # (cis/trans) restraint — which keys on BondType.DOUBLE — finds nothing
-        # via THIS branch (cistrans=0, graceful). chai's adapter therefore PREFERS
-        # its source-SMILES path (chai/adapter.py _mol_from_smiles), which carries
-        # real Kekulized bond orders + E/Z, and only falls back to this perceive
-        # branch when no SMILES is available; bond/angle/chiral (order-agnostic) work
-        # either way. The other tools supply real bond orders directly (boltz/protenix/
-        # openfold/AF3 via CCD/biotite; esmfold2 via ligand_bond_orders).
+        # Heavy-atom geometry determines connectivity, not bond orders: absent H atoms
+        # prevent reliable valence assignment by DetermineBonds. All perceived bonds
+        # are single, so this fallback cannot supply cistrans torsions.
         try:
             from rdkit.Chem import rdDetermineBonds
 
             rdDetermineBonds.DetermineConnectivity(mol)
-            # DetermineConnectivity leaves every atom noImplicit=True with 0 implicit
-            # H, so heavy-atom stereocenters look 3-coordinate and the
-            # AssignStereochemistryFrom3D below would find ZERO chiral tags (silently
-            # dropping all chiral restraints). Re-enable implicit-H accounting so
-            # stereo perception sees the stereocenters. Scoped to the perceive branch
-            # only — the explicit-bond path (protenix/openfold) is untouched.
+            # DetermineConnectivity disables implicit H accounting. Restore it so
+            # heavy-atom stereocentres are not mistaken for three-coordinate atoms.
             for a in mol.GetAtoms():
                 a.SetNoImplicit(False)
             mol.UpdatePropertyCache(strict=False)
         except Exception as exc:
-            # Don't abort (geometry-only restraints don't need connectivity), but a
-            # bond-less mol silently drops chiral/cistrans restraints, so surface it.
+            # Geometry-only targets remain usable, but missing connectivity disables torsions.
             logger.warning(
                 "connectivity perception failed for ligand; chiral/cistrans "
                 "restraints may be dropped: %s",
@@ -180,7 +160,7 @@ def build_ligand_mol(elements, coords, bonds_local, perceive_bonds=False):
     except Exception:  # geometry-only restraints don't need a clean valence model
         pass
     try:
-        Chem.AssignStereochemistryFrom3D(mol)  # chiral tags for chiral restraints
+        Chem.AssignStereochemistryFrom3D(mol)
     except Exception:
         pass
     return mol
@@ -498,8 +478,7 @@ def _ff_relax_once(mol, coords, force_field):
         if AllChem.UFFOptimizeMolecule(mh, maxIters=200) not in (0, 1):
             return None  # not converged / no force field -> keep the tool's conformer
     else:
-        # Pre-check on the COPY: a clearer message than the bare rc == -1 that a
-        # metal-containing (or otherwise un-typeable) ligand would otherwise produce.
+        # Check MMFF typing on the copy; unsupported atoms otherwise return only rc=-1.
         variant = "MMFF94s" if ff == "mmff94s" else "MMFF94"
         if not AllChem.MMFFHasAllMoleculeParams(mh):
             raise RelaxError(
@@ -707,9 +686,7 @@ def ff_relax(mol, coords, force_field="uff", *, stereo_mol=None):
         raise
     except Exception as exc:
         if ff.startswith("mmff"):
-            # Explicitly requested -> never degrade silently. This also covers the mol
-            # whose SanitizeMol failed in build_ligand_mol (a bare except: pass there), on
-            # which RDKit raises a Pre-condition Violation RuntimeError.
+            # Explicit MMFF requests must raise on RDKit failures, including invalid valences.
             raise RelaxError(
                 f"relax_force_field.ligand={force_field!r}: relax failed for this "
                 f"ligand: {exc}"

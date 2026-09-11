@@ -65,15 +65,11 @@ class TorchRestraintOptimizer:
         self._dtype = None
         self._vdw = None  # dict of device tensors for the fixed-background VdW term
         self._active_vdw = None  # dynamic active-active polymer neighbour metadata
-        # custom restraints -> torch closures, built lazily in _ensure UNDER
-        # inference_mode(False) and on the coords' device, so the baked selection-index
-        # tensors are normal + on-device (an inference tensor used in the autograd gather
-        # can't be saved for backward -- boltz/Lightning run under inference_mode).
+        # Build custom closures outside inference mode so their index tensors support
+        # autograd, including under boltz/Lightning inference.
         self._custom_terms = None
-        # per-optimizer torch.compile'd energy+grad INCLUDING the custom closures (the
-        # module-global gpu_cg energy can't see them), keyed by VdW mode and active custom
-        # subset. Missing=unbuilt, False=disabled/failed for THAT key
-        # (one artifact failing must not disable the others).
+        # Compiled custom energy/gradient artifacts, keyed by VdW mode and active
+        # custom subset. A failed artifact disables only its own key.
         self._custom_cvg = {}
 
     def _custom_energy(self, active, sigma, step):
@@ -215,9 +211,7 @@ class TorchRestraintOptimizer:
             from rgi_toolkit.custom.closure import build_terms
 
             self._custom_terms = build_terms(self.spec.custom, "torch", device=device)
-            # the compiled artifacts CLOSE OVER the terms rebuilt above (and their
-            # device-resident index tensors), so they must not survive a device/dtype
-            # change.
+            # Compiled closures capture the device/dtype-specific terms rebuilt above.
             self._custom_cvg = {}
         self._device = device
         self._dtype = dtype
@@ -246,8 +240,6 @@ class TorchRestraintOptimizer:
         per-entry-gated set (``PER_ENTRY_KEYS``) both come from ``TERM_DEFS``, so adding a term
         can't silently leave it ungated on the compiled path."""
         p = self._prepared
-        # conformer gate: active sigma window (conf_stop <= sigma <= conf_start) AND
-        # active step window (conf_start_step <= step <= conf_stop_step).
         cg_on = sigma is None or (
             (sigma <= float(self.spec.conf_start_sigma))
             and (sigma >= float(self.spec.conf_stop_sigma))
@@ -273,8 +265,7 @@ class TorchRestraintOptimizer:
                         step_on = (step >= array.start_step) & (step <= array.stop_step)
                         on = step_on if on is None else (on & step_on)
                     gates[gk] = tuple(bool(b) for b in on.tolist())
-        # the cache key carries EVERY gate state, so a step flipping only a group gate
-        # gets its own (correct) entry instead of reusing a stale conf/rmsd mask.
+        # Cache every gate state, including each per-entry term.
         key = (cg_key, tuple(sorted(gates.items())))
         cache = self._prepared_g
         if key not in cache:
@@ -404,22 +395,15 @@ class TorchRestraintOptimizer:
         info = inactive_info()
         if not self.spec.is_active():
             return (coords, info) if return_info else coords
-        # sigma is the per-step scalar noise level. Coerce to a python float: the skip
-        # test below and the GPU pre-gate (which builds the rmsd-gate tuple from it) both
-        # assume a scalar; a stray multi-element tensor would otherwise fail GPU-only.
+        # Host-side gates require scalar sigma and step values.
         if sigma is not None:
             sigma = float(sigma)
-        # step is the diffusion step index (int); coerce so the python-float gate compares
-        # in the eager CG / GPU pre-gate behave (a tensor step would break the GPU path).
         if step is not None:
             step = int(step)
         if not window_on(active_windows(self.spec), sigma, step):
             return (coords, info) if return_info else coords
-        # Optimize in fp32 even when the model runs the diffusion in bf16/fp16: a
-        # half-precision CG line search + autograd gradient is too coarse, so the
-        # restraint could silently fail to converge. Work in fp32 and cast the result
-        # back to the coord dtype. fp32/fp64 tools are unaffected (work_dtype ==
-        # coords.dtype), so this is a safe no-op for them.
+        # Use at least fp32 for CG and its gradients; fp16/bf16 are too coarse
+        # for the line search. Restore the input dtype after optimization.
         out_dtype = coords.dtype
         work_dtype = (
             torch.float32
@@ -479,7 +463,7 @@ class TorchRestraintOptimizer:
                 dtype=work_dtype,
                 device=coords.device,
             )
-            active.copy_(coords[..., self._active_idx, :])  # casts bf16/fp16 -> fp32
+            active.copy_(coords[..., self._active_idx, :])
             # Bind before line searches and retain the same objective across VdW
             # blocks. Never write these sample-dependent masks into either cache.
             prepared = torch_energy.bind_peptide_states(active, prepared)
@@ -491,11 +475,6 @@ class TorchRestraintOptimizer:
                 else None
             )
 
-            # Distance + conformer (bond/angle/chiral/cistrans/vdw) + RMSD + group-centroid
-            # angle/dihedral restraints all minimise ONE objective in the gradient solver
-            # (total_energy sums every active term). Distance is an autodiff CG term too: its
-            # energy rescales the centroid gradient (reduced-mass scale) so each group
-            # translates rigidly with the minimal-displacement split — no closed-form shift.
             if has_builtin or has_custom:
                 active = active.detach().clone()
                 active.requires_grad_(True)
@@ -510,12 +489,8 @@ class TorchRestraintOptimizer:
                 fixed_vdw = None
                 active_vdw = None
 
-                # Verlet skin: list a `skin` shell beyond the contact cutoff and rebuild on
-                # MEASURED displacement rather than every `check` iterations. `movement` is
-                # the worst-case travel between two staleness CHECKS (not per block, since a
-                # list now survives many blocks), so a pair outside the listed radius cannot
-                # reach contact before the next check notices. skin=0 reproduces the old
-                # rebuild-every-check behaviour. See _cg_config.py / doc/config.md.
+                # The search radius includes worst-case travel between staleness checks.
+                # The skin supplies an extra shell and the displacement budget for rebuilds.
                 skin = float(
                     getattr(self.spec, "vdw_neighbor_skin", VDW_NEIGHBOR_SKIN_DEFAULT)
                 )
@@ -665,11 +640,8 @@ class TorchRestraintOptimizer:
 
                 if self._is_cg():
                     remaining = int(mi)
-                    # Displacement reference coordinates from the last build of each half.
-                    # The fixed-background half tracks only the LIGAND atoms: `bg_pos` is a
-                    # snapshot for the whole call, so only ligand motion can stale that list
-                    # — measuring all of `active` would let ordinary polymer motion force
-                    # pointless rebuilds of it.
+                    # Track only ligand displacement against the fixed background: bg_pos is
+                    # frozen for this invocation, so unrelated polymer motion cannot stale it.
                     fixed_ref = active_ref = None
                     cg_state = None
                     while remaining > 0 or cg_state is None:
@@ -690,12 +662,8 @@ class TorchRestraintOptimizer:
                                 active_ref = cur.clone()
                                 rebuilt = True
                         if rebuilt:
-                            # the objective changed: the carried energy/gradient/direction
-                            # describe the OLD pair list, so restart the CG. Theory says the
-                            # added and removed pairs contribute exactly zero (the penalty is
-                            # clamped beyond contact), but `max_neighbors` truncation can
-                            # break that premise, so pay one evaluation per REBUILD rather
-                            # than rely on it. Rebuilds are now rare, so this is cheap.
+                            # Invalidate the CG history when pairs change. Capacity truncation can
+                            # make added/removed pairs contribute nonzero energy.
                             if cg_state is not None:
                                 cg_state = cg_state._replace(valid=False)
                         block_iters = min(check, remaining)
@@ -721,13 +689,9 @@ class TorchRestraintOptimizer:
                     opt.step(closure)
             new_active = active.detach().clone()
 
-        # Robustness (mirror the jax backend's guard in jax_optim.py): a degenerate
-        # geometry can make the solver step diverge to non-finite values; keep the
-        # input coordinates rather than writing NaN/Inf into the structure.
+        # Retain input coordinates if optimization produces non-finite values.
         if not torch.isfinite(new_active).all():
-            # If the INPUT coords were already non-finite, the model (or a broken GPU
-            # kernel) diverged upstream — the restraint only inherited the NaN. Reporting
-            # input_finite keeps a NaN from being misattributed to the restraint.
+            # Distinguish pre-existing non-finite inputs from optimizer failure.
             input_finite = bool(torch.isfinite(coords[..., self._active_idx, :]).all())
             logger.warning(
                 "restraint step produced non-finite coords; skipping update "

@@ -73,9 +73,7 @@ def biotite_ligand_confs(
     conf_rest_annot = None
     if "conformer_restraints" in atom_array.get_annotation_categories():
         conf_rest_annot = np.asarray(atom_array.conformer_restraints, dtype=bool)
-    # bonds may be absent (a structure whose only hetero atoms are monatomic ions has
-    # no BondList); treat as no bonds rather than bailing so the ions still surface as
-    # LigandConf for fixed-background VdW (matching boltz).
+    # Monatomic ions may have no BondList but still need LigandConf entries for VdW.
     bond_arr = (
         atom_array.bonds.as_array()  # (n_bond, 3): i, j, order
         if getattr(atom_array, "bonds", None) is not None

@@ -41,14 +41,13 @@ def test_minimize_gpu_flattens_and_restores_shape():
     sm = ScanMinimizer(_FakeRgi(), minimizer)
     pos = np.zeros((4, 3, 3))  # (num_tokens=4, max=3, 3) -> flat (12, 3)
     out = sm.minimize_gpu(pos, 2.5)
-    assert seen["shape"] == (12, 3)  # minimizer saw the flat atom axis
+    assert seen["shape"] == (12, 3)
     assert seen["sigma"] == 2.5
-    assert out.shape == (4, 3, 3)  # restored to the original shape
-    assert np.allclose(out, 1.0)  # transform applied through the round-trip
+    assert out.shape == (4, 3, 3)
+    assert np.allclose(out, 1.0)
 
 
 def test_minimize_gpu_shape_agnostic():
-    # an already-flat (n, 3) tensor round-trips unchanged in shape
     seen = {}
 
     def minimizer(flat, sigma, step=0):
@@ -66,14 +65,13 @@ def test_minimize_gpu_noop_when_no_minimizer():
     pos = np.arange(6.0).reshape(2, 3)
     out = sm.minimize_gpu(pos, 1.0)
     assert out is pos  # untouched (same object)
-    assert sm.is_active() is False  # minimizer None -> inactive
+    assert sm.is_active() is False
 
 
 def test_is_active_and_n_active():
     sm = ScanMinimizer(_FakeRgi(active=True, n_active=7), lambda f, s: f)
     assert sm.is_active() is True
     assert sm.n_active == 7
-    # inactive rgi -> not active even with a minimizer
     assert ScanMinimizer(_FakeRgi(active=False), lambda f, s: f).is_active() is False
 
 
@@ -92,4 +90,4 @@ def test_finalize_flattens_and_delegates():
 def test_finalize_noop_when_no_minimizer():
     rgi = _FakeRgi()
     ScanMinimizer(rgi, None).finalize(np.zeros((4, 3, 3)))
-    assert rgi.finalized == []  # no minimizer -> no finalize call
+    assert rgi.finalized == []

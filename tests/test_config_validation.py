@@ -1,14 +1,6 @@
-"""Config-parsing validation + adapter resid-convention regression tests.
+"""Config validation and adapter residue-ordinal regression tests.
 
-Covers the silent-config-drop failure class surfaced by the audit: a typo'd section
-name or entry key that used to be dropped with no error, plus the bool() coercion trap
-and the per-chain resid convention. Pure parsing / lightweight numpy fixtures — no GPU.
-
-NOTE: a full cross-adapter (same structure -> all six adapters -> diff AtomRecords)
-runtime parity test is intentionally NOT here: faithful fixtures need each tool's real
-feats format, and a hand-built one risks not reproducing the very divergence the
-invariant guards. The esmfold2 case below is the one adapter constructible from plain
-numpy; the others are exercised by their tools' E2E runs.
+Cover unknown keys, boolean coercion, and ESMFold2 token padding with CPU fixtures.
 """
 
 import logging
@@ -21,7 +13,6 @@ from rgi_toolkit.config import RestraintsConfig
 from rgi_toolkit.rmsd_restr_data import RmsdData
 
 
-# --- top-level section whitelist (F1) ---------------------------------------------
 def test_unknown_top_level_key_raises():
     """A misspelled SECTION name must raise, not silently drop the whole block."""
     with pytest.raises(ValueError, match="unknown top-level key"):
@@ -57,9 +48,7 @@ def test_backend_key_rejected_with_hint():
 
 
 def test_plane_conformer_key_migrations():
-    """The conformer plane term was renamed improper -> planarity -> plane. BOTH old keys
-    must raise a migration hint (like dihedral -> cistrans), not silently leave the opt-in
-    term OFF; the new `plane` key parses cleanly."""
+    """Reject improper/planarity with a migration hint; accept the plane key."""
     with pytest.raises(ValueError, match="'improper' was renamed to 'plane'"):
         RestraintsConfig.from_dict(
             {"conformer_restraints_config": {"improper": {"weight": 1.0}}}
@@ -68,7 +57,6 @@ def test_plane_conformer_key_migrations():
         RestraintsConfig.from_dict(
             {"conformer_restraints_config": {"planarity": {"weight": 1.0}}}
         )
-    # new key is accepted (conformer_config is passed through verbatim)
     cfg = RestraintsConfig.from_dict(
         {"conformer_restraints_config": {"plane": {"weight": 1.0}}}
     )
@@ -81,10 +69,8 @@ def test_empty_config_is_vanilla():
     assert RestraintsConfig.from_dict({}).rmsd_data == []
 
 
-# --- per-entry unknown-key warnings (F1) ------------------------------------------
 def test_unknown_distance_entry_key_warns(caplog):
-    """A key distance does not read (e.g. a typo'd 'weihgt') is warned, not silently
-    dropped. ('weight' is now a real distance key, so a misspelling is the live footgun.)"""
+    """Warn about unrecognized distance-entry keys such as a misspelled weight."""
     with caplog.at_level(logging.WARNING):
         RestraintsConfig.from_dict(
             {
@@ -104,22 +90,18 @@ def test_unknown_distance_entry_key_warns(caplog):
 
 
 def test_bare_atom_selection_on_rmsd_raises():
-    """The documented footgun: a bare 'atom_selection' (only the _ref/_target shorthand
-    and the _fit/_calc keys are read) would be silently dropped, broadening the
-    superposition to the whole structure -- so it is now rejected loudly, like a
-    misspelled section name or a top-level start_sigma."""
+    """Reject bare atom_selection so a typo cannot broaden RMSD to the whole structure."""
     rr = RmsdData()
     with pytest.raises(ValueError, match="atom_selection"):
         rr.set_config(
             {
                 "ref_pdb": "x.pdb",
                 "harmonic": {"target_rmsd": 1.0},
-                "atom_selection": "chain A",  # footgun: not a real key
+                "atom_selection": "chain A",
             }
         )
 
 
-# --- bool coercion trap (F4) ------------------------------------------------------
 def test_best_effort_string_false_disables():
     """best_effort: "false" (quoted) must disable it — plain bool("false") is True."""
     rr = RmsdData()
@@ -179,7 +161,6 @@ def test_known_methods_ok():
         assert RestraintsConfig.from_dict({"method": good}).method == good
 
 
-# --- esmfold2 adapter: per-chain resid convention + token-pad guard (F10) ---------
 def _min_esm_features(asym_ids):
     """Minimal ESMFold2 features dict (1 atom / token) for the convention checks."""
     n = len(asym_ids)

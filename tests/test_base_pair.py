@@ -1,16 +1,7 @@
-"""Nucleic-acid base-pair restraints: config parse, WC expansion, fail-loud, convergence.
+"""Nucleic-acid base-pair parsing, expansion, validation and convergence.
 
-The base-pair restraint is a config-time MACRO: each entry expands into WC H-bond
-distance restraints (+ an optional coplanarity plane restraint). These tests cover the
-expansion (right atom pairs / counts), the fail-loud guards, and that the generated
-restraints actually converge under the torch CG (H-bonds reach the target window, the
-two bases flatten).
-
-The coplanarity plane is a standalone ``PlaneRestraintData`` (the ``plane_restraints_config``
-term), so it carries the entry's OWN gate window and ``move``. It used to be injected into
-the conformer ``plane`` arrays, where it rode the shared conformer gate — hence the
-``_plane_atoms`` / ``_plane_slack`` helpers below, which read the same two quantities the
-old ``(atoms, slack, weight)`` tuple carried.
+Check Watson-Crick atom pairs, distance targets, and coplanarity. Standalone
+plane restraints must carry the entry's own activation window and move mask.
 """
 
 from __future__ import annotations
@@ -87,7 +78,6 @@ def _plane_slack(plane):
     return plane.target2
 
 
-# --------------------------------------------------------------------------- config
 class TestConfig:
     def test_defaults(self):
         bp = BasePairData()
@@ -138,7 +128,6 @@ class TestConfig:
         assert any("unknown config key" in r.message for r in caplog.records)
 
 
-# ------------------------------------------------------------------------- resolve
 class TestResolve:
     def test_gc_auto_three_hbonds(self):
         dists, plane = _resolve(
@@ -222,7 +211,6 @@ class TestResolve:
         assert all(d.move_mode == 1 for d in dists)
 
 
-# ------------------------------------------------------------------------ fail-loud
 class TestFailLoud:
     def test_more_than_one_residue(self):
         adapter = _adapter(
@@ -259,7 +247,6 @@ class TestFailLoud:
             )
 
 
-# ----------------------------------------------------------------------- config wiring
 class TestConfigWiring:
     def test_top_level_key_accepted(self):
         cfg = RestraintsConfig.from_dict({"base_pair_restraints_config": [_entry()]})
@@ -274,8 +261,7 @@ class TestConfigWiring:
             {"gpu": False, "base_pair_restraints_config": [_entry()]},
         )
         assert int(cr.spec.distance.mask.sum()) == 3
-        # the coplanarity plane is the STANDALONE plane term (per-entry gate), not the
-        # conformer `plane` sub-term it used to be injected into
+        # Coplanarity uses standalone plane arrays with per-entry gates.
         assert int(cr.spec.group_plane.mask.sum()) == 1
         assert cr.spec.plane is None
 
@@ -315,9 +301,7 @@ class TestConfigWiring:
         assert int(cr.spec.group_plane.mask.sum()) == 3
 
     def test_entry_gate_and_move_reach_the_coplanarity_plane(self):
-        # The migration off `extra_plane_groups`: the plane now carries the entry's own
-        # sigma window and move mask. It used to ride the shared conformer gate, so a
-        # stop_sigma released the H-bonds but left the coplanarity pulling.
+        # The coplanarity plane shares the entry's window and move mask.
         cr = CombinedRestraints()
         cr.setup(
             _adapter(("A", 1, "G", _G_BASE), ("B", 1, "C", _C_BASE)),
@@ -347,7 +331,6 @@ class TestConfigWiring:
         assert int(cr.spec.distance.mask.sum()) == 3  # still 3, not 6
 
 
-# ----------------------------------------------------------------------- convergence
 class TestConverge:
     def test_torch_hbonds_and_plane_converge(self):
         torch = pytest.importorskip("torch")
@@ -391,7 +374,6 @@ class TestConverge:
         assert _plane_dev(xo) < 0.5 * dev0  # flattened
 
 
-# ---------------------------------------------------------------------------- triple
 class TestTriple:
     """``residue3`` widens the coplanarity plane to a base triple.
 
@@ -423,7 +405,7 @@ class TestTriple:
         _, triple_plane = _resolve(
             self._triple_adapter(), residue3="chain A and resid 2"
         )
-        # slack 0 -> harmonic toward 0 (unchanged for every pre-existing config)
+        # Zero slack gives a harmonic plane restraint.
         assert _plane_slack(pair_plane) == 0.0
         assert pair_plane.geom_type == "harmonic"
         # a positive slack -> the upper-bound-only flat-bottomed2, same max(0, rms-slack)
@@ -514,7 +496,6 @@ class TestTriple:
         assert _run(coplanar_slack=0.0) > 0.2
 
 
-# ------------------------------------------------------------------------ plane only
 class TestPlaneOnly:
     """``hbonds: false`` keeps the plane and drops the Watson-Crick lookup.
 

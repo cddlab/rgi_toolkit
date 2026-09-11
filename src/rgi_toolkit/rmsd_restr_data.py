@@ -2,8 +2,8 @@
 
 One ``rmsd_restraints_config`` entry restrains the **Kabsch-superposed RMSD**
 between a moving group in the diffusion structure and a fixed group from a
-reference structure -- given as EITHER ``ref_pdb`` (legacy PDB) OR ``ref_cif`` (mmCIF),
-mutually exclusive; both parse to the same atom records via the dependency-free
+reference structure -- given as EITHER ``ref_pdb`` (PDB) OR ``ref_cif`` (mmCIF),
+mutually exclusive; both parse to the same atom records via
 ``read_pdb_atoms`` / ``read_cif_atoms`` -- shaped by a restraint-type block
 (``harmonic`` / ``flat-bottomed`` /
 ``flat-bottomed1`` / ``flat-bottomed2``) on the RMSD value and optimised by the CG solver. The
@@ -12,9 +12,7 @@ superposition ("fit") atoms and the measured ("calc") atoms can differ:
   atom_selection_ref_fit / atom_selection_target_fit   -> Kabsch superposition
   atom_selection_ref_calc / atom_selection_target_calc -> RMSD measured here
 
-Backward-compatible shorthand: ``atom_selection_ref`` / ``atom_selection_target``
-set BOTH fit and calc (so a single selection == fit==calc == the original
-behaviour).
+The shorthand ``atom_selection_ref`` / ``atom_selection_target`` sets both fit and calc.
 
 Selections are OPTIONAL. Omit them (no ``atom_selection*`` at all) to fit + measure
 RMSD over the WHOLE structure: the whole diffusion structure is superposed onto the
@@ -27,7 +25,7 @@ restraint-type block are required.
 Reference and target atoms are paired by IDENTITY (chain, resid, atom-name) when
 both sides expose atom names, so the reference PDB's atom order need not match the
 tool's internal order. If names are unavailable on either side it falls back to
-selection-order pairing (the original behaviour).
+selection-order pairing.
 
 Pairing is BEST-EFFORT by default (PyMOL align/super-like): a target atom with no
 matching (chain, resid, name) in the reference is SKIPPED, so a partially-overlapping
@@ -52,8 +50,8 @@ atoms are pinned onto the REFERENCE's side-chain coordinates. To avoid that pinn
 restrict the selection to the backbone with a ``backbone`` / ``name CA`` atom_selection,
 so only those atoms are superposed; this is PyMOL-align without the outlier-rejection
 cycles. align defaults to best-effort (gap/unshared atoms skipped), but ``best_effort:
-false`` with an EXPLICIT selection is honoured -- a residue aligned to a gap then raises
-(no longer a silent no-op). align needs residue names on both sides (the reference
+false`` with an EXPLICIT selection is honoured -- a residue aligned to a gap then raises.
+align needs residue names on both sides (the reference
 always has them; the target needs an adapter that fills ``AtomRecord.resname`` -- it
 raises loudly otherwise). Ligand / non-polymer atoms stay on ordinal (chain, resid,
 name) identity even under align.
@@ -62,17 +60,8 @@ name) identity even under align.
 active when ``stop_sigma <= sigma <= start_sigma`` (``start_sigma`` defaults to +inf =
 on from the first step; ``stop_sigma`` defaults to -1 = never released). Setting
 ``stop_sigma > 0`` RELEASES the restraint for the final low-sigma steps so the model's
-own denoising re-idealises geometry the restraint would otherwise hold distorted. This
-is the fix for a broken peptide bond at the junction between a restrained residue and a
-FREE unmodeled tail: with ``target_rmsd=0`` the CG drives the restrained residue exactly
-onto the reference every step (a per-atom weight only changes the convergence RATE, not
-the fixed point, so down-weighting the terminus does NOT help), while the free tail lags
-and the bond snaps (length AND omega planarity). Releasing the restraint below
-``stop_sigma`` lets the final steps pull the bond back to ideal; the global reference
-bias, established over the earlier (higher-sigma) steps, survives because low-sigma
-denoising only refines locally. Pick ``stop_sigma`` in the model's sigma units; boltz2
-(sigma_data=16, ~2560 -> ~0.006 over 200 steps) was validated at ``stop_sigma: 1.0``
-(bond fully healed, ref CA-RMSD held ~0.3 A); the other tools share sigma_data=16.
+own denoising can repair strained geometry, such as a peptide bond between a restrained
+residue and a free tail. Choose ``stop_sigma`` in the model's sigma units.
 """
 
 from __future__ import annotations
@@ -172,12 +161,12 @@ def pair_target_to_ref(
     atom's resid is first translated to the aligned ref resid via ``resid_map`` (ligands stay
     on ordinal identity). Shared by the built-in RMSD restraint and the custom ``rmsd()``
     primitive, so both pair identically."""
-    if sel_target is None:  # whole structure (no filter)
+    if sel_target is None:
         tgt = list(atoms)
     else:
         st = AtomSelector(sel_target)
         tgt = [a for a in atoms if st.matches(candidate_dict(a))]
-    if sel_ref is None:  # whole reference (no filter)
+    if sel_ref is None:
         ref = list(ref_atoms)
     else:
         sr = AtomSelector(sel_ref)
@@ -211,8 +200,7 @@ def pair_target_to_ref(
         [r.name for r in ref[:4]],
     )
     if tgt_named and ref_named:
-        # duplicate (chain, resid, name) keys would silently collapse last-wins and
-        # mispair atoms, so reject an ambiguous reference loudly instead.
+        # Duplicate identity keys would collapse to the last atom and mispair the reference.
         refmap = {}
         for r in ref:
             k = (r.chain, r.resid, normalise_atom_name(r.name))
@@ -225,10 +213,8 @@ def pair_target_to_ref(
         sites, coords, skipped = [], [], 0
         for a in tgt:
             if align and polymer_type(a.mol_type, a.resname) is not None:
-                # polymer: translate target resid -> aligned ref resid. No entry =
-                # residue aligned to a gap (the homolog ref lacks it); skip under
-                # best_effort, else raise so best_effort:false is honoured (not a
-                # silent no-op). Ligand atoms fall to ordinal identity below.
+                # Map polymer residues through the alignment; gaps obey best_effort.
+                # Ligands use ordinal identity below.
                 mapped = resid_map.get((a.chain, a.resid))
                 if mapped is None:
                     if best_effort:
@@ -243,7 +229,7 @@ def pair_target_to_ref(
             else:
                 key = (a.chain, a.resid, normalise_atom_name(a.name))
             if key not in refmap:
-                if best_effort:  # whole-structure default: use what matches
+                if best_effort:
                     skipped += 1
                     continue
                 raise ValueError(
@@ -257,7 +243,7 @@ def pair_target_to_ref(
                 f"rmsd {tag}: no target atom matched the reference by "
                 f"(chain, resid, name) in {ref_path!r}"
             )
-        if skipped:  # transparency: do not silently drop atoms
+        if skipped:
             logger.info(
                 "rmsd %s (best-effort): matched %d / %d atoms "
                 "(%d unmatched in ref skipped)",
@@ -303,10 +289,7 @@ _KNOWN_RMSD_KEYS = {
 
 @dataclass
 class RmsdData:
-    # reference structure: EXACTLY ONE of ref_pdb (legacy PDB) / ref_cif (mmCIF),
-    # mutually exclusive. Both parse — via the dependency-free read_pdb_atoms /
-    # read_cif_atoms — to the same PdbAtom list, so they are interchangeable; ref_path
-    # holds whichever was given and is what every downstream message reports.
+    # Mutually exclusive PDB/mmCIF inputs; both readers return PdbAtom records.
     ref_pdb: str = None
     ref_cif: str = None
     ref_path: str = None
@@ -318,18 +301,11 @@ class RmsdData:
     target2: float = None
     weight: float = None
     start_sigma: float = None  # per-restraint; from_dict defaults None -> +inf
-    # per-restraint LOWER noise bound: the restraint is RELEASED for sigma < stop_sigma,
-    # so the model's final low-sigma denoising steps re-idealise geometry the restraint
-    # would otherwise hold distorted -- notably the peptide bond between a restrained
-    # residue and a FREE unmodeled tail (target_rmsd=0 drives the restrained residue
-    # onto the reference while the tail lags, snapping the bond; releasing late lets the
-    # model repair it). -1 (default) = never released (sigma>=-1 always true), active
-    # down to sigma=0 (old behaviour); any value <= 0 is "off".
+    # Release below stop_sigma so late denoising can repair strained boundary
+    # geometry. -1 keeps the restraint active down to sigma=0.
     stop_sigma: float = -1.0
-    # step-window (the alternative gate axis to the sigma window above): active for
-    # start_step <= step <= stop_step (diffusion step index). Omitted -> -inf/+inf =
-    # always. Mutually exclusive with the sigma window; NOT portable across tools (step
-    # counts differ per tool, unlike sigma).
+    # Inclusive step window, mutually exclusive with an explicit sigma window.
+    # Step counts differ across predictors.
     start_step: float = float("-inf")
     stop_step: float = float("inf")
     # selection strings (fit = superposition atoms, calc = measured atoms)
@@ -337,16 +313,10 @@ class RmsdData:
     sel_target_fit: str = None
     sel_ref_calc: str = None
     sel_target_calc: str = None
-    # PyMOL align/super-like tolerant matching: skip target atoms with no
-    # (chain, resid, name) match in the ref instead of raising. DEFAULT True (set
-    # best_effort:false for strict pairing that raises on any unmatched atom). If
-    # NOTHING matches it still raises, so a wholly-wrong selection is not silent.
+    # Skip unmatched atoms unless strict pairing is requested. No matches always raises.
     best_effort: bool = True
-    # residue correspondence: "identity" = pair by (chain, resid, name) ordinal;
-    # "align" (the DEFAULT, set from config in set_config; None here pre-config) =
-    # sequence-align polymer chains first (BLOSUM62/identity) so a homolog reference
-    # with substitutions/indels maps on (PyMOL align-like). align engages only when
-    # polymer atoms exist (else identity). Populated in resolve_sites.
+    # Identity pairs by (chain, resid, name); the default align mode first aligns
+    # polymer sequences. Non-polymer atoms always use identity.
     pairing: str = None
     resid_map: dict = field(default=None)  # (chain, target_resid) -> ref_resid (align)
     # resolved: global target atom indices + paired reference coords (n_atoms, 3)
@@ -357,12 +327,6 @@ class RmsdData:
     run_restr: bool = None
 
     def set_config(self, config: dict):
-        # Bare 'atom_selection' is a footgun: only the _ref/_target shorthand and the
-        # _fit/_calc keys are honoured, so a bare one would be silently dropped and the
-        # superposition would quietly broaden to the WHOLE structure (a wrong-result
-        # no-op). Reject it loudly -- like the other dangerous config typos (top-level
-        # start_sigma, a misspelled section name) -- instead of leaving it to the muted
-        # warn_unknown_keys warning.
         if "atom_selection" in config:
             raise ValueError(
                 "rmsd_restraints_config entry: bare 'atom_selection' is not a valid key "
@@ -373,9 +337,6 @@ class RmsdData:
         warn_unknown_keys(
             config, _KNOWN_RMSD_KEYS, "rmsd_restraints_config entry", logger
         )
-        # reference structure: ref_pdb (PDB) XOR ref_cif (mmCIF). Both readers emit the
-        # same PdbAtom list, so they are interchangeable; giving both is a config error
-        # (which file wins would be silent) -- raise like the other dangerous typos.
         self.ref_pdb = config.get("ref_pdb", None)
         self.ref_cif = config.get("ref_cif", None)
         if self.ref_pdb is not None and self.ref_cif is not None:
@@ -384,18 +345,10 @@ class RmsdData:
                 "exclusive -- give exactly one reference structure"
             )
         self.ref_path = self.ref_pdb if self.ref_pdb is not None else self.ref_cif
-        # restraint type on the Kabsch RMSD value, mirroring distance/angle/dihedral:
-        # harmonic{target_rmsd} / flat-bottomed{target_rmsd1,target_rmsd2} /
-        # flat-bottomed1{target_rmsd1} (lower) / flat-bottomed2{target_rmsd2} (upper).
-        # RMSD is in Angstroms (no unit conversion), so conv is float.
+        # RMSD targets are in Angstroms, so no angular conversion is needed.
         self.rmsd_type, self.target1, self.target2 = parse_geom_type(
             config, "target_rmsd", float
         )
-        # weight + the sigma/step gate windows: one shared parse (so the null/zero handling
-        # can't drift across distance/rmsd/angle/dihedral). weight None -> 1.0 (an explicit
-        # 0 stays a zero-weight no-op); stop_sigma default -1 = never released (releasing
-        # late lets the model re-idealise the boundary geometry); start_sigma None -> +inf
-        # is filled by from_dict; the step window defaults always-on.
         apply_window_params(self, config, "rmsd_restraints_config entry")
         # explicit _fit / _calc override the shared ref/target shorthand. A selection
         # left None means "the whole structure on that side" (resolved best-effort).
@@ -405,22 +358,12 @@ class RmsdData:
         self.sel_target_fit = config.get("atom_selection_target_fit", tgt)
         self.sel_ref_calc = config.get("atom_selection_ref_calc", ref)
         self.sel_target_calc = config.get("atom_selection_target_calc", tgt)
-        # tolerate partial topology overlap by default (skip unmatched atoms); set
-        # best_effort:false for strict pairing that raises on any unmatched atom.
         self.best_effort = coerce_bool(config.get("best_effort"), True)
-        # DEFAULT "align": polymer chains (protein/dna/rna) are sequence-aligned so a
-        # homolog reference maps on by residue, not by fragile ordinal numbering;
-        # non-polymer atoms (ligands) always stay on ordinal identity. align only
-        # ENGAGES when the structure actually has polymer atoms (see resolve_sites), so
-        # this default never forces alignment on a ligand-only structure. Set
-        # pairing:"identity" to force pure ordinal pairing everywhere.
         self.pairing = config.get("pairing") or "align"
         if self.pairing not in ("identity", "align"):
             raise ValueError(
                 f"rmsd pairing must be 'identity' or 'align', got {self.pairing!r}"
             )
-        # selections are OPTIONAL (omit -> whole-structure best-effort); only a reference
-        # (ref_pdb or ref_cif) + target_rmsd are required.
         self.run_restr = self.ref_path is not None and self.rmsd_type is not None
         if not self.run_restr:
             raise ValueError(
@@ -442,28 +385,18 @@ class RmsdData:
         if not self.run_restr:
             return
         atoms = list(adapter.iter_atoms())
-        # pick the reader by which reference key was given; both emit the same PdbAtom
-        # list, so the rest of resolve_sites is format-agnostic. Raises on a bad file.
         reader = read_cif_atoms if self.ref_cif is not None else read_pdb_atoms
         ref_atoms = reader(self.ref_path)
-        # "align": sequence-align polymer chains so a homolog reference (substitutions,
-        # indels) maps onto the prediction by residue, not by ordinal. Built once and
-        # reused for both fit and calc. Polymer atoms are then keyed by the aligned ref
-        # resid; ligands stay on (chain, resid, name) identity. align ENGAGES only when
-        # the structure has polymer atoms -- so the "align" DEFAULT degrades to pure
-        # identity on a bare/ligand-only structure (no resname, no names) instead of
-        # demanding alignment of things that have no sequence. With polymer atoms but no
-        # alignable chain (chain-id mismatch), _build_resid_map raises loudly.
+        # Build polymer correspondence once for both fit and calc. Ligand-only
+        # structures use identity without attempting sequence alignment.
         has_polymer = any(
             polymer_type(a.mol_type, a.resname) is not None for a in atoms
         )
         align = self.pairing == "align" and has_polymer
         if align:
             self.resid_map = self._build_resid_map(atoms, ref_atoms)
-        # no target selection -> whole structure, paired best-effort (skip atoms missing
-        # from the ref); an explicit selection stays strict when best_effort:false.
-        # align no longer forces best-effort: a gap/unmatched atom raises under
-        # best_effort:false (see _pair), so strict pairing is honoured even with align.
+        # Omitted target selections use whole-structure best-effort pairing;
+        # explicit selections obey best_effort, including alignment gaps.
         self.fit_target_sites, self.fit_ref_coords = self._pair(
             atoms,
             ref_atoms,

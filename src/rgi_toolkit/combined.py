@@ -64,9 +64,7 @@ class CombinedRestraints:
         self._optimizer = None
         self._minimize_fn = None
         self._minimize_info_fn = None
-        # custom restraints added in code via add_custom() (the throwaway / Pythonic path).
-        # Kept separate from config so set_config does not wipe them; setup() merges them
-        # into cfg.custom_data before resolving + building the spec.
+        # Code-added restraints survive setup with either a new or a reused config.
         self._pending_custom: list = []
 
     def set_config(self, config: dict) -> None:
@@ -110,9 +108,7 @@ class CombinedRestraints:
             raise ValueError(
                 "add_custom: pass exactly one of fn (callable) or energy (formula string)"
             )
-        # Only forward the window keys the caller actually set, so the mutually-exclusive
-        # sigma/step check in CustomData.set_config sees a clean entry (always including
-        # stop_sigma would otherwise collide with a step window).
+        # Forward only explicit window keys to avoid conflicting sigma/step defaults.
         entry: dict = {"weight": weight, "name": name}
         if start_sigma is not None:
             entry["start_sigma"] = start_sigma
@@ -140,14 +136,10 @@ class CombinedRestraints:
         Instance-scoped lifecycle (the supported pattern):
         ``CombinedRestraints() -> setup(adapter, config=...) -> minimize ->
         finalize``. Derived state (spec / optimizers) is cleared up front so a
-        reused instance never carries a stale spec, and passing ``config`` folds
-        the old two-call ``set_config -> setup`` into one. Constructing a fresh
-        instance per structure makes batch runs cross-contamination-free.
+        reused instance never carries a stale spec. Use a fresh instance per structure.
 
-        ``nbatch`` is accepted for the documented integration API (all seven tools pass
-        it) but is currently unused here — the spec is built once and broadcast over the
-        batch dim at minimize time. It is kept as a stable hook for future per-batch
-        specs; do not remove it without updating every tool's call site.
+        ``nbatch`` is accepted by the integration API but currently unused: the spec
+        is built once and broadcast over the batch dimension at minimize time.
         """
         # Clear derived state first: a reused instance must not keep a stale spec.
         self.spec = None
@@ -159,23 +151,13 @@ class CombinedRestraints:
         cfg = self.config
         for restraint in cfg.iter_resolvable_data():
             restraint.resolve_sites(adapter)
-        # merge code-added custom restraints into a LOCAL list, then resolve every custom
-        # entry's selections. Do NOT mutate cfg.custom_data in place: a config-less
-        # re-setup() of a reused instance reuses the same config object, so an in-place
-        # extend would re-append self._pending_custom every call and silently duplicate the
-        # custom restraints. (Clearing _pending_custom instead would drop them on a
-        # re-setup that DOES pass a fresh config, so a local merge is the correct fix.)
+        # Merge locally so repeated setup calls do not duplicate pending restraints.
         custom_data = list(cfg.custom_data) + self._pending_custom
         for cd in custom_data:
             cd.resolve_sites(adapter)
 
-        # nucleic-acid base-pair restraints: expand each entry into pre-resolved WC H-bond
-        # DistanceData (+ an optional coplanarity plane group). Build a LOCAL merged
-        # distance list — NOT cfg.distance_data in place: a config-less re-setup() reuses
-        # the same config object, so an in-place extend would re-append every call and
-        # silently duplicate (the same reasoning as custom_data above). The generated
-        # distances are ALREADY resolved (target_sites filled), so they intentionally
-        # bypass the distance resolve loop above.
+        # Base-pair expansions are already resolved. Keep them out of cfg.distance_data
+        # so repeated setup calls do not accumulate copies.
         bp_planes = []
         bp_distances = []
         for bp in cfg.base_pair_data:
@@ -198,12 +180,7 @@ class CombinedRestraints:
             try:
                 elements = adapter.get_elements()
             except Exception as exc:
-                # Elements feed ONLY the VdW conformer term (off unless a `vdw:` block is
-                # present). If VdW was actually requested, a get_elements failure is a real
-                # problem -> re-raise loudly rather than silently drop the term and quietly
-                # run without the contact penalty. Otherwise (the common case) tolerate it:
-                # no other restraint needs elements. This keeps a broken adapter from
-                # hiding behind "VdW disabled" exactly when VdW matters.
+                # Element lookup failures are fatal only when VdW is enabled.
                 if _conf_weight(cfg.conformer_config, "vdw") > 0:
                     raise
                 logger.warning("get_elements failed, VdW disabled: %s", exc)
@@ -247,9 +224,7 @@ class CombinedRestraints:
             atom_records=atom_records,
             reference_uids=reference_uids,
         )
-        # backend is inferred lazily (get_minimizer() -> jax; minimize(coords) -> from
-        # the coords type) and the matching optimizer built on first use; reset here so a
-        # reused instance re-infers rather than keeping the previous structure's backend.
+        # Reused instances infer their backend again on the next optimizer invocation.
         self._backend = None
         self._optimizer = None
         self._minimize_fn = None
@@ -288,8 +263,6 @@ class CombinedRestraints:
                     f"{int(avc.polymer_mask.sum())}poly/{avc.max_neighbors}nn"
                 )
             vdw_s = "+".join(vdw_bits) if vdw_bits else "off"
-            # Per-restraint start_sigma: conformer terms share conf_start_sigma;
-            # each distance restraint has its own (show the observed range).
             if d is None or n_dist == 0:
                 dist_ss = "n/a"
             else:
@@ -300,8 +273,6 @@ class CombinedRestraints:
                     else f"{float(ss.min()):g}..{float(ss.max()):g}"
                 )
 
-            # Keep conformer sub-term counts visible without maintaining another
-            # restraint list outside the shared registry.
             conf_counts = " ".join(
                 f"{key}={term_counts.get(key, 0)}"
                 for key in ("bond", "angle", "chiral", "plane", "cistrans")
@@ -332,10 +303,7 @@ class CombinedRestraints:
             )
             logger.info(msg)
             print(msg, flush=True)
-            # base pairs expand INTO the distance / group_plane counts above, so their own
-            # firing signal would otherwise be invisible. Report pairs -> h-bonds +
-            # coplanar groups explicitly (the CLAUDE.md verification recipe relies on
-            # per-term counts to confirm a restraint was actually built).
+            # Report macro expansions separately from aggregate distance/plane counts.
             if cfg.base_pair_data:
                 n_triples = sum(1 for bp in cfg.base_pair_data if bp.residue3)
                 bp_msg = (
@@ -347,22 +315,16 @@ class CombinedRestraints:
                 print(bp_msg, flush=True)
 
     def _warn_never_active(self) -> None:
-        """Flag restraints that are built (non-zero weights/counts) but can never fire.
+        """Warn about negative start_sigma and reject empty sigma/step windows.
 
-        Two distinct failure modes, handled differently:
-        * ``start_sigma < 0`` — the gate ``sigma <= start_sigma`` never fires. This CAN
-          be a deliberate "off switch", so it is a loud WARNING (the verbose count/energy
-          logs would not reveal it; ``-1`` is the documented never-fires sentinel).
-        * ``stop_sigma > start_sigma`` — the active window ``stop <= sigma <= start`` is
-          EMPTY, which is never intentional: the restraint you configured can never act.
-          This RAISES — a warning would be muted by the package NullHandler, leaving a
-          silent no-op that reads (counts + ungated finalize energy) as a satisfied
-          restraint."""
+        A negative start may deliberately disable a restraint; reversed window bounds
+        are configuration errors.
+        """
         import numpy as np
 
         spec = self.spec
-        msgs = []  # start_sigma < 0 (possibly deliberate) -> warn
-        errors = []  # empty active window (stop_sigma > start_sigma) -> raise
+        msgs = []
+        errors = []
         if spec.has_conformer() and float(spec.conf_start_sigma) < 0:
             msgs.append(
                 f"conformer restraints are configured but conf_start_sigma="
@@ -378,8 +340,6 @@ class CombinedRestraints:
                 "(conf_stop_sigma <= sigma <= conf_start_sigma) is EMPTY and the "
                 "conformer terms NEVER activate — set conf_stop_sigma below it"
             )
-        # empty STEP window (conf_stop_step < conf_start_step) — same silent-no-op trap as
-        # the empty sigma window above; the step window is the alternative gate axis.
         if spec.has_conformer() and float(
             getattr(spec, "conf_stop_step", float("inf"))
         ) < float(getattr(spec, "conf_start_step", float("-inf"))):
@@ -418,11 +378,7 @@ class CombinedRestraints:
                     f"one or more {label} restraints have stop_step < start_step, so "
                     "their active step window is EMPTY and they NEVER activate"
                 )
-        # custom restraints: each CustomSpec is its own restraint (no mask array), so the
-        # same two traps apply as the built-in families above — start_sigma < 0 never fires
-        # (warn), and an EMPTY sigma/step window is a silent no-op that reads as satisfied
-        # via the ungated _custom_breakdown (raise). This block was the one family missing
-        # from the guard, so a custom restraint could silently never activate.
+        # Custom restraints carry individual windows instead of array masks.
         for cs in spec.custom:
             if float(cs.start_sigma) < 0:
                 msgs.append(
@@ -480,8 +436,6 @@ class CombinedRestraints:
             )
 
     def _build_optimizer(self) -> None:
-        # Dynamic fixed-background VdW (vdw_config) runs on BOTH backends (the torch
-        # optimizer and jax_optim, which ports the torch term), so AF3 gets it too.
         b = self._backend
         if b == "torch":
             from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
@@ -498,8 +452,6 @@ class CombinedRestraints:
                 method=self.config.method,
             )
         else:
-            # Unreachable via _ensure_backend (only torch/jax pass); kept as a defensive
-            # invariant for any future caller that bypasses it.
             raise ValueError(f"unknown backend: {b}")
 
     def is_active(self) -> bool:
@@ -553,21 +505,13 @@ class CombinedRestraints:
 
                 return coords, inactive_info()
             return coords
-        # Infer the backend from the coords type and build the optimizer lazily on the
-        # first call (jax array -> jax; torch tensor / numpy array -> torch).
         self._ensure_backend(self._infer_backend(coords))
         # Per-restraint gating lives in the energy (active sigma window AND active step
         # window per term); the host-spec window table skips the whole step when all
         # terms are inactive, without reading prepared device tensors.
         if self._backend == "jax":
             if sigma is None:
-                # The jax per-restraint gate is `stop_sigma <= sigma <= start_sigma`, so NO
-                # single scalar activates every restraint: the earlier `-inf` sentinel failed
-                # the stop_sigma lower bound (default -1) and silently gated EVERY sigma
-                # restraint OFF -> a no-op the torch branch (which special-cases sigma=None)
-                # does not share. Fail loudly instead of silently doing nothing. The
-                # production AF3 path always passes a real sigma via ScanMinimizer /
-                # get_minimizer(), so this only guards a direct debug call.
+                # No scalar sentinel activates every JAX sigma window.
                 raise ValueError(
                     "minimize(<jax array>) requires an explicit `sigma`: the jax gate "
                     "cannot represent 'all restraints active' with a single scalar (unlike "
@@ -578,15 +522,14 @@ class CombinedRestraints:
         return self._minimize_torch(coords, sigma, istep, return_info=return_info)
 
     def _minimize_torch(self, coords, sigma=None, step=None, *, return_info=False):
-        """Run the torch optimizer (the only CPU/GPU restraint optimizer — the
-        numpy/scipy backend was removed).
+        """Run the Torch optimizer and write coordinates back in place.
 
         - ``torch.Tensor``: optimize on the coords' device, except with ``gpu:false``
           on an accelerator tensor, where we compute on CPU (move to CPU, optimize,
-          write the result back to the original device). The optimization is identical
-          to the GPU path and the dynamic fixed-background VdW still applies.
+          write the result back to the original device).
         - numpy array: optimize on a CPU torch tensor and write the result back in
-          place (the torch optimizer replaces the old scipy path for array callers)."""
+          place.
+        """
         import torch
 
         info = None
@@ -632,9 +575,7 @@ class CombinedRestraints:
         try:
             bd = self._restraint_breakdown(coords)
             total = sum(bd[key] for key in BREAKDOWN_KEYS)
-            # custom restraints are closures (not in the array breakdown) — evaluate each
-            # at the final coords and report by name. A 0.0 here with custom > 0 in the
-            # setup spec means SATISFIED (cross-check the setup `custom=N` count).
+            # Custom closures are absent from the array breakdown.
             custom_bd = self._custom_breakdown(coords)
             total += sum(custom_bd.values())
             # Dynamic VdW is optimizer-only and absent from the array breakdown. Both
@@ -672,10 +613,8 @@ class CombinedRestraints:
             )
             logger.info(msg)
             print(msg, flush=True)
-        except Exception as exc:  # stats are best-effort (verbose-only diagnostic)
-            # finalize only runs under verbose, so the user asked for diagnostics:
-            # surface the traceback (exc_info) + print it, but never let a stats bug
-            # crash the real inference run.
+        except Exception as exc:
+            # Report diagnostic failures without aborting inference.
             logger.warning("finalize stats failed: %s", exc, exc_info=True)
             print(f"[rgi_toolkit] WARNING: finalize stats failed: {exc}", flush=True)
 

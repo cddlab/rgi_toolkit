@@ -93,14 +93,10 @@ class RestraintsConfig:
     gpu: bool = True
     method: str = "CG"
     max_iter: int = 100
-    # one value for all conformer restraints; +inf = active every step (the
-    # documented "omitted start_sigma" default, matching build_spec). from_dict always
-    # passes this explicitly, so the default only applies to a bare RestraintsConfig().
+    # Shared conformer window; +inf starts at the first diffusion step.
     conf_start_sigma: float = float("inf")
     conf_stop_sigma: float = -1.0  # shared conformer lower bound; -1 = never released
-    # shared conformer STEP window (the alternative gate axis to the sigma window above):
-    # active for conf_start_step <= step <= conf_stop_step. -inf/+inf = always (default).
-    # Mutually exclusive with the conformer sigma window.
+    # Inclusive step window, mutually exclusive with an explicit sigma window.
     conf_start_step: float = float("-inf")
     conf_stop_step: float = float("inf")
     conformer_config: dict | None = None
@@ -134,14 +130,6 @@ class RestraintsConfig:
         config = {} if config is None else config
         if not isinstance(config, dict):
             raise ValueError("restraints_config must be a mapping")
-        # Validate top-level keys against a fixed whitelist and RAISE on anything
-        # unknown. The dangerous case this catches: a misspelled SECTION name (e.g.
-        # 'distance_restraint_config' instead of 'distance_restraints_config') makes
-        # config.get(<correct name>, []) return nothing and silently drops the WHOLE
-        # restraint block -> a valid-looking unrestrained run (wasted GPU + wrong
-        # conclusions). A warning would be muted by the package NullHandler, so this
-        # must raise. 'start_sigma' is excluded so its dedicated migration message
-        # below fires instead of this generic one.
         _KNOWN_TOP_LEVEL = {
             "verbose",
             "gpu",
@@ -153,10 +141,6 @@ class RestraintsConfig:
         } | {route.section for route in _ENTRY_ROUTES}
         _unknown_top = set(config) - _KNOWN_TOP_LEVEL - {"start_sigma"}
         if _unknown_top:
-            # 'backend' was removed as a config key: it is now inferred from how the
-            # engine is invoked (get_minimizer() -> jax; minimize(coords) with a
-            # torch/numpy array -> torch). Give a targeted migration hint instead of
-            # the generic unknown-key error so stale configs get an actionable message.
             hint = ""
             if "backend" in _unknown_top:
                 hint = (
@@ -170,11 +154,6 @@ class RestraintsConfig:
                 f"(e.g. 'distance_restraint_config') would silently drop the whole "
                 f"restraint block, so it is rejected here.{hint}"
             )
-        # start_sigma is NOT a global key (the old global + per-entry override scheme was
-        # confusing): it is set per distance entry and once for all conformer terms. A
-        # top-level 'start_sigma' is rejected. It is OPTIONAL per restraint — when omitted
-        # it defaults to +inf, i.e. the restraint is active at EVERY diffusion step. Set it
-        # (e.g. 1.0) to apply a restraint only late (low-noise) in denoising.
         if "start_sigma" in config:
             raise ValueError(
                 "restraints_config: top-level 'start_sigma' is not supported — set it on "
@@ -186,17 +165,11 @@ class RestraintsConfig:
         conformer_config = {} if conformer_config is None else conformer_config
         if not isinstance(conformer_config, dict):
             raise ValueError("conformer_restraints_config must be a mapping")
-        # The conformer cis/trans term was renamed dihedral -> cistrans. Reject the old
-        # key loudly (like the start_sigma / backend:numpy guards) rather than silently
-        # falling back to the default weight, which would weaken or re-enable the term.
         if "dihedral" in conformer_config:
             raise ValueError(
                 "conformer_restraints_config: 'dihedral' was renamed to 'cistrans' "
                 "(it restrains acyclic double bonds' cis/trans (E/Z) geometry)."
             )
-        # The conformer plane term was renamed improper -> planarity -> plane. Reject both
-        # old keys loudly (same policy as dihedral above) instead of silently ignoring
-        # them, which would leave the opt-in plane term OFF without warning.
         if "improper" in conformer_config:
             raise ValueError(
                 "conformer_restraints_config: 'improper' was renamed to 'plane' "
@@ -220,12 +193,7 @@ class RestraintsConfig:
             "plane",
             "cistrans",
             "vdw",
-            # NOT a term: points the polymer bond/angle/plane/link TARGETS at a CCP4
-            # monomer library instead of the predictor's reference conformer.
             "monomer_library",
-            # NOT a term: its `ligand` key selects which force field idealises the LIGAND
-            # reference conformer before the bond/angle/chiral/cistrans/plane targets are
-            # measured off it.
             "relax_force_field",
         }
         unknown_conformer = {
@@ -240,11 +208,6 @@ class RestraintsConfig:
                 f"{sorted(known_conformer_keys)}"
             )
         validate_vdw_config(conformer_config)
-        # Only `vdw` validated its own sub-keys, so a typo INSIDE any other term block was
-        # silently ignored: the run looked configured while the term kept its default. That
-        # is the same silent-config-failure class the outer whitelist exists for, and it
-        # bites hardest on `slack`, whose whole purpose is to loosen a restraint that is
-        # otherwise driven to its exact target. Check every term's sub-keys while parsing.
         for term in ("bond", "angle", "chiral", "cistrans", "plane"):
             block = conformer_config.get(term)
             if block is None:
@@ -269,39 +232,20 @@ class RestraintsConfig:
                     parsed = finite_float(value, f"conformer {term} {key}")
                     if key == "slack" and parsed < 0:
                         raise ValueError(f"conformer {term} slack must be >= 0")
-        # Validate the monomer-library spec HERE so a typo'd path/option raises while
-        # parsing the config, not several minutes later when the first structure builds
-        # its polymer geometry. Parsing is stdlib-only (gemmi loads lazily).
+        # Validate nested options even when no entity opts into conformer restraints.
         monlib_geom.parse_config(conformer_config)
-        # Same reasoning for the relax force field: the whitelist above only checks the
-        # KEY, so an unknown VALUE ("mmf94") would slip through and silently run UFF on any
-        # run where no ligand opts in (build_spec would never reach it). Validate the value
-        # while parsing. Stdlib-only -- _mol_build imports RDKit inside its functions, so
-        # the "import rgi_toolkit needs numpy only" invariant holds.
         parse_relax_force_field(conformer_config)
-        # conformer terms share ONE gate window. Like every other restraint it is EITHER
-        # a sigma window OR a step window (mutually exclusive); reuse the shared check.
         check_window_exclusive(conformer_config, "conformer_restraints_config")
         _css = conformer_config.get("start_sigma")
         conf_start_sigma = float(_css) if _css is not None else _ALWAYS_ON
-        # shared conformer lower bound: release conformer terms below this noise level
-        # (omitted -> -1 = off). Window: conf_stop <= sigma <= conf_start
         _csstop = conformer_config.get("stop_sigma")
         conf_stop_sigma = float(_csstop) if _csstop is not None else -1.0
-        # shared conformer STEP window (omitted -> -inf/+inf = always): active for
-        # conf_start_step <= step <= conf_stop_step (the alternative gate axis).
         _csa = conformer_config.get("start_step")
         conf_start_step = float(_csa) if _csa is not None else float("-inf")
         _cso = conformer_config.get("stop_step")
         conf_stop_step = float(_cso) if _cso is not None else float("inf")
-        # Default GPU (gpu:true): minimize on whatever device the coords live on. Coerce
-        # via the shared helper so a quoted/string value (e.g. "false"/"no"/"off"/"0") --
-        # truthy in plain Python -- correctly turns the GPU off for a CPU-intended run.
+        # Quoted booleans such as "false" must not use Python's string truthiness.
         gpu = coerce_bool(config.get("gpu", True))
-        # Validate `method` against the solver whitelist. An unrecognized value used to
-        # SILENTLY fall back to L-BFGS (torch_optim._is_cg / jax_optim route any non-CG
-        # string to L-BFGS), so a typo ('CGG', 'bfgs') ran a different, untested solver
-        # with no error. Raise instead (a warning would be muted by the NullHandler).
         method = config.get("method", "CG")
         _valid_methods = {"cg", "ncg", "nonlinear-cg", "nonlinearcg", "l-bfgs", "lbfgs"}
         if str(method).lower() not in _valid_methods:
@@ -317,13 +261,10 @@ class RestraintsConfig:
         ):
             raise ValueError("max_iter must be an integer >= 0")
         cfg = cls(
-            # coerce so a quoted/string value (e.g. "false"/"no"/"off"/"0") -- truthy in
-            # plain Python -- correctly turns verbose OFF (mirrors the gpu coercion above).
             verbose=coerce_bool(config.get("verbose", False)),
             gpu=gpu,
             method=method,
             max_iter=int(max_iter),
-            # one start_sigma for all conformer terms (omitted -> +inf = every step)
             conf_start_sigma=conf_start_sigma,
             conf_stop_sigma=conf_stop_sigma,
             conf_start_step=conf_start_step,
@@ -334,8 +275,6 @@ class RestraintsConfig:
                 else None
             ),
         )
-        # Parse every ordinary built-in entry through one routing table. Reference-
-        # anchored entries keep their distinct closure path but share the same dispatch.
         for route in _ENTRY_ROUTES:
             destination = getattr(cfg, route.destination)
             for entry in _entries(config, route.section):
@@ -360,10 +299,6 @@ class RestraintsConfig:
             cd = CustomData()
             cd.set_config(entry)
             cfg.custom_data.append(cd)
-        # nucleic-acid base-pair restraints: a config-time macro that expands into WC
-        # H-bond distance restraints (+ optional coplanarity plane) at resolve time. The
-        # per-entry start_sigma applies to the generated distance restraints, so it uses
-        # the same None -> +inf (every step) default as distance/rmsd.
         for entry in _entries(config, "base_pair_restraints_config"):
             bp = BasePairData()
             bp.set_config(entry)

@@ -17,16 +17,11 @@ _TRUE_STRINGS = ("1", "true", "yes", "on")
 
 VDW_SCALE_DEFAULT = 1.0
 VDW_MAX_ATOM_STEP_DEFAULT = 0.1
-# How often the CG CHECKS whether a dynamic neighbour list has gone stale (in iterations).
-# It is no longer how often it rebuilds -- that is decided by measured displacement against
-# VDW_NEIGHBOR_SKIN_DEFAULT -- but it still bounds how far an atom can move between checks,
-# which is folded into the search cutoff as `max_atom_step * interval`.
+# CG iterations between neighbor-list staleness checks. The search cutoff includes
+# the unchecked travel bound, max_atom_step * interval.
 VDW_NEIGHBOR_REBUILD_INTERVAL_DEFAULT = 10
-# Verlet skin (Angstrom): extra radius listed beyond the contact cutoff so a pair can drift
-# toward contact without being missed, and the displacement budget that triggers a rebuild.
-# 0 reproduces the old rebuild-at-every-check behaviour exactly. Bounded above by `dmax`
-# because the K-nearest cap (`max_neighbors`) is applied AFTER ranking by clearance: a skin
-# large enough to overflow K silently drops restrained pairs instead of raising.
+# Verlet skin in Angstroms: extra search radius and displacement budget for rebuilds.
+# Zero skin requires rebuilding after any movement; validate capacity bounds below.
 VDW_NEIGHBOR_SKIN_DEFAULT = 2.0
 
 
@@ -173,7 +168,6 @@ def warn_unknown_keys(
         )
 
 
-# the two mutually-exclusive gate windows a restraint entry may carry
 _SIGMA_WINDOW_KEYS = ("start_sigma", "stop_sigma")
 _STEP_WINDOW_KEYS = ("start_step", "stop_step")
 
@@ -290,7 +284,7 @@ def parse_move_indices(mv, n_groups: int) -> set[int] | None:
     elif isinstance(mv, (list, tuple)):
         items = list(mv)
     else:
-        items = [mv]  # a bare int / float
+        items = [mv]
     try:
         idx = set()
         for x in items:

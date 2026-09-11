@@ -342,7 +342,6 @@ def test_jax_minimize_reduces_energy():
     spec, coords_np = _distorted_ethane()
     coords = jnp.asarray(coords_np)
     e0 = energy_of(spec, coords)
-    # gating uses spec.max_start_sigma() (here conf_start_sigma=1e30), so sigma=0 runs
     minimize = make_minimizer(spec, max_iter=2000)
     coords = minimize(coords, 0.0)
     e1 = energy_of(spec, coords)
@@ -363,8 +362,7 @@ def test_jax_minimizer_step_window_traced_under_jit():
     from rgi_toolkit.optim.jax_optim import make_minimizer
     from rgi_toolkit.spec import DistanceArrays, RestraintSpec
 
-    # distance restraint with a STEP window [5, 10]; sigma window stays always-on so only
-    # the step axis gates (start_sigma=+inf -> max_start_sigma=+inf -> lax.cond never skips).
+    # Use only a step window; sigma remains unrestricted.
     spec = RestraintSpec(
         n_active=4,
         active_sites=np.arange(4),
@@ -403,15 +401,11 @@ def test_jax_minimizer_step_window_traced_under_jit():
 
 
 def test_jax_minimizer_move_mode_end_to_end():
-    """jax E2E (build_spec -> jax_energy.prepare_spec -> pack_spec -> make_minimizer -> the
-    CG): move_mode=2 pins group1 and moves ONLY group2 to meet the centroid-distance target.
-    Confirms move_mode flows via the featurizer and the SHARED pack_spec into the jax prepared
-    dict, then through the jax minimizer (the AF3 closure path). Distance is now CG-minimised
-    (the old apply_distance_shift_jax closed-form is gone); the move_mode pin is the
-    centroid_eff free=0 stop_gradient, so group1 stays EXACTLY fixed. NOTE: unlike the
-    closed-form (which shifted along the axis to the NEAR side), the CG can land the moving
-    group on EITHER side of the pin (both satisfy |c2-c1|=target), so the side is not
-    asserted -- the contract is pin + target reached."""
+    """JAX honors move_mode=2 through spec building, preparation and optimization.
+
+    Group 1 stays fixed while group 2 reaches the target gap. Either side of the
+    pinned group is valid because both positions satisfy the distance restraint.
+    """
     jax = pytest.importorskip("jax")
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
@@ -430,7 +424,7 @@ def test_jax_minimizer_move_mode_end_to_end():
     spec = build_spec(
         [], [dd], {}, elements=np.zeros(4, dtype=np.int64), conf_start_sigma=1e30
     )
-    assert list(spec.distance.move_mode) == [2]  # flowed into the spec via featurizer
+    assert list(spec.distance.move_mode) == [2]
 
     coords_np = np.zeros((1, 4, 3))
     coords_np[0, 2:, 0] = (
@@ -442,21 +436,20 @@ def test_jax_minimizer_move_mode_end_to_end():
     coords = minimize(coords, 0.0)
     a = np.asarray(coords)
     gap = np.linalg.norm(a[0, 2:].mean(0) - a[0, :2].mean(0))
-    assert abs(gap - 7.0) < 1e-5  # centroid gap on target
+    assert abs(gap - 7.0) < 1e-5
     assert np.allclose(
         a[0, :2], g1_before, atol=1e-9
     )  # group1 EXACTLY pinned (move_mode=2)
-    # group2 alone moved to meet the restraint; group1 is fixed at x=0, so |centroid2_x| = 7.
-    # The CG may land it on either side (-7 or +7) -- both give gap 7 -- so check |x|, not sign.
+    # Either reflected centroid position (+7 or -7) satisfies the target gap.
     assert abs(abs(a[0, 2:].mean(0)[0]) - 7.0) < 1e-5  # only group2 moved, to |x| = 7
 
 
 def test_distance_minimal_displacement_split_torch_jax():
-    """move_mode=0 (both groups move) reproduces the old closed-form's minimal-displacement
-    split via the reduced-mass centroid_eff scale (``mu = N1*N2/(N1+N2)``): the per-group
-    centroid shifts satisfy ``|s1|:|s2| = N2:N1`` (the SMALLER group moves more), the gap
-    reaches target, and torch and jax agree. N1=3 != N2=1 so the split is non-trivial (1:3);
-    the gap 12 -> 4 never crosses 0, so there is no near/far-side ambiguity here."""
+    """Reduced-mass centroid scaling gives displacement ratio N2:N1 in both backends.
+
+    Use unequal groups (N1=3, N2=1) and a gap that stays positive to distinguish the
+    1:3 split without a reflected-solution ambiguity.
+    """
     torch = pytest.importorskip("torch")
     jax = pytest.importorskip("jax")
     jax.config.update("jax_enable_x64", True)
@@ -535,7 +528,7 @@ def test_distance_move_mode1_pins_group2_torch_jax():
     spec = build_spec(
         [], [dd], {}, elements=np.zeros(4, dtype=np.int64), conf_start_sigma=1e30
     )
-    assert list(spec.distance.move_mode) == [1]  # flowed into the spec via featurizer
+    assert list(spec.distance.move_mode) == [1]
 
     base = np.zeros((4, 3))
     base[2:, 0] = 20.0  # group1 centroid x=0, group2 centroid x=20 -> gap 20, target 7
@@ -547,7 +540,7 @@ def test_distance_move_mode1_pins_group2_torch_jax():
 
     for a in (at.numpy(), aj):
         gap = np.linalg.norm(a[2:].mean(0) - a[:2].mean(0))
-        assert abs(gap - 7.0) < 1e-4, gap  # centroid gap on target
+        assert abs(gap - 7.0) < 1e-4, gap
         # group2 fixed at x=20 stays EXACTLY pinned; centroid1 lands at 20 +/- 7.
         assert np.allclose(a[2:], g2_before, atol=1e-9)
         assert abs(abs(a[:2].mean(0)[0] - 20.0) - 7.0) < 1e-4  # only group1 moved
@@ -602,9 +595,6 @@ def test_distance_coupled_weight_balance_torch_jax():
         assert np.allclose(a[0], [0.0, 0.0, 0.0], atol=1e-9)  # anchor pinned (mode 2)
         assert abs(a[1, 0] - expected) < 1e-3, a[1, 0]  # B at weighted balance (8.5)
     assert np.allclose(at.numpy(), aj, atol=1e-4)  # torch == jax
-
-
-# --- group-centroid angle / dihedral restraints ---------------------------------------
 
 
 def _angle_deg(p1, p2, p3):
@@ -756,7 +746,7 @@ def test_torch_group_angle_move_pins_other_groups():
     pinned_before = coords[0, [2, 3, 4, 5], :].clone()  # groups 2 + 3 atoms
     TorchRestraintOptimizer(spec, max_iter=500).minimize(coords)
     c1, c2, c3 = _coms(coords.numpy()[0])
-    assert abs(_angle_deg(c1, c2, c3) - 120.0) < 1.0  # target reached
+    assert abs(_angle_deg(c1, c2, c3) - 120.0) < 1.0
     assert torch.allclose(coords[0, [2, 3, 4, 5], :], pinned_before, atol=1e-9)
 
 
@@ -804,18 +794,15 @@ def test_group_angle_step_gated_off_is_noop_torch_jax():
 
     init = _group_angle_coords()  # 90 deg
 
-    # torch: step OUTSIDE the window -> gated off -> coords UNCHANGED (and no crash)
     c_off = torch.tensor(init, dtype=torch.float64)
     TorchRestraintOptimizer(spec, max_iter=200).minimize(c_off, sigma=5.0, step=0)
     assert torch.allclose(c_off, torch.tensor(init), atol=1e-9)
 
-    # torch: step INSIDE the window -> the term IS wired, just gated -> reaches 120 deg
     c_on = torch.tensor(init, dtype=torch.float64)
     TorchRestraintOptimizer(spec, max_iter=500).minimize(c_on, sigma=5.0, step=7)
     a1, a2, a3 = _coms(c_on.numpy()[0])
     assert abs(_angle_deg(a1, a2, a3) - 120.0) < 1.0
 
-    # jax: the same gate-off is already a no-op (jnp.where -> 0 grad); parity check
     out = np.asarray(make_minimizer(spec, max_iter=200)(jnp.asarray(init), 5.0, 0))
     assert np.allclose(out, init, atol=1e-9)
 
@@ -986,8 +973,6 @@ def test_jax_vdw_pushes_ligand_off_fixed_protein():
         elements[i] = atom.GetAtomicNum()
     elements[n] = 6  # heavy -> VdW background
 
-    # conf_start_sigma high so sigma=0 passes the gate (the config path defaults it to
-    # +inf; a direct build_spec call defaults it to -1.0, which gates everything off)
     spec = build_spec(
         [lc],
         [],
@@ -1108,9 +1093,6 @@ def test_jax_interligand_vdw_separates_two_ligands():
     # BOTH ligands moved (no fixed background)
     assert not np.allclose(np.asarray(coords[0, :n]), a_before, atol=1e-4)
     assert not np.allclose(np.asarray(coords[0, n:]), b_before, atol=1e-4)
-
-
-# --- sync-free GPU CG (optim/_torch_cg_gpu.py) -----------------------------------
 
 
 def _rmsd_spec(n=6, seed=3):
@@ -1461,8 +1443,7 @@ def test_standalone_plane_move_pins_the_other_group():
     TorchRestraintOptimizer(spec, max_iter=300).minimize(coords, sigma=1.0)
     x = coords.numpy()[0]
     assert np.allclose(x[3:], pos[3:], atol=1e-8), "pinned group moved"
-    # the pinned group holds the plane, so the free group has to travel onto it; 0.2 is the
-    # same convergence bar the conformer-plane CG tests use
+    # The pinned group holds the plane while the free group moves onto it.
     assert _plane_rms_dev(x) < 0.2 * _plane_rms_dev(pos)
 
 
@@ -1582,10 +1563,8 @@ def test_compiled_energy_matches_eager():
     from rgi_toolkit.optim import _torch_cg_gpu as g
     from rgi_toolkit.spec import GroupAngleArrays, GroupDihedralArrays
 
-    spec, pos_np = _rmsd_spec()  # active_sites = arange(6); add group terms over those
-    # a pinned group on the angle (move_free col 0) exercises the detach-select
-    # (torch.where + .detach) UNDER torch.compile — the one inductor path the rmsd
-    # precedent doesn't cover.
+    spec, pos_np = _rmsd_spec()
+    # The pinned angle group exercises detach-based gradient masks under torch.compile.
     spec.group_angle = GroupAngleArrays(
         grp1_idx=np.array([[0, 1]]),
         grp2_idx=np.array([[2, 3]]),
@@ -1667,7 +1646,7 @@ def test_dynamic_vdw_pair_energy_matches_optimizer():
     coords[0, :n, :] = torch.tensor(c)
     coords[0, n, :] = torch.tensor(c[0] + np.array([0.5, 0.0, 0.0]))  # a clash
     opt = TorchRestraintOptimizer(spec, max_iter=10)
-    opt._ensure(coords.device, coords.dtype)  # builds opt._vdw
+    opt._ensure(coords.device, coords.dtype)
     active = coords[0, opt._active_idx, :]
     bg_pos = coords[0, opt._vdw["bg_global"], :]
     v = opt._vdw

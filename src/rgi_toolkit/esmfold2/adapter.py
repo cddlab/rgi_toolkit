@@ -78,15 +78,11 @@ class ESMFold2Adapter:
         res_type_names: dict | None = None,
     ) -> None:
         self._asym = _batch0(features["asym_id"]).astype(np.int64)  # (n_tok,)
-        # Precondition guard data: per-chain ordinals assume NO token padding (pad
-        # tokens would consume ordinals and shift real residue/ligand resids). Keep the
-        # token mask (if present) so _compute_token_ordinals can verify it is all-ones.
+        # Token padding would shift residue ordinals; retain its mask for validation.
         _tam = features.get("token_attention_mask")
         self._token_mask = _batch0(_tam).astype(bool) if _tam is not None else None
         self._mol_type = _batch0(features["mol_type"]).astype(np.int64)  # (n_tok,)
-        # per-token residue-type int + the {int -> 3-letter} vocab passed in by the
-        # esm caller (adapter stays framework-free); powers AtomRecord.resname ->
-        # pairing="align" RMSD. None -> resname unavailable.
+        # Caller-provided residue-type IDs and CCD-name vocabulary.
         rt = features.get("res_type")
         self._res_type = _batch0(rt).astype(np.int64) if rt is not None else None
         self._res_type_names = res_type_names
@@ -118,11 +114,8 @@ class ESMFold2Adapter:
         self._asym_to_name = {
             int(c.asym_id): str(c.chain_id) for c in (chain_infos or [])
         }
-        # {asym_id -> [(atom_name1, atom_name2, order), ...]} CCD ligand bonds with the
-        # Kekulized bond order (prepare_input populates ChainInfo.ligand_bond_orders).
-        # Used to upgrade the binary token_bonds connectivity with real bond orders so
-        # build_ligand_mol can re-perceive aromaticity for the UFF-relaxed restraint
-        # target. Absent (SMILES ligand / older feats) -> orders default to single.
+        # CCD bond orders supplement binary token_bonds connectivity and enable
+        # aromaticity perception. Missing orders default to single.
         self._asym_to_bond_orders = {
             int(c.asym_id): list(getattr(c, "ligand_bond_orders", None) or [])
             for c in (chain_infos or [])
@@ -174,7 +167,6 @@ class ESMFold2Adapter:
             ordinal[tok] = counter[ch]
         return ordinal
 
-    # --- FrameworkAdapter -----------------------------------------------------
     def iter_atoms(self) -> Iterator[AtomRecord]:
         a2t = self._atom_to_token
         for i in range(self._n_atom):
@@ -196,7 +188,6 @@ class ESMFold2Adapter:
                 conformer_restraints=self._asym_to_conf_restraints.get(asym, False),
             )
 
-    # --- ConformerAdapter -----------------------------------------------------
     def num_atoms(self) -> int:
         return self._n_atom
 
@@ -223,7 +214,6 @@ class ESMFold2Adapter:
 
     def iter_ligand_confs(self) -> Iterator[LigandConf]:
         a2t = self._atom_to_token
-        # ligand atoms = real atoms whose token is a nonpolymer
         lig_atoms = [
             i
             for i in range(self._n_atom)
@@ -232,7 +222,6 @@ class ESMFold2Adapter:
         ]
         if not lig_atoms:
             return
-        # group by ligand chain (the asym_id of each atom's token)
         by_chain: dict[int, list[int]] = {}
         for i in lig_atoms:
             by_chain.setdefault(int(self._asym[int(a2t[i])]), []).append(int(i))
@@ -241,12 +230,8 @@ class ESMFold2Adapter:
             idxs = np.array(sorted(idxs), dtype=np.int64)
             elements = self._ref_element[idxs]
             coords = self._ref_pos[idxs]
-            # Connectivity comes from token_bonds (binary, reliable). Bond ORDERS, when
-            # available, come from ChainInfo.ligand_bond_orders (CCD, Kekulized) matched by
-            # atom name -> local index; pairs without a recorded order default to single.
-            # Real orders let build_ligand_mol re-perceive aromaticity so the UFF-relaxed
-            # bond/angle target keeps aromatic rings planar (a flat single-bond ring would
-            # otherwise pucker to sp3). 1 token/atom -> a token pair is an atom bond.
+            # Match CCD bond orders by atom name. Ligands have one token per atom,
+            # so token_bonds supplies atom connectivity.
             order_by_pair: dict[tuple[int, int], int] = {}
             name_orders = self._asym_to_bond_orders.get(int(asym))
             if name_orders:

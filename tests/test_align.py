@@ -13,12 +13,6 @@ def _prot(seq, start=1):
     return [(start + i, _ONE_TO_THREE[c]) for i, c in enumerate(seq)]
 
 
-# (The old BLOSUM62-transcription spot check is gone: the matrix is no longer hand-
-# transcribed -- _align now loads Biopython's canonical BLOSUM62 -- so there is nothing
-# to guard against a bad copy. The protein-vs-nucleotide scoring behaviour is covered by
-# the pair_residues cases below.)
-
-
 def test_identical_sequence_pairs_one_to_one():
     res = _prot("MKLAV")
     assert pair_residues(res, res, "protein") == [(i, i) for i in range(1, 6)]
@@ -31,10 +25,8 @@ def test_substitutions_same_length_still_one_to_one():
     assert pair_residues(tgt, ref, "protein") == [(i, i) for i in range(1, 6)]
 
 
-# Indel tests use full-length-like sequences: an affine gap (-11) only wins over a
-# register shift when enough downstream matches penalize the shift, which is always
-# true for real chains but not for 5-residue toys (where a free end-gap shift is
-# cheaper than one internal gap).
+# Use enough downstream matches to favor an internal affine gap over a
+# free end-gap shift; very short sequences favor the latter.
 _BASE20 = "MKLAVDEFGHIKLMNPQRST"
 
 

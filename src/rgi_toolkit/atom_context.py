@@ -15,18 +15,10 @@ class AtomRecord:
     chain: str  # chain name (e.g. "A")
     resid: int  # 1-based residue/token ordinal WITHIN the chain (resets per chain)
     index: int  # global padded atom index
-    name: str | None = None  # atom name (e.g. "CA"); enables identity-based RMSD
-    # pairing (chain, resid, name) instead of selection-order. None = unavailable
-    # (RMSD then falls back to selection-order pairing).
-    mol_type: str | None = None  # NORMALIZED molecule type: "protein"/"dna"/"rna"/
-    # "ligand", or None (water/unknown). Set by each adapter from its framework's
-    # entity/molecule-type enum, normalized to these strings — raw enum ints DIFFER
-    # across tools (boltz/esm DNA=1,RNA=2 vs chai/openfold RNA=1,DNA=2), so the
-    # string is the only safe cross-tool currency. Powers the protein/dna/rna
-    # selectors; None never matches them.
-    resname: str | None = None  # 3-letter residue/CCD code (e.g. "ALA"); OPTIONAL,
-    # enables the PyMOL-align-like (pairing="align") RMSD correspondence. None =
-    # unavailable (that adapter has not been plumbed; align pairing then errors loudly).
+    # Atom name for identity pairing; None uses selection order.
+    name: str | None = None
+    mol_type: str | None = None  # Normalized protein/dna/rna/ligand; None for unknown.
+    resname: str | None = None  # Optional residue/CCD code for sequence alignment.
     # Per-chain opt-in propagated from the sequence input. Polymer conformer geometry
     # is built only for records whose chain sets this flag.
     conformer_restraints: bool = False
@@ -68,8 +60,7 @@ class LigandConf:
     conf_coords: "np.ndarray"  # (n_lig_atoms, 3) ideal conformer coordinates
     global_indices: "np.ndarray"  # (n_lig_atoms,) global padded atom index per mol atom
     invert_chirality: bool = False
-    # Per-chain opt-in: conformer restraints are built only when this is True. Every
-    # tool gets the flag from the ligand sequence input (chai uses its chain sidecar).
+    # Per-chain conformer-restraints opt-in from the predictor input.
     conformer_restraints: bool = False
     # Optional source-graph molecule in the same atom order as ``mol``. For SMILES
     # inputs this retains the original @/@@ and E/Z annotations even when a tool

@@ -92,9 +92,6 @@ def _fd_grad(f, x, eps: float = 1e-6):
     return g
 
 
-# --------------------------------------------------------------------------------------
-# (a) 3-backend energy + gradient parity
-# --------------------------------------------------------------------------------------
 def test_custom_energy_parity_3backend():
     torch = pytest.importorskip("torch")
     jax = pytest.importorskip("jax")
@@ -180,11 +177,7 @@ def test_custom_dihedral_wrap_periodicity():
 
     sels = {"A": "resid 1", "B": "resid 2", "C": "resid 3", "D": "resid 4"}
 
-    # phi of the four single-atom centroids, computed on the SAME active-site ordering the
-    # closures use (energy == dihedral(...) -> ops.sum(scalar) == scalar), so the target can
-    # be placed exactly 358 deg away without tracking the A/B/C/D -> local-index mapping.
-    # All specs here reference the same four atoms, so they share n_active == 4 and one
-    # ``pos`` maps consistently across them.
+    # Measure the target in active-site order. All specs use the same four atoms.
     phi_spec = _spec_from_entries([{"energy": "dihedral(A,B,C,D)", "selections": sels}])
     pos = _positions(phi_spec, seed=7)
     phi = float(build_terms(phi_spec.custom, "numpy")[0][-1](pos))
@@ -201,7 +194,7 @@ def test_custom_dihedral_wrap_periodicity():
     e_naive = float(build_terms(naive.custom, "numpy")[0][-1](pos))
     assert abs(e_wrapped - np.radians(2.0) ** 2) < 1e-6, e_wrapped  # ~ (2 deg)^2
     assert abs(e_naive - d**2) < 1e-6, e_naive  # ~ (358 deg)^2, the periodicity bug
-    assert e_naive / e_wrapped > 1000.0  # the fix collapses a huge false penalty
+    assert e_naive / e_wrapped > 1000.0
 
     # the wrapped form agrees across all three backends (structural parity of ``wrap``)
     pt = torch.tensor(pos, dtype=torch.float64)
@@ -210,9 +203,6 @@ def test_custom_dihedral_wrap_periodicity():
     assert abs(e_wrapped - e_t) < 1e-6 and abs(e_wrapped - e_j) < 1e-6
 
 
-# --------------------------------------------------------------------------------------
-# (b) torch eager CG + (c) jax minimizer: a custom distance restraint converges to target
-# --------------------------------------------------------------------------------------
 def _dist_spec():
     return _spec_from_entries(
         [
@@ -253,9 +243,6 @@ def test_custom_jax_minimize_nan_free():
     assert abs(d - 5.0) < 0.1, f"jax distance {d} did not reach 5.0"
 
 
-# --------------------------------------------------------------------------------------
-# code path: a registered ctx function + the direct add_custom quick path
-# --------------------------------------------------------------------------------------
 def test_code_ctx_restraint_parity_and_minimize():
     torch = pytest.importorskip("torch")
     from rgi_toolkit import custom_restraint
@@ -275,7 +262,6 @@ def test_code_ctx_restraint_parity_and_minimize():
         a = float(build_terms(spec.custom, "numpy")[0][-1](pos))
         b = float(build_terms(fspec.custom, "numpy")[0][-1](pos))
         assert abs(a - b) < 1e-9, (a, b)
-        # and it converges
         coords = torch.zeros((1, 2, 3), dtype=torch.float64)
         coords[0, 1, 0] = 1.0
         TorchRestraintOptimizer(spec, max_iter=200).minimize(coords)
@@ -322,12 +308,7 @@ def test_add_custom_re_setup_without_config_no_duplication():
     assert restr.config.custom_data == []  # setup never mutated the config in place
 
 
-# --------------------------------------------------------------------------------------
-# gate regression: the sigma/step window actually gates the custom energy in the optimizer
-# (the gate lives independently in torch_optim._custom_energy and jax_optim._descend, so a
-# single-backend test would miss a divergence). A windowed `(distance-5)**2`: INSIDE the
-# window it converges to 5 A, OUTSIDE the gate zeroes the term and the coords stay put.
-# --------------------------------------------------------------------------------------
+# Exercise sigma/step gates independently in the Torch and JAX optimizers.
 def _dist_spec_win(extra):
     return _spec_from_entries(
         [
@@ -423,13 +404,10 @@ def test_custom_weight_scaling():
     assert abs(e_half - 0.5 * e_full) < 1e-9
 
 
-# --------------------------------------------------------------------------------------
-# DSL safety + config whitelist
-# --------------------------------------------------------------------------------------
 def test_dsl_rejects_unsafe():
     from rgi_toolkit.custom.dsl import parse_formula
 
-    parse_formula("(distance(A,B) - 2.0)**2")  # ok
+    parse_formula("(distance(A,B) - 2.0)**2")
     # branching + logical operators are part of the surface (they lower to where / & / |)
     parse_formula("rg(A) if (rg(A) > 1.0) and not (rg(B) > 2.0) else rg(B)")
     for bad in [
@@ -578,7 +556,6 @@ def test_dsl_ternary_resolves_both_branches():
         ]
     )
     assert set(spec.custom[0].selections) == {"A", "B", "C", "D"}
-    # and it actually evaluates (no KeyError from the unresolved else branch)
     assert float(build_terms(spec.custom, "numpy")[0][-1](_positions(spec))) > 0.0
 
 
@@ -651,11 +628,10 @@ def test_custom_entry_requires_one_source():
 
 
 def test_penalty_vocabulary_is_flat_bottomed():
-    """The penalty vocabulary mirrors the distance config keys: flat_bottomed /
-    flat_bottomed1 (lower) / flat_bottomed2 (upper) / harmonic. The old lower / upper /
-    flat_bottom names are GONE (hard rename, not aliased) -- a formula using the new
-    names builds a closure; one using an old name raises at parse (not in the DSL
-    whitelist)."""
+    """Accept harmonic/flat_bottomed/flat_bottomed1/flat_bottomed2 penalty functions.
+
+    The unsupported lower/upper/flat_bottom names must fail during parsing.
+    """
     spec = _spec_from_entries(
         [
             {
@@ -675,9 +651,6 @@ def test_penalty_vocabulary_is_flat_bottomed():
             _spec_from_entries([{"energy": old, "selections": {"A": "resid 1 to 3"}}])
 
 
-# --------------------------------------------------------------------------------------
-# kabsch(A, B): Kabsch superposition returning coordinates (a (k, 3) block that composes)
-# --------------------------------------------------------------------------------------
 def _kabsch_spec():
     """kabsch(A, B) superposes A onto B; ``norm(... - coords(B))`` then sums the per-atom
     post-superposition deviations. A/B are equal-size (positional correspondence)."""
@@ -762,9 +735,6 @@ def test_custom_kabsch_requires_equal_counts():
         )
 
 
-# --------------------------------------------------------------------------------------
-# rmsd(A, B): Kabsch-superposed RMSD against a per-call external reference structure
-# --------------------------------------------------------------------------------------
 def _write_ca_pdb(path, coords, chain="A"):
     """One CA atom per coord (its own ALA residue, chain ``chain``); the per-chain resid
     ordinal follows file order (1..n) — read_pdb_atoms' convention."""
@@ -984,12 +954,8 @@ def test_custom_rmsd_first_arg_must_be_selection(tmp_path):
         )
 
 
-# --------------------------------------------------------------------------------------
-# reference-backed selections: fitted-reference coordinate blocks — reference atoms placed in the
-# prediction frame by a Kabsch fit, usable in distance/angle/dihedral alongside prediction
-# groups. Like kabsch/rmsd the whole transform is stop-gradient'd (the fit anchor gets NO
-# gradient), so these are checked torch-vs-jax, NOT under the numpy-FD test.
-# --------------------------------------------------------------------------------------
+# Fitted references stop-gradient the Kabsch transform. Check gradient parity
+# between Torch and JAX, excluding NumPy finite differences.
 def _ref_spec(pdb, energy, *, selections, fit=True, pairing="identity", n=12):
     """A custom entry using a reference-backed selection; the fit anchor is prediction/ref resid 1..6 (identity)."""
     rdef = {"ref_pdb": str(pdb), "pairing": pairing}
@@ -1244,12 +1210,8 @@ def test_custom_ref_undefined_raises(tmp_path):
         )
 
 
-# --------------------------------------------------------------------------------------
-# Built-in reference-group distance/angle/dihedral (ref_geom): a distance/angle/dihedral
-# config entry carrying reference keys is routed to a kind="ref_geom" CustomSpec closure.
-# Prediction groups use a RIGID centroid (weight=1 moves a large group), reference groups are
-# fitted-and-fixed. Grad is torch-vs-jax (the rigid-centroid + stop-gradient carve-out).
-# --------------------------------------------------------------------------------------
+# Reference-anchored built-ins use custom closures with rigid centroids and
+# fixed reference groups. Their gradient parity is Torch-vs-JAX.
 def _refgeom_spec(cfgdict, n=12):
     cfg = RestraintsConfig.from_dict(cfgdict)
     for cd in cfg.custom_data:  # reference-group entries are routed into custom_data
@@ -1623,9 +1585,6 @@ def test_refgeom_combined_lifecycle(tmp_path, capsys):
     assert d == pytest.approx(5.0, abs=0.1), f"lifecycle did not converge: {d}"
 
 
-# --------------------------------------------------------------------------------------
-# (e) plane(): the best-fit-plane primitive in the DSL + the ref_geom plane closure
-# --------------------------------------------------------------------------------------
 def _puckered_ring(lift: float = 0.4, n: int = 6) -> np.ndarray:
     """A hexagon in z=0 with every other atom lifted -> out-of-plane RMS = lift/2."""
     ring = np.array(

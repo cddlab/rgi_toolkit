@@ -75,11 +75,8 @@ def test_config_defaults():
     assert cr.config.verbose is False
     assert cr.config.gpu is True
     assert cr.config.method == "CG"
-    # backend is no longer a config field — it is inferred at minimize/get_minimizer
-    # time (numpy/torch coords -> torch; get_minimizer() -> jax).
     cr.set_config({"gpu": True})
     assert cr.config.gpu is True
-    # a leftover `backend` key is rejected with a migration hint (it is now inferred)
     with pytest.raises(ValueError, match="backend"):
         cr.set_config({"backend": "torch"})
 
@@ -146,7 +143,7 @@ def test_get_elements_failure_loud_only_when_vdw_requested(caplog):
     cr = CombinedRestraints()
     cr.set_config({})
     with caplog.at_level(logging.WARNING):
-        cr.setup(_ThrowingElementsAdapter(atoms))  # must NOT raise
+        cr.setup(_ThrowingElementsAdapter(atoms))
     assert not any("get_elements failed" in r.getMessage() for r in caplog.records)
     # (b) VdW requested (weight > 0): the failure is fatal -> re-raise the real error.
     cr = CombinedRestraints()
@@ -257,12 +254,9 @@ def test_distance_hits_target():
     coords[0, 2:, 0] = 20.0  # centroid1 at x=0, centroid2 at x=20 -> dist 20
     cr.minimize(coords, 0, sigma=0.0)
     d = np.linalg.norm(coords[0, 2:].mean(0) - coords[0, :2].mean(0))
-    assert abs(d - 7.0) < 1e-3  # centroid gap lands on target (the physical invariant)
-    # NOTE: the CG minimizes the sign-agnostic (d - target)^2, so for a LARGE one-shot
-    # move it may settle on the reflected (groups-crossed) solution rather than the
-    # minimal-displacement split the old closed-form guaranteed. We assert only the gap;
-    # the per-step diffusion regime (small moves) stays in the minimal-displacement basin,
-    # and the exact N2:N1 split is covered by the parity test.
+    assert abs(d - 7.0) < 1e-3
+    # A large CG move may cross the groups: either reflected solution has the
+    # correct centroid gap. Small-step displacement ratios are tested separately.
 
 
 def test_distance_move_mode_end_to_end():
@@ -293,18 +287,17 @@ def test_distance_move_mode_end_to_end():
         AtomRecord("B", 2, 3),
     ]
     cr.setup(MockAdapter(atoms))
-    assert cr.config.distance_data[0].move_mode == 2  # parsed onto the DistanceData
+    assert cr.config.distance_data[0].move_mode == 2
     coords = np.zeros((1, 4, 3))
     coords[0, 2:, 0] = 20.0  # centroid1 (A) at x=0, centroid2 (B) at x=20 -> dist 20
     a_before = coords[0, :2].copy()
     cr.minimize(coords, 0, sigma=0.0)
     d = np.linalg.norm(coords[0, 2:].mean(0) - coords[0, :2].mean(0))
-    assert abs(d - 7.0) < 1e-3  # centroid gap lands on target
+    assert abs(d - 7.0) < 1e-3
     assert np.allclose(
         coords[0, :2], a_before
     )  # group1 (chain A) EXACTLY fixed (pinned, grad 0)
-    # group2 carries the whole shift (group1 pinned). The CG may land it on the reflected
-    # side for this large one-shot move, so we assert only that the pinned group did not move.
+    # The free group may cross the pinned group while reaching the target gap.
 
 
 def test_distance_name_ca_selects_backbone_only():
@@ -341,7 +334,6 @@ def test_distance_name_ca_selects_backbone_only():
     dd = cr.config.distance_data[0]
     assert set(dd.target_sites1) == {0, 2}  # chain A CAs only (CB 1,3 excluded)
     assert set(dd.target_sites2) == {4, 6}  # chain B CAs only (CB 5,7 excluded)
-    # end-to-end: the CG centroid shift lands the CA-group distance on target
     coords = np.zeros((1, 8, 3))
     coords[0, 4:, 0] = 20.0  # chain B far on x
     cr.minimize(coords, 0, sigma=0.0)
@@ -351,10 +343,7 @@ def test_distance_name_ca_selects_backbone_only():
 
 
 def test_distance_moltype_selector_matches():
-    """Parity with RMSD: protein/dna/rna selectors resolve in distance centroid groups too
-    (the distance candidate dict now carries mol_type). Guards the silent-failure
-    footgun where 'protein'/'dna' would match nothing and an OR with a chain term would
-    quietly return a wrong, non-empty group."""
+    """Molecule-type selectors must resolve within distance centroid groups, including ORs."""
     cr = CombinedRestraints()
     cr.set_config(
         {
@@ -652,7 +641,7 @@ def test_distance_move_mode_parsing():
     assert mode(1) == 1 and mode("1") == 1  # int or string form
     assert mode(2) == 2 and mode("2") == 2
     with pytest.raises(ValueError, match="move"):
-        mode("group1")  # unknown value raises (no silent fallback)
+        mode("group1")
     with pytest.raises(ValueError, match="move"):
         mode(3)
 
@@ -962,23 +951,19 @@ def _dist_config(**extra):
 
 
 def test_gpu_false_uses_torch_on_cpu():
-    """gpu:false (backend inferred torch) runs on a CPU tensor (replacing the old
-    numpy/scipy fallback). Backend is inferred at minimize time, so _backend is None
-    until the first minimize."""
+    """gpu:false uses a CPU Torch tensor; backend inference waits until minimize."""
     torch = pytest.importorskip("torch")
     cr = CombinedRestraints()
-    cr.set_config(
-        _dist_config(gpu=False)
-    )  # gpu defaults True now; set False for the CPU path
+    cr.set_config(_dist_config(gpu=False))
     cr.setup(MockAdapter(_dist_atoms()))
     assert cr._backend is None  # lazy: not resolved until first minimize/get_minimizer
     coords = torch.zeros((1, 4, 3))  # CPU tensor
     coords[0, 2:, 0] = 20.0
     cr.minimize(coords, 0, sigma=0.0)
-    assert cr._backend == "torch"  # inferred from the torch tensor
+    assert cr._backend == "torch"
     assert coords.device.type == "cpu"
     d = float(torch.norm(coords[0, 2:].mean(0) - coords[0, :2].mean(0)))
-    assert abs(d - 5.0) < 1e-3  # CG centroid-distance shift hits target on CPU
+    assert abs(d - 5.0) < 1e-3
 
 
 @pytest.mark.gpu
@@ -994,7 +979,7 @@ def test_gpu_false_cuda_coords_compute_on_cpu():
     coords = torch.zeros((1, 4, 3), device="cuda")
     coords[0, 2:, 0] = 20.0
     cr.minimize(coords, 0, sigma=0.0)
-    assert cr._backend == "torch"  # inferred from the torch tensor (lazy)
+    assert cr._backend == "torch"
     assert coords.device.type == "cuda"  # written back to the original device
     d = float(torch.norm(coords[0, 2:].mean(0) - coords[0, :2].mean(0)))
     assert abs(d - 5.0) < 1e-4
@@ -1151,7 +1136,7 @@ def test_rmsd_default_best_effort_skips_missing(tmp_path):
     atoms = [AtomRecord("A", i + 1, i, name="CA") for i in range(6)]  # 1..6 (6 absent)
     cr = CombinedRestraints()
     cr.set_config(_missing_atom_cfg(pdb, strict=False))
-    cr.setup(MockAdapter(atoms))  # must NOT raise
+    cr.setup(MockAdapter(atoms))
     assert cr.config.rmsd_data[0].fit_target_sites == [0, 1, 2, 3, 4]
 
 
@@ -1178,7 +1163,7 @@ def test_rmsd_best_effort_skips_missing(tmp_path):
             ],
         }
     )
-    cr.setup(MockAdapter(atoms))  # must NOT raise
+    cr.setup(MockAdapter(atoms))
     rr = cr.config.rmsd_data[0]
     # resid 6 has no ref match -> skipped; 1..5 matched (target indices 0..4)
     assert rr.fit_target_sites == [0, 1, 2, 3, 4]
@@ -1343,14 +1328,15 @@ def test_rmsd_default_no_polymer_uses_identity(tmp_path):
         }
     )  # no pairing -> align, but no polymer -> identity (no crash)
     assert rr.pairing == "align"
-    rr.resolve_sites(MockAdapter(atoms))  # must NOT raise
+    rr.resolve_sites(MockAdapter(atoms))
     assert rr.calc_target_sites == [10, 11, 12]
 
 
 def test_rmsd_align_strict_gap_raises(tmp_path):
-    """best_effort:false is HONOURED under align (no longer a silent no-op): a target
-    residue aligning to a gap in a homolog ref raises instead of being skipped. Needs an
-    EXPLICIT selection -- whole-structure (no selection) RMSD is always best-effort."""
+    """Strict alignment rejects target residues aligned to gaps.
+
+    An explicit selection enables strictness; whole-structure pairing is best-effort.
+    """
     rng = np.random.default_rng(3)
     atoms = [
         AtomRecord(
@@ -1407,7 +1393,7 @@ def test_rmsd_align_derives_polymer_from_resname(tmp_path):
     """Adapters that don't set mol_type (protenix/of3/chai) still align: the polymer
     type is derived from the residue name, so only resname needs plumbing."""
     rng = np.random.default_rng(7)
-    # target like protenix: mol_type LEFT UNSET, but resname present
+    # Exercise residue-name fallback without an explicit molecule type.
     atoms = [
         AtomRecord("A", i + 1, i, name="CA", resname=_ONE_TO_THREE[c])
         for i, c in enumerate(_ALIGN_BASE)
@@ -1430,7 +1416,7 @@ def test_rmsd_align_derives_polymer_from_resname(tmp_path):
     )
     cr.setup(MockAdapter(atoms))
     rr = cr.config.rmsd_data[0]
-    assert rr.resid_map[("A", 12)] == 11  # register recovered across the deletion
+    assert rr.resid_map[("A", 12)] == 11
     assert len(rr.fit_target_sites) == 19
 
 
@@ -1578,9 +1564,7 @@ def test_pdb_ref_hetatm_per_atom_ordinal(tmp_path):
 
 
 def test_rmsd_ligand_identity_pairing(tmp_path):
-    """A ligand reference (HETATM, single resSeq) identity-pairs with an adapter that
-    gives each ligand atom its own per-atom ordinal. Regression: pdb_ref used to give
-    every ligand atom one ordinal -> the (chain, resid, name) key never matched."""
+    """A single-resSeq ligand reference must pair with per-atom adapter ordinals."""
     from rgi_toolkit.rmsd_restr_data import RmsdData
 
     pdb = tmp_path / "lig.pdb"
@@ -1735,10 +1719,7 @@ def test_cif_quoted_value_with_space_not_truncated(tmp_path):
 
 
 def test_minimize_jax_requires_explicit_sigma():
-    """minimize(<jax array>) with no sigma must RAISE, not silently no-op. The jax gate
-    stop_sigma<=sigma<=start_sigma can't mean 'all active' with one scalar (the old -inf
-    sentinel gated every restraint OFF); the torch path special-cases sigma=None, so this is
-    a jax-only guard. AF3 always passes a real sigma via ScanMinimizer."""
+    """Direct JAX minimize requires sigma: no scalar sentinel activates every window."""
     jnp = pytest.importorskip("jax.numpy")
     cr = CombinedRestraints()
     cr.set_config(
@@ -1868,8 +1849,7 @@ def test_rmsd_duplicate_ref_key_raises():
 
 
 def test_rmsd_weight_zero_preserved_and_default():
-    """weight: 0 stays 0 (a no-op restraint); an omitted weight defaults to 1.0.
-    The old `or 1.0` truthiness coerced an explicit 0 to full weight."""
+    """An explicit zero weight stays zero; an omitted weight defaults to one."""
     from rgi_toolkit.rmsd_restr_data import RmsdData
 
     base = {
@@ -1926,7 +1906,7 @@ def test_rmsd_no_selection_whole_structure(tmp_path):
     )  # NO selection
     assert rr.is_valid() and rr.sel_target_fit is None
     rr.resolve_sites(MockAdapter(atoms))
-    assert rr.fit_target_sites == [a.index for a in atoms]  # the whole structure
+    assert rr.fit_target_sites == [a.index for a in atoms]
     assert rr.calc_target_sites == [a.index for a in atoms]
     assert rr.fit_ref_coords.shape == (n, 3)
 
@@ -1951,7 +1931,9 @@ def test_rmsd_no_selection_best_effort_skips_unmatched(tmp_path):
 
     rr = RmsdData()
     rr.set_config({"ref_pdb": str(pdb), "harmonic": {"target_rmsd": 0.0}})
-    rr.resolve_sites(MockAdapter(atoms))  # must NOT raise (4 H's skipped)
+    rr.resolve_sites(
+        MockAdapter(atoms)
+    )  # Four hydrogens are absent from the reference.
     matched = {a.index for a in atoms if a.name != "H"}
     assert set(rr.fit_target_sites) == matched and len(rr.fit_target_sites) == 8
     assert set(rr.calc_target_sites) == matched

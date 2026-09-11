@@ -185,9 +185,6 @@ def _iter_cif_rows(block, path: str):
     seq = preferred("seq")
     name = preferred("name")
     comp = preferred("comp")
-    # a coordinate loop must at least have positions + a chain id; else there is no
-    # _atom_site loop to read (fail loudly -- a missing RMSD reference is the worst
-    # silent failure).
     if x is None or y is None or z is None or chain is None:
         raise ValueError(f"rmsd ref_cif has no _atom_site loop: {path!r}")
     missing = [

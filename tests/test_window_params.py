@@ -20,9 +20,7 @@ from rgi_toolkit.group_geom_restr_data import (
 )
 from rgi_toolkit.rmsd_restr_data import RmsdData
 
-# minimal valid configs per type, parameterised so the shared keys (weight + windows)
-# can be merged in. Each carries exactly the type-specific selection/target keys needed
-# for set_config to run without raising.
+# Minimal per-type configs for testing the shared weight/window parameters.
 _BASE = {
     "distance": (
         DistanceData,

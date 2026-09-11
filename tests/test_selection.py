@@ -41,9 +41,7 @@ class TestResidSelection:
         assert sel.eval(mol(resid=6)) is False
 
     def test_resid_descending_range_raises(self):
-        """`resid 5 to 3` (end < start) must raise a clear range-order error. The check
-        used to be swallowed by the list-form backtracking (the `except ParseError` that
-        handles `resid 5 6 7`), leaving a misleading 'trailing characters: to 3' message."""
+        """Descending ranges must report a range-order error despite parser backtracking."""
         with pytest.raises(ValueError, match="less than start|Range end"):
             AtomSelector("resid 5 to 3")
 
@@ -135,8 +133,6 @@ class TestNameSelection:
 
 
 class TestMolTypeSelection:
-    # protein/dna/rna match the normalized mol_type. Guards the shared bare-keyword
-    # parser (the same path that now also yields backbone/sidechain).
     def test_protein_dna_rna(self):
         assert AtomSelector("protein").matches(mol(mol_type="protein")) is True
         assert AtomSelector("protein").matches(mol(mol_type="dna")) is False
@@ -161,9 +157,7 @@ class TestMolTypeSelection:
 
 
 class TestBackboneSidechain:
-    # backbone/sidechain are POLYMER selectors: name-based but GATED on polymer type,
-    # which is mol_type when the adapter sets it (boltz/esm/AF3) else derived from
-    # resname (chai/of3/protenix). matches() is the public alias of eval().
+    # Backbone/sidechain require polymer identity from mol_type or residue-name fallback.
     def test_backbone_protein_by_mol_type(self):
         sel = AtomSelector("backbone")
         for n in ("N", "CA", "C", "O", "OXT"):
@@ -182,7 +176,7 @@ class TestBackboneSidechain:
         assert bb.matches(mol(name="ca", mol_type="protein")) is True
 
     def test_polymer_gate_from_resname_when_mol_type_unset(self):
-        # the chai/of3/protenix path: no mol_type, polymer derived from resname
+        # Exercise residue-name fallback when mol_type is absent.
         bb = AtomSelector("backbone")
         sc = AtomSelector("sidechain")
         assert bb.matches(mol(name="CA", resname="ALA")) is True
@@ -201,8 +195,7 @@ class TestBackboneSidechain:
         assert sc.matches(mol(name="C", mol_type="ligand")) is False
 
     def test_modified_residue_mse_diverges(self):
-        # accepted cross-tool divergence: MSE is polymer only where the framework set
-        # mol_type="protein"; from resname alone it derives None -> not polymer
+        # Modified residues require explicit polymer typing; their names alone are unknown.
         bb = AtomSelector("backbone")
         assert bb.matches(mol(name="CA", mol_type="protein", resname="MSE")) is True
         assert bb.matches(mol(name="CA", resname="MSE")) is False

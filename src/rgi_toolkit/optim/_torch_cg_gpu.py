@@ -6,21 +6,13 @@ fuses the small energy kernels. The compilation cache specializes static shapes;
 prepared masks and dynamic neighbor arrays are inputs, so artifacts can be reused
 across denoising steps. This execution choice does not change PR+ or strong Wolfe.
 
-The default Inductor mode is deliberate: trial coordinates use fresh allocations,
-which caused repeated CUDA-graph recording under ``mode="reduce-overhead"`` in the
-previous solver. Current timings must be measured separately from those historical
-Armijo-engine results.
+Default Inductor mode avoids repeated CUDA-graph recording for fresh trial-coordinate
+allocations.
 
-The two DYNAMIC VdW terms -- the fixed background (default boltz/protenix conformer) and the
-active-active polymer neighbour list -- are folded into further compiled energies, one per
-combination, so those paths are JIT-compiled too: ``_ENERGY_BY_MODE`` maps the 2-bit mode
-(bit 0 = fixed background, bit 1 = active-active) onto ``_energy`` / ``_energy_vdw`` /
-``_energy_active_vdw`` / ``_energy_both_vdw``. ``torch_optim._get_custom_cvg`` wraps the SAME
-table and adds the custom-restraint closures on top (its artifact must be per-optimizer,
-since the closures are spec-specific), so the with- and without-custom compiled paths cannot
-drift apart. Used only for CUDA coords; CPU keeps ``_minimize_cg``. Shared ``_cg_config``
-constants keep the convergence contract identical to CPU/jax. Any compile failure degrades
-to the eager functional CG -- still the correct early-exit algorithm.
+``_ENERGY_BY_MODE`` combines fixed-background and active-active VdW with mode bits
+0 and 1. Custom restraints wrap the same base energies in per-optimizer artifacts
+because their closures are spec-specific. CPU execution and compile failures use
+the eager CG with the same convergence contract.
 """
 
 from __future__ import annotations
@@ -50,10 +42,8 @@ _COMPILE_DISABLED = os.environ.get("RGI_DISABLE_COMPILE", "") not in ("", "0", "
 _compile_failed = {0: False, 1: False, 2: False, 3: False}
 _CVG_BY_MODE = {}
 
-# Defense-in-depth: the compiled energy is module-global and reused across all structures
-# in a process, so an unforeseen value-specialized leaf must not silently trip dynamo's
-# recompile cap and drop to PERMANENT eager. Raise the limits once (best-effort across
-# torch versions). The real fix is keeping python-float scalars OUT of the compiled pytree.
+# Allow value-specialized recompilations across structures without permanently
+# falling back to eager. Keep Python scalar leaves out of the compiled pytree.
 try:
     import torch._dynamo as _dynamo
 
@@ -480,9 +470,6 @@ def _energy_both_vdw(
     )
 
 
-# VdW mode -> energy fn, keyed by the same bits as ``_compile_failed`` (0=fixed-background,
-# 1=active-active). Shared with ``torch_optim._get_custom_cvg``, which wraps the SAME base
-# energy and adds the custom closures on top, so the two compiled paths cannot drift.
 _ENERGY_BY_MODE = {
     0: _energy,
     1: _energy_vdw,
@@ -593,9 +580,7 @@ def gpu_cg(
             logger.warning("GPU CG (compiled) failed at runtime (%s); eager", exc)
             _compile_failed[mode] = True
 
-    # eager fallback (CPU coords, compile disabled, or compiled artifact failed): the same
-    # correct early-exit CG on the same (vdw-augmented) energy used by the compiled path.
-    # A state produced by either path is valid for the other -- identical maths.
+    # Eager and compiled paths share the objective and can reuse each other's CG state.
     base = _ENERGY_BY_MODE[mode]
     extra = (vdw or ()) + (active_vdw or ())
 

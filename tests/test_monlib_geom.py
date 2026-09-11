@@ -26,10 +26,8 @@ from rgi_toolkit.config import RestraintsConfig
 _LIB_BOND_P_O5 = 1.777
 _LIB_BOND_O5_C5 = 1.888
 _LIB_ANGLE_P_O5_C5 = 111.0
-# Link modifications rewrite the FREE residue's own targets once it is polymer-bonded --
-# CCP4's TRANS does exactly this (DEL-OXT: C-O 1.251 -> 1.229, CA-C-O 117.191 -> 120.614;
-# DEL-HN1: CA-N 1.483 -> 1.453), because a monomer entry describes the free zwitterion.
-# Distinct values per side so a test can tell which mod reached which residue.
+# Link modifications convert free-monomer targets to bonded geometry.
+# Use distinct values on each side to identify which residue received each mod.
 _MOD_S1_BOND_O5_C5 = 1.808
 _MOD_S2_BOND_P_O5 = 1.707
 _MOD_S2_ANGLE_P_O5_C5 = 104.0
@@ -305,16 +303,8 @@ def test_library_bond_and_angle_targets_replace_the_reference_conformer(library_
 
 
 def test_link_modifications_rewrite_the_bonded_residue_targets(library_dir):
-    # A monomer entry describes the FREE residue. For an amino acid that is the zwitterion
-    # (-NH3+ / -COO-), and CCP4's TRANS link carries `_chem_mod` records that rewrite those
-    # targets once the residue is peptide-bonded: DEL-OXT takes C-O 1.251 -> 1.229 and
-    # CA-C-O 117.191 -> 120.614, DEL-HN1 takes CA-N 1.483 -> 1.453. Skipping them restrains
-    # a whole chain to free-amino-acid geometry -- measured on QBP, that alone moved the
-    # backbone ~0.025 A off Engh-Huber and took MolProbity's rms_bond from 0.005 to 0.014.
-    #
-    # Which mod applies is POSITIONAL, and the fixture's two residues pin both ends of it:
-    # residue 1 is side 1 only (the chain's last residue is nobody's side 1, so a real
-    # C-terminus keeps its -COO-), residue 2 is side 2 only (the N-terminus keeps -NH3+).
+    # Link modifications depend on residue position: side 1 receives MOD-S1,
+    # side 2 receives MOD-S2. Free termini keep their unmodified targets.
     spec = _setup(_NucleotideAdapter(), _config(library_dir))
     bonds, angles = _bond_targets(spec), _angle_targets(spec)
 
@@ -400,8 +390,6 @@ def test_on_missing_error_rejects_an_uncovered_residue(library_dir):
 
 
 def test_missing_library_directory_raises(tmp_path):
-    # A silently empty library looks exactly like a working one (every residue quietly
-    # falls back), so a bad path must fail loudly.
     with pytest.raises(ValueError, match="is not a directory"):
         _setup(_NucleotideAdapter(), _config(str(tmp_path / "nope")))
 
@@ -425,9 +413,7 @@ def test_config_rejects_a_malformed_monomer_library_spec(spec, message):
 
 
 def test_library_target_pulls_a_distorted_bond_back(library_dir):
-    # The restraint must have FORCE, not just a spec entry: when a library target
-    # coincides with what the model already produces, "working" and "never built" look
-    # identical. Start off-target and check the minimizer lands on the library value.
+    # Start off-target to distinguish an active library restraint from a no-op.
     torch = pytest.importorskip("torch")
     restr = CombinedRestraints()
     restr.setup(_NucleotideAdapter(), config=_config(library_dir))
@@ -549,13 +535,8 @@ _chem_mod_bond.new_value_dist_esd
 
 
 def test_peptide_link_id_follows_the_second_residue_group(tmp_path):
-    # CCP4 splits the peptide link by the SECOND residue's group because the nitrogen
-    # differs: proline's sits in a ring with no amide hydrogen, so X-Pro uses PTRANS (and
-    # the DEL-HNP mod) rather than TRANS/DEL-HN1. Their targets differ by up to 2.5 deg
-    # (CA-C-N 115.917 vs 118.415, O-C-N 123.469 vs 121.016) and PTRANS carries a CD-N-C
-    # angle TRANS has no equivalent for, so picking by mol_type alone mis-restrains every
-    # X-Pro junction -- 7 of them in the QBP benchmark, where proline was 6-7x enriched
-    # among the residues MolProbity flagged.
+    # X-Pro uses PTRANS/DEL-HNP because proline's nitrogen sits in a ring and
+    # lacks an amide hydrogen. Resolve the link from the second residue's group.
     (tmp_path / "a").mkdir()
     (tmp_path / "p").mkdir()
     (tmp_path / "list").mkdir()

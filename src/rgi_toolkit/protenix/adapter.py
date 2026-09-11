@@ -27,11 +27,8 @@ from rgi_toolkit.atom_context import AtomRecord, LigandConf
 logger = logging.getLogger(__name__)
 
 
-# protenix biotite AtomArray.mol_type is already a normalized string
-# ("protein"/"rna"/"dna"/"ligand"); pass the polymer/ligand values through and map
-# anything else (water/empty/unknown) to None. mol_type is entity-derived, so a MODIFIED
-# residue in a protein chain reads "protein" -> forwarding it powers protein/dna/rna +
-# backbone/sidechain selectors and RMSD align pairing for modified residues.
+# Entity-derived mol_type already uses normalized names and preserves modified
+# residues' polymer identity. Unknown types map to None.
 _VALID_MOLTYPES = {"protein", "dna", "rna", "ligand"}
 
 
@@ -50,7 +47,6 @@ class ProtenixAdapter:
         # padded atom count = coordinate length in the diffusion loop
         self._n_atom = int(input_feature_dict["atom_to_token_idx"].shape[-1])
 
-    # --- FrameworkAdapter -----------------------------------------------------
     def iter_atoms(self) -> Iterator[AtomRecord]:
         aa = self.atom_array
         if aa is None:
@@ -67,11 +63,8 @@ class ProtenixAdapter:
             if "conformer_restraints" in categories
             else None
         )
-        # Per-chain 1-based residue/token ordinal, matching boltz/AF3 so one
-        # selection string means the same atom in every tool. protenix tokenizes a
-        # ligand per atom but sets res_id=1 for ALL atoms of a single-CCD ligand,
-        # so res_id can't be trusted directly: count polymer residues by res_id
-        # group, but give each hetero (ligand) atom its own ordinal -> 1..N.
+        # CCD ligand atoms share res_id=1 but tokenize individually. Count standard
+        # polymer residues by res_id and assign each hetero atom its own ordinal.
         chain_resmap: dict[str, dict[int, int]] = {}
         chain_counter: dict[str, int] = {}
         for i in range(len(aa)):
@@ -101,7 +94,6 @@ class ProtenixAdapter:
                 ),
             )
 
-    # --- ConformerAdapter -----------------------------------------------------
     def num_atoms(self) -> int:
         return self._n_atom
 
@@ -130,11 +122,8 @@ class ProtenixAdapter:
             return
 
         def _post_build(chain_id, mol, coords, idxs, elements_all, bonds_local):
-            # SMILES ligand: replace the target with a stereo-correct ETKDG ideal
-            # conformer (atom_array.coord may be the wrong isomer, e.g. maleate predicted
-            # trans -> the restraint would converge to trans). The atom_array atom order
-            # equals the SMILES mol's RDKit order (json_parser builds it from
-            # mol.GetAtoms()), so the ideal coords line up with idxs.
+            # Embed the source SMILES to repair references with incorrect stereo.
+            # Align the source graph to the coordinate atom order below.
             smiles = self._smiles_by_chain.get(str(chain_id))
             if smiles is None:
                 return mol, coords

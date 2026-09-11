@@ -5,10 +5,7 @@ from typing import Iterator
 
 import numpy as np
 
-# boltz adapter imports torch ON PURPOSE (the other five rgi_toolkit adapters are
-# framework-free): boltz feats arrive as native torch tensors, read at batch 0 here.
-# It is a lazily-imported submodule, so top-level `import rgi_toolkit` still needs only
-# numpy (the framework-free invariant's actual intent).
+# Native feature tensors require torch here. This adapter is imported lazily.
 import torch
 
 from rgi_toolkit._moltype import MOLTYPE_BY_ID
@@ -31,9 +28,7 @@ class BoltzFeatsAdapter:
 
     def __init__(self, feats: dict, token_names: list | None = None) -> None:
         self.feats = feats
-        # boltz const.tokens (token-id -> 3-letter CCD name), passed in by the boltz
-        # caller so the adapter stays framework-free. Enables AtomRecord.resname (and
-        # thus pairing="align" RMSD restraints); None -> resname unavailable.
+        # Caller-provided token ID to CCD-name vocabulary for residue correspondence.
         self.token_names = token_names
         self._asym_id_atom = None
         self._atom_to_token = None
@@ -49,14 +44,11 @@ class BoltzFeatsAdapter:
             self._atom_to_token = feats["atom_to_token"][0]
             self._atom_token_indices = self._atom_to_token.argmax(dim=-1)
             self._asym_id_atom = feats["asym_id"][0][self._atom_token_indices].long()
-            # boltz pads the atom dim to a multiple of the window size; padding atoms
-            # get asym_id=0 and an all-zero atom_to_token row, so without this mask
-            # they would be emitted as chain-0 / residue-ordinal-1 and corrupt any
-            # selection touching them (and inflate a chain-0 ligand's atom count).
+            # Padding atoms have asym_id=0 and zero atom_to_token rows; mask them
+            # so they cannot appear as real chain-0 atoms.
             self._pad0 = self.feats["atom_pad_mask"][0].bool()
         return self._asym_id_atom, self._atom_to_token
 
-    # --- FrameworkAdapter -----------------------------------------------------
     def iter_atoms(self) -> Iterator[AtomRecord]:
         """Yield AtomRecord for every atom (for distance restraint selection).
 
@@ -99,7 +91,6 @@ class BoltzFeatsAdapter:
             rcr0 = None
         for chain in record[0].chains:
             chain_id = chain.chain_id
-            # exclude padding atoms (else they surface as chain-0 / resid 1)
             chain_sites = np.flatnonzero((atom_chains == chain_id) & real_atoms)
             toks = token_indices[chain_sites].tolist()
             # rank this chain's tokens -> per-chain 1-based ordinal. boltz emits a
@@ -143,7 +134,7 @@ class BoltzFeatsAdapter:
             if arr.dim() == 3:  # one-hot (n_atom, 4, 64) -> codes (n_atom, 4)
                 arr = arr.argmax(dim=-1)
             codes = arr.detach().cpu().numpy().astype(np.int64)  # (n_atom, 4)
-        except Exception as exc:  # unexpected shape/dtype: surface it, don't hide it
+        except Exception as exc:
             logger.warning(
                 "boltz 'ref_atom_name_chars' decode failed (%s); RMSD identity "
                 "pairing falls back to selection-order pairing",
@@ -158,7 +149,6 @@ class BoltzFeatsAdapter:
 
         return f
 
-    # --- ConformerAdapter -----------------------------------------------------
     def num_atoms(self) -> int:
         return int(self.feats["atom_pad_mask"][0].shape[0])
 
@@ -212,13 +202,10 @@ class BoltzFeatsAdapter:
             if mol is None:
                 continue
             try:
-                # RemoveAllHs, NOT RemoveHs: boltz CCD mols can carry an explicit
-                # H (e.g. an N-H drawn in the component) that RemoveHs PRESERVES, so
-                # GetNumAtoms() would then exceed the heavy-only structure sites and
-                # the count guard below would silently skip the whole conformer
-                # (n_active=0). RemoveAllHs strips every H, restoring heavy==sites.
+                # RemoveAllHs also removes explicit component hydrogens that RemoveHs
+                # preserves, keeping the atom count aligned with heavy-only structure sites.
                 mol = Chem.RemoveAllHs(mol)
-            except Exception as exc:  # keep the run alive; just skip this ligand
+            except Exception as exc:
                 logger.warning(
                     "ligand %s: RemoveAllHs failed (%s); skip", chain.chain_name, exc
                 )

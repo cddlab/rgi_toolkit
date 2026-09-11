@@ -44,9 +44,7 @@ THREE_TO_ONE = {
     "VAL": "V",
 }
 
-# affine gap (BLAST BLOSUM62 defaults) for proteins; identity match/mismatch for NA.
-# Biopython's gap model matches the old hand-rolled one: a gap of length L costs
-# ``open + (L-1)*extend``, so these values transfer verbatim.
+# BLAST BLOSUM62 affine gaps: a length-L gap costs open + (L - 1) * extend.
 GAP_OPEN = -11
 GAP_EXTEND = -1
 NA_MATCH = 5
@@ -58,10 +56,7 @@ def _configure(aligner):
     aligner.mode = "global"
     aligner.open_gap_score = GAP_OPEN
     aligner.extend_gap_score = GAP_EXTEND
-    # free leading/trailing gaps on both sequences (skip a target/ref overhang at no cost).
-    # ``end_gap_score`` sets all four end-gap scores at once and is stable across the
-    # supported Biopython range (1.84-1.87); the granular ``*_end_gap_score`` names are
-    # deprecated in 1.87.
+    # Free leading/trailing gaps on both sequences.
     aligner.end_gap_score = 0.0
     return aligner
 

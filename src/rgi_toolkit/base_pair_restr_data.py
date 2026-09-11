@@ -35,18 +35,16 @@ plane terms means the base-pair restraint inherits their 3-backend energy, CG so
 gating and finalize reporting for free — nothing new is added to the energy/optim
 layers.
 
-The engine has no monomer library, so the WC donor/acceptor atom pairs and their ideal
-H-bond distances are the small hard-coded table below (base letter after stripping the
-DNA ``D`` prefix; DNA and RNA share base-atom names). The paired nucleotides are named
-by the user (``residue1`` / ``residue2`` selectors); auto-detection of pairs from
-coordinates is intentionally NOT done (coordinates are pure noise at high sigma).
+WC donor/acceptor atom pairs and their ideal H-bond distances come from the table below
+(base letter after stripping the DNA ``D`` prefix; DNA and RNA share base-atom names).
+The user names paired nucleotides with ``residue1`` / ``residue2`` selectors.
+Pairs are not detected from coordinates, which are pure noise at high sigma.
 
 Each entry is gated on EITHER a sigma window (``start_sigma`` / ``stop_sigma``) OR a step
 window (``start_step`` / ``stop_step``) — mutually exclusive, applied to the H-bond
 DISTANCE restraints AND to the coplanarity plane: the plane is emitted as a standalone
 ``PlaneRestraintData`` (``plane_restraints_config``'s array term), which carries its own
-per-entry gate. It used to ride the shared conformer gate, so ``stop_sigma`` released the
-H-bonds but not the coplanarity; now both are released together.
+per-entry gate. ``stop_sigma`` releases both the H-bonds and coplanarity.
 """
 
 from __future__ import annotations
@@ -86,21 +84,15 @@ _KNOWN_BASE_PAIR_KEYS = {
     "target",
 }
 
-# Watson-Crick donor/acceptor atom pairs, keyed by (base1, base2) in the CANONICAL
-# orientation (purine first for GC/GU; the pyrimidine partner second). Each tuple is
-# ``(atom_on_base1, atom_on_base2)`` — the distance restraint is symmetric so only the
-# atom identities matter. DNA/RNA share these base-atom names (the sugar differs, the
-# base does not). Target H-bond distance ~2.85-2.90 Angstrom (N...N / N...O).
+# Watson-Crick donor/acceptor pairs: (atom on base1, atom on base2), with the
+# purine first. DNA and RNA share the base-atom names.
 _WC_ATOMS = {
     ("G", "C"): [("N1", "N3"), ("N2", "O2"), ("O6", "N4")],
     ("A", "T"): [("N1", "N3"), ("N6", "O4")],
     ("A", "U"): [("N1", "N3"), ("N6", "O4")],
-    # G.U wobble (RNA). NOT auto-detected (a G and U near each other need not be a
-    # wobble pair): only used when the user sets ``pair: GU`` explicitly.
+    # G.U wobble requires an explicit pair selection.
     ("G", "U"): [("N1", "O2"), ("O6", "N3")],
 }
-# Pairs that AUTO-detection (resname-derived, no explicit ``pair`` key) may form. Wobble
-# (GU/UG) is excluded — it is opt-in via ``pair`` only.
 _CANONICAL_AUTO = frozenset(
     {("G", "C"), ("C", "G"), ("A", "T"), ("T", "A"), ("A", "U"), ("U", "A")}
 )
@@ -108,10 +100,8 @@ _CANONICAL_AUTO = frozenset(
 # default WC H-bond distance flat-bottomed window (Angstrom)
 _DEFAULT_TARGET = (2.7, 3.1)
 
-# Default coplanarity slack (Angstrom out-of-plane RMS). A WC pair keeps 0 -- the value
-# every existing config was written against. A triple gets room for the third base's real
-# tilt: 0.44 A was the worst observed over the reference triples (see the module
-# docstring), so 0.45 penalises only arrangements flatter geometry cannot explain.
+# Coplanarity slack in Angstrom RMS. Triple slack accommodates the largest
+# reference deviation (0.44 A; see the module docstring).
 _PAIR_SLACK = 0.0
 _TRIPLE_SLACK = 0.45
 
@@ -225,12 +215,8 @@ class BasePairData:
                 "with coplanar: false. Drop residue3, or turn coplanar back on and give "
                 "the third base's hydrogen bonds via distance_restraints_config."
             )
-        # weight + the sigma/step gate windows: shared parse (start_sigma None -> +inf is
-        # applied by config.from_dict, matching distance/rmsd/angle/dihedral).
         apply_window_params(self, config, "base_pair_restraints_config entry")
-        # `move` (which residue the H-bonds pull): reuse the 2-group distance vocabulary
-        # so `both`/`1`/`2` stay in lockstep. 1 -> only residue1 moves (dock it onto a
-        # fixed residue2), 2 -> only residue2, both/omitted -> both.
+        # Use the same two-group move vocabulary as distance restraints.
         idx = parse_move_indices(config.get("move"), 2)
         if idx is not None:
             self.move_mode = {
@@ -312,9 +298,7 @@ class BasePairData:
         map1, resname1 = self._resolve_one_residue(adapter, self.residue1, "residue1")
         map2, resname2 = self._resolve_one_residue(adapter, self.residue2, "residue2")
 
-        # base identities: explicit `pair` override, else auto-detect from resname.
-        # Skipped entirely for a plane-only entry -- there is no table to consult, and
-        # demanding a canonical pair is exactly what makes those entries impossible.
+        # Plane-only entries do not require a canonical base-pair identity.
         if not self.hbonds:
             base1 = _base_letter(resname1) or "?"
             base2 = _base_letter(resname2) or "?"
@@ -364,9 +348,7 @@ class BasePairData:
         if self.coplanar:
             groups = [self._base_atoms(map1), self._base_atoms(map2)]
             if self.residue3 is not None:
-                # The third base joins the plane only. Its identity is NOT checked
-                # against the WC table: docked on a groove edge, it is non-WC by
-                # definition, and any base can sit there.
+                # The third base joins only the plane and need not match the Watson-Crick table.
                 map3, resname3 = self._resolve_one_residue(
                     adapter, self.residue3, "residue3"
                 )
@@ -384,10 +366,7 @@ class BasePairData:
                     f"base_pair {base1}-{base2}: fewer than 3 base atoms found for the "
                     "coplanarity restraint; set coplanar: false or check the residues"
                 )
-            # slack: explicit `coplanar_slack` wins, else 0 for a pair (what every
-            # existing config was written against) and _TRIPLE_SLACK for a triple, whose
-            # third base is genuinely tilted out of the pair's plane. The `target` key
-            # tunes only the H-bond distance, not this plane.
+            # Plane slack is independent of the H-bond distance target.
             slack = self.coplanar_slack
             if slack is None:
                 slack = _PAIR_SLACK if self.residue3 is None else _TRIPLE_SLACK
@@ -438,15 +417,10 @@ class BasePairData:
         atoms — a standalone ``plane`` restraint, one group per residue, all pooled into a
         single best-fit plane.
 
-        The slack maps onto the shared four restraint types exactly: ``slack == 0`` is a
-        pure harmonic toward 0 out-of-plane RMS, a positive slack is the upper-bound-only
-        ``flat-bottomed2`` (``max(0, rms - slack)``, the identical formula the old
-        conformer-plane ``slack`` used), so the migration is numerically a no-op.
-
-        What DOES change versus the old ``extra_plane_groups`` injection: the plane now
-        rides this entry's OWN gate window and ``move`` instead of the shared conformer
-        gate — so ``stop_sigma`` releases the coplanarity together with the H-bonds, and
-        ``move: 1`` pins residue2's atoms in the plane fit as well.
+        Zero slack gives a harmonic target of zero out-of-plane RMS; positive slack
+        gives ``flat-bottomed2`` with residual ``max(0, rms - slack)``. The plane uses
+        this entry's gate window and ``move`` mask, so it is released with the H-bonds
+        and ``move: 1`` pins residue2's atoms in the plane fit.
         """
         pr = PlaneRestraintData()
         pr.atom_selections = [
@@ -459,9 +433,7 @@ class BasePairData:
             pr.geom_type, pr.target1, pr.target2 = "flat-bottomed2", 0.0, float(slack)
         else:
             pr.geom_type, pr.target1, pr.target2 = "harmonic", 0.0, 0.0
-        # move: 0 = every residue free; 1/2 = only that residue moves (the other, and a
-        # third base if present, are pinned) — the same reading as the H-bond distances'
-        # move_mode, now applied to the plane fit too.
+        # move=1/2 pins the other residue and the optional third base.
         pr.move_free = tuple(
             self.move_mode == 0 or (g + 1) == self.move_mode for g in range(len(groups))
         )

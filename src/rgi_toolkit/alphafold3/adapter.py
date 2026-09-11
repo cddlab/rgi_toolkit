@@ -70,20 +70,13 @@ class AF3RestraintAdapter:
             None if ref_space_uid is None else np.asarray(ref_space_uid)
         )
         self.max_atoms_per_token = self.ref_pos.shape[1]
-        # Per-token molecule-type masks -> normalized "protein"/"dna"/"rna" for the
-        # selection DSL (powers the protein/dna/rna selectors). AF3 always emits these
-        # in the BatchDict, so index them directly: a missing key is a real batch-shape
-        # bug that should fail loudly here, not silently yield mol_type=None.
         self.is_protein = np.asarray(batch["is_protein"]).astype(bool)  # (num_tokens,)
         self.is_dna = np.asarray(batch["is_dna"]).astype(bool)
         self.is_rna = np.asarray(batch["is_rna"]).astype(bool)
         # Per-token residue-type index into the CCD-name vocabulary.
         self.aatype = np.asarray(batch["aatype"])  # (num_tokens,)
         self.polymer_residue_names = polymer_residue_names
-        # ...but WHICH vocabulary: AF3 encodes `aatype` with the order that carries a
-        # GAP token after UNK, and a caller handing over the gap-less list shifts every
-        # nucleic name by one while leaving proteins (index < 21) correct. Resolve it
-        # against the batch's own molecule-type flags instead of trusting either.
+        # Resolve unfamiliar vocabularies against the batch's molecule-type masks.
         self._name_shift = self._resolve_name_shift()
         # chain.id -> asym int (1-based, fold_input chain order); resolved by the shim.
         self.chain_id_to_asym = dict(chain_id_to_asym)
@@ -94,11 +87,8 @@ class AF3RestraintAdapter:
         }
         # [(chain_id, mol, is_smiles)] resolved by the shim (the only CCD/SMILES step).
         self.ligand_mols = list(ligand_mols)
-        # The chain<->asym mapping assumes fold_input.chains order matches the batch
-        # asym_id assignment (both 1-based by appearance), which holds for standard
-        # inference (no cropping). Warn if the assumed asym ids aren't all present in
-        # the batch, so a misalignment is visible rather than silently restraining the
-        # wrong atoms (e.g. a chain dropped by structure cleaning).
+        # The shim assumes chain order matches batch asym_id assignment. Warn if
+        # cleaning or cropping removed an expected chain.
         batch_asyms = {int(a) for a in np.unique(self.token_asym_ids)}
         if not set(self.asym_int_to_chain) <= batch_asyms:
             logger.warning(
@@ -180,7 +170,6 @@ class AF3RestraintAdapter:
             else None
         )
 
-    # --- FrameworkAdapter ------------------------------------------------------
     def _token_mol_type(self, token_idx: int) -> str | None:
         """Normalized molecule type of a token from AF3's per-token masks.
 
@@ -249,7 +238,6 @@ class AF3RestraintAdapter:
                     ),
                 )
 
-    # --- ConformerAdapter ------------------------------------------------------
     def iter_ligand_confs(self) -> Iterator[LigandConf]:
         """Yield one LigandConf per shim-resolved ligand mol."""
         try:
@@ -270,21 +258,8 @@ class AF3RestraintAdapter:
             stereo_mol = Chem.Mol(mol)
             stereo_mol.RemoveAllConformers()
             conf_crds = pos_flat[flat_indices]  # (n_atoms, 3) reference coords
-            # A SMILES mol carries no 3D geometry, so chiral tags exist only if the
-            # SMILES annotated them (@/@@); the featurizer keys chiral restraints on
-            # GetChiralTag. Attach the reference conformer and perceive stereo from it
-            # (matching the CCD path, which assigns stereo from the ideal conformer) so
-            # an unannotated SMILES stereocentre still gets chiral restraints.
-            # NOTE: af3 keeps ref_pos ITSELF as the conformer/cistrans target (no ETKDG-
-            # ideal substitution like boltz/protenix) because it needs none. af3 does NOT
-            # canonicalize SMILES: the featurised ligand atoms are in Chem.MolFromSmiles
-            # order (assign_atom_names_from_graph names them <element><counter> in that
-            # order), which matches this shim's bare MolFromSmiles mol POSITIONALLY
-            # (token i == mol atom i; see _smiles_flat_indices), and ref_pos is a stereo-
-            # correct ETKDGv3 conformer encoding the SMILES @/@@ and /\. So bond/angle/
-            # chiral AND cistrans all target the correct geometry. E2E-verified on af3:
-            # SMILES fumarate (E) keeps its C=C at -180 deg and maleate (Z) at ~0 deg,
-            # both with one E/Z torsion; conjugated single bonds may add sp2 torsions.
+            # Perceive unspecified stereo from reference coordinates; authoritative
+            # source annotations remain in stereo_mol.
             if mol.GetNumConformers() == 0 and mol.GetNumAtoms() == len(conf_crds):
                 conf = Chem.Conformer(mol.GetNumAtoms())
                 for i in range(len(conf_crds)):
@@ -305,13 +280,11 @@ class AF3RestraintAdapter:
                 mol=mol,
                 conf_coords=conf_crds,
                 global_indices=np.asarray(flat_indices, dtype=np.int64),
-                # opted-in: ligands that set conformer_restraints=False are dropped by
-                # the shim. Pass True explicitly (LigandConf defaults to False).
+                # The shim filters out ligands without per-chain opt-in.
                 conformer_restraints=True,
                 stereo_mol=stereo_mol,
             )
 
-    # --- flat-index mapping (framework-free) -----------------------------------
     def _ligand_flat_indices(self, chain_id, mol, is_smiles, Chem):
         """Return (flat_indices, mol) for a shim-resolved ligand mol.
 

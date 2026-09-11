@@ -49,11 +49,7 @@ _GEOM_SPEC = {
     "angle": (3, "target_angle"),
     "dihedral": (4, "target_dihedral"),
     "improper": (4, "target_improper"),
-    # plane takes 1..4 groups, so its group count is NOT fixed by the geometry: `None`
-    # means "the caller supplies n_groups" (config.py counts the entry's contiguous
-    # atom_selectionN keys via plane_restr_data.count_plane_groups). Keeping n_groups a
-    # plain int from __init__ onward is deliberate — it is read in five places that all
-    # rely on "a missing atom_selectionN raises".
+    # Plane group counts vary; the caller must resolve n_groups to an int.
     "plane": (None, "target_plane"),
 }
 
@@ -211,9 +207,7 @@ class RefGeomData:
             config, self._base, conv
         )
         if self.geom_type is None:
-            # plane's target is essentially always 0 (planar), so its type block is
-            # optional and defaults to harmonic toward 0 — mirroring the array-path
-            # PlaneRestraintData. Every other geom needs an explicit target.
+            # Only planes have an implicit target: zero out-of-plane RMS.
             if self.geom == "plane":
                 self.geom_type, self.target1, self.target2 = "harmonic", 0.0, 0.0
             else:
@@ -277,10 +271,8 @@ class RefGeomData:
                     f"{self.name} reference group {ref_name}",
                     self.ref_defs[ref_name]["ref_path"],
                 )
-            # A ref-anchored PLANE defines its plane from the reference atoms alone, so a
-            # 1- or 2-atom reference selection leaves the normal undefined (the energy
-            # would be finite but meaningless). Raise, mirroring the fit's >= 3 anchor
-            # check below — the other geoms only need a centroid, so any count works.
+            # Reference planes need at least three anchors to define a normal;
+            # centroid-based geometries allow smaller groups.
             if (
                 self.geom == "plane"
                 and len(self._ref_group_coords[key]) < _MIN_PLANE_REF_ATOMS

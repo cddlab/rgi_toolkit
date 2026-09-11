@@ -26,7 +26,6 @@ from rgi_toolkit.alphafold3.adapter import AF3RestraintAdapter
 from rgi_toolkit.atom_context import decode_atom_name
 
 
-# --- shared helpers --------------------------------------------------------------
 def test_decode_atom_name():
     # ord(c) - 32 encoding: 'C'->35, 'A'->33, 'B'->34, '1'->17
     assert decode_atom_name([35, 33, 0, 0]) == "CA"
@@ -59,7 +58,6 @@ def _assert_source_e_stereo(ligand_conf):
     assert list(bonds.values()) == ["E"]
 
 
-# --- AF3 framework-free adapter --------------------------------------------------
 def _enc(name: str, width: int = 4) -> np.ndarray:
     a = np.zeros(width, dtype=np.int64)
     for i, ch in enumerate(name):
@@ -127,9 +125,7 @@ def _af3_nucleotide_batch():
 
 @pytest.mark.parametrize("vocabulary", [_POLY_GAPLESS, _POLY_WITH_GAP])
 def test_af3_nucleic_resnames_survive_either_residue_vocabulary(vocabulary):
-    # Read straight off the gap-less list these would be "G" and "DA" -- a base-pair
-    # macro would then reject a real A-U pair, and a monomer-library lookup would
-    # restrain a ribonucleotide with deoxy geometry. The molecule-type flags settle it.
+    # The gap-less vocabulary misreads A/U as G/DA; molecule-type masks resolve it.
     ad = AF3RestraintAdapter(
         _af3_nucleotide_batch(), {"A": 1}, vocabulary, ligand_mols=[]
     )
@@ -270,7 +266,6 @@ def test_boltz_ligand_retains_source_stereo():
 
 
 def test_af3_adapter_imports_no_alphafold3():
-    # the whole point of the split: the rgi_toolkit adapter must not pull in alphafold3
     assert "alphafold3" not in sys.modules
 
 
@@ -397,7 +392,6 @@ def test_esmfold2_adapter_retains_source_stereo():
     _assert_source_e_stereo(ligand[0])
 
 
-# --- biotite shared core (protenix/openfold) -------------------------------------
 class _FakeBonds:
     def __init__(self, arr):
         self._arr = np.asarray(arr)
@@ -643,8 +637,7 @@ def test_biotite_get_elements():
 
 
 def test_biotite_ligand_confs_default_on():
-    # helper contract: honor an explicit conf_rest_default=True (no tool uses this now --
-    # protenix + openfold both pass False -- but the helper must still respect it).
+    # An explicit helper default must work without an opt-in annotation.
     aa = _fake_aa()
     confs = list(
         biotite_ligand_confs(
@@ -718,10 +711,7 @@ def test_biotite_ligand_confs_post_build_hook():
     assert np.array_equal(confs[0].conf_coords, moved)
 
 
-# --- the real adapter classes through the shared core (delegation wiring) --------
-# These construct ProtenixAdapter / Openfold3Adapter and call the delegating methods,
-# so a runtime NameError / wrong kwarg INSIDE iter_ligand_confs/get_elements (which
-# "import succeeds" can't catch) is caught here on CPU, not only at the GPU smoke.
+# Exercise adapter delegation at runtime, beyond import checks.
 def test_protenix_adapter_delegation():
     from rgi_toolkit.protenix.adapter import ProtenixAdapter
 

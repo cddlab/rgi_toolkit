@@ -36,13 +36,8 @@ from rgi_toolkit.atom_context import AtomRecord, LigandConf
 logger = logging.getLogger(__name__)
 
 _LIGAND_MOLTYPE = 3  # openfold MoleculeType.LIGAND
-# openfold MoleculeType -> normalized polymer string for AtomRecord.mol_type. The enum
-# order is PROTEIN=0/RNA=1/DNA=2 (RNA BEFORE DNA), the OPPOSITE of the shared
-# MOLTYPE_BY_ID (boltz/esm: DNA=1/RNA=2), so this dedicated table is required — reusing
-# the shared one would silently swap DNA<->RNA. molecule_type_id keeps a MODIFIED
-# polymer residue (e.g. MSE) typed as its polymer (NOT LIGAND, unlike biotite hetero),
-# so forwarding it powers protein/dna/rna + backbone/sidechain selectors and RMSD align
-# pairing for modified residues too.
+# OpenFold uses RNA=1 and DNA=2, unlike the shared boltz/ESM enum. Entity
+# types preserve polymer identity for modified residues.
 _MOLTYPE_BY_ID_OF3 = {0: "protein", 1: "rna", 2: "dna", 3: "ligand"}
 
 
@@ -70,7 +65,6 @@ class Openfold3Adapter:
         )
         self._smiles_by_chain = dict(smiles_by_chain or {})
 
-    # --- ligand identity ------------------------------------------------------
     def _ligand_mask(self) -> np.ndarray:
         """Per-atom bool: True where the atom belongs to a LIGAND entity.
 
@@ -83,7 +77,6 @@ class Openfold3Adapter:
             return np.asarray(aa.molecule_type_id) == _LIGAND_MOLTYPE
         return np.asarray(aa.hetero, dtype=bool)
 
-    # --- FrameworkAdapter -----------------------------------------------------
     def iter_atoms(self) -> Iterator[AtomRecord]:
         aa = self.atom_array
         if aa is None:
@@ -93,11 +86,7 @@ class Openfold3Adapter:
         names = np.asarray(aa.atom_name) if hasattr(aa, "atom_name") else None
         resnames = np.asarray(aa.res_name) if hasattr(aa, "res_name") else None
         is_lig = self._ligand_mask()
-        # Per-atom molecule type -> AtomRecord.mol_type (normalized polymer string).
-        # Read from the molecule_type_id annotation (same source _ligand_mask uses);
-        # absent -> None. molecule_type_id keeps a MODIFIED polymer residue typed as its
-        # polymer (NOT LIGAND, unlike biotite hetero), so this powers protein/dna/rna +
-        # backbone/sidechain + RMSD align pairing for modified residues.
+        # Use entity molecule types, not hetero, to classify modified polymer residues.
         cats = aa.get_annotation_categories()
         mtypes = np.asarray(aa.molecule_type_id) if "molecule_type_id" in cats else None
         conf_restraints = (
@@ -105,16 +94,9 @@ class Openfold3Adapter:
             if "conformer_restraints" in cats
             else None
         )
-        # Non-standard residues are biotite hetero=True; a standard polymer residue is
-        # not. hetero (not molecule_type_id) drives the per-token ORDINAL below because a
-        # modified residue must get its own ordinal to match the other tools.
+        # Use hetero for token ordinals: non-standard residues tokenize per atom.
         hetero = np.asarray(aa.hetero, dtype=bool)
-        # Per-chain 1-based PER-TOKEN ordinal (the cross-tool convention shared by
-        # boltz/protenix/esmfold2): a standard polymer residue gets one ordinal for
-        # all its atoms (= residue ordinal); a ligand atom and each atom of a
-        # NON-standard residue gets its own ordinal. (Previously a modified polymer
-        # residue was grouped by res_id -> ONE ordinal, diverging from the other
-        # tools for that edge case; standard residues + ligands are unaffected.)
+        # One ordinal per standard residue, one per atom for ligands/modified residues.
         chain_resmap: dict[str, dict[int, int]] = {}
         chain_counter: dict[str, int] = {}
         for i in range(len(aa)):
@@ -144,7 +126,6 @@ class Openfold3Adapter:
                 ),
             )
 
-    # --- ConformerAdapter -----------------------------------------------------
     def num_atoms(self) -> int:
         return self._n_atom
 
@@ -199,11 +180,7 @@ class Openfold3Adapter:
                 )
             return mol, coords, stereo_mol
 
-        # openfold marks ligand atoms via molecule_type_id (see _ligand_mask); chains
-        # are chain_id. Per-ligand opt-in: a ligand is restrained only when its input
-        # chain set conformer_restraints: true, threaded in as a per-atom AtomArray
-        # annotation (set in query.py, mirroring protenix). Absent annotation -> default
-        # OFF (conf_rest_default=False), so the flag is required like every other tool.
+        # Per-chain conformer opt-in arrives as an AtomArray annotation; absent means off.
         yield from biotite_ligand_confs(
             aa,
             ligand_mask=self._ligand_mask(),

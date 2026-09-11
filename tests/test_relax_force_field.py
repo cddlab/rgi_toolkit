@@ -50,9 +50,6 @@ def _stereo_mismatches(reference_mol, reference_coords, candidate_coords):
     return expected, _stereo_mismatch_counts(reference_mol, candidate_coords, expected)
 
 
-# --------------------------------------------------------------------------- config
-
-
 @pytest.mark.parametrize(
     "value,expected",
     [
@@ -134,17 +131,13 @@ def test_config_validates_value_not_just_key():
     assert cfg.conformer_config["relax_force_field"] == {"ligand": "mmff94s"}
 
 
-# ----------------------------------------------------------------------- the switch
-
-
 def test_force_fields_give_different_targets():
     """The option must actually change the geometry the targets are measured off."""
     mol, crds = _embed("Nc1ncnc2n(cnc12)[C@@H]1O[C@H](COP(=O)(O)O)[C@@H](O)[C@H]1O")
     out = {ff: ff_relax(mol, crds, ff) for ff in ("uff", "mmff94", "mmff94s")}
     assert all(c is not None and len(c) == len(crds) for c in out.values())
 
-    # the exocyclic amine C-N: MMFF pulls the conjugated bond well below UFF (measured
-    # 1.428 / 1.389 / 1.376 against a monomer-library 1.330).
+    # MMFF shortens the conjugated exocyclic C-N bond more than UFF.
     def c6_n6(c):
         return float(np.linalg.norm(c[0] - c[1]))
 
@@ -181,7 +174,7 @@ def test_none_keeps_the_cached_conformer_exactly():
     }
     for g0, g1, r0, _esd in raw:
         assert r0 == pytest.approx(expected[(g0, g1)], abs=1e-12)
-    # ...and the relax really was doing something, so "none" is not a no-op distinction
+    # Confirm relaxation changes the targets.
     assert any(
         r0 != pytest.approx(expected[(g0, g1)], abs=1e-6)
         for g0, g1, r0, _esd in relaxed
@@ -193,9 +186,6 @@ def test_bad_coordinate_count_keeps_uff_soft_but_mmff_explicit():
     assert ff_relax(mol, coords[:-1], "uff") is None
     with pytest.raises(RelaxError, match="coordinate count"):
         ff_relax(mol, coords[:-1], "mmff94")
-
-
-# -------------------------------------------------------- stereo-preserving retries
 
 
 def test_stereo_validation_detects_ez_and_chiral_inversions():
@@ -368,9 +358,6 @@ def test_align_stereo_mol_preserves_labels_in_target_order():
     assert next(iter(source_labels.values())) == next(iter(aligned_labels.values()))
 
 
-# --------------------------------------------------------------- the two RDKit traps
-
-
 def test_mmff_does_not_mutate_the_caller_mol():
     """MMFF typing KEKULIZES its argument (aromatic flags cleared, bonds -> SINGLE/DOUBLE).
 
@@ -409,12 +396,9 @@ def test_mmff_raises_on_unsanitized_mol():
     mol.AddConformer(conf, assignId=True)
     crds = np.asarray(mol.GetConformer(0).GetPositions(), dtype=np.float64)
 
-    assert ff_relax(mol, crds, "uff") is None  # unchanged soft-fail
+    assert ff_relax(mol, crds, "uff") is None
     with pytest.raises(RelaxError):
         ff_relax(mol, crds, "mmff94")
-
-
-# ------------------------------------------------------- the relax-skipped guard
 
 
 def _all_single_ligand():
@@ -506,8 +490,7 @@ def test_relax_error_escapes_combined_setup():
             },
         )
 
-    # ...and the same structure sets up fine under the default, so the raise is about the
-    # force field rather than anything else in the fixture.
+    # The default succeeds on the same structure, isolating the force-field failure.
     CombinedRestraints().setup(adapter, 1, config={"conformer_restraints_config": conf})
 
 

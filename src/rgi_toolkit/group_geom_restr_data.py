@@ -129,14 +129,9 @@ def _parse_common(
     """Shared parse of weight / start_sigma / stop_sigma / move / type for both classes
     (``self`` is the angle, dihedral, or improper data object being filled).
     ``default_free`` is the per-group free mask used when ``move`` is omitted."""
-    # weight + the sigma/step gate windows: one shared parse (so the null/zero handling
-    # can't drift across distance/rmsd/angle/dihedral/improper). The windows default to always-on
-    # (set in __init__); start_sigma None -> +inf is filled by config.from_dict.
     apply_window_params(self, config, f"{label}_restraints_config entry")
     self.move_free = _parse_move(config, n_groups, default_free)
-    # Angle/dihedral/improper targets are degrees by default; `unit: radians` makes conv the
-    # identity. The flat-bottomed `t1 < t2` check inside parse_geom_type runs on the raw
-    # (pre-conv) values, so it is unit-agnostic. RMSD/distance pass `float` (native A).
+    # Validate bounds before conversion; targets default to degrees.
     unit = str(config.get("unit", "degrees")).strip().lower()
     if unit not in ("degrees", "radians"):
         raise ValueError(

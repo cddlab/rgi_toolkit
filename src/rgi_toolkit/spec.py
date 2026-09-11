@@ -23,10 +23,7 @@ from rgi_toolkit._config_util import (
 )
 from rgi_toolkit.energy._terms import CONF_KEYS, PER_ENTRY_KEYS, iter_spec_terms
 
-# ---------------------------------------------------------------------------
-# Distance restraint type codes (shared across numpy / torch / jax backends).
-# These mirror the string types used in the YAML config.
-# ---------------------------------------------------------------------------
+# Distance type codes shared by all energy backends.
 DIST_HARMONIC = 0  # penalize (d - target1)^2 everywhere
 DIST_FLAT_BOTTOMED = 1  # penalize d < target1 or d > target2
 DIST_LOWER_BOUND = 2  # "flat-bottomed1": penalize d < target1 only
@@ -40,12 +37,8 @@ DIST_TYPE_CODES = {
     "flat-bottomed2": DIST_UPPER_BOUND,
 }
 
-# Which group(s) the distance restraint's centroid gradient moves (the `move` config key).
-# The minimal-displacement split ("both") rescales both group centroids by the reduced mass
-# so they move with ratio N2:N1; move-1/move-2 pin the OTHER group (stop-gradient) so the
-# full shift lands on group1 / group2 (e.g. pull only a ligand toward a fixed pocket). The
-# code equals the config value: 1 -> group1, 2 -> group2 (atom_selection1 / atom_selection2);
-# "both" -> 0. Consumed by ``energy.*_energy.distance_energy`` (the autodiff CG term).
+# Distance move modes. For both groups free, reduced-mass scaling gives their
+# centroid displacements the ratio N2:N1. Modes 1/2 pin the other group.
 MOVE_BOTH = 0
 MOVE_GROUP1 = 1
 MOVE_GROUP2 = 2
@@ -102,10 +95,8 @@ class PlaneArrays:
     Servalcat-style: each row is a set of atoms the reference conformer holds
     coplanar (an aromatic / conjugated ring, or a non-ring sp2 functional group =
     an sp2 centre with its heavy neighbours). The energy is the group's out-of-plane
-    RMS deviation from its own best-fit plane (target 0 = planar), so it flattens
-    aromatic rings the old per-centre signed-volume term could not (a ring CH has
-    only 2 heavy neighbours in the H-removed mol). Variable group size ``A`` is
-    encoded purely by ``grp_mask`` (padding columns zeroed), the same layout as
+    RMS deviation from its own best-fit plane (target 0 = planar). Variable group
+    size ``A`` is encoded by ``grp_mask`` (padding columns zeroed), the same layout as
     ``DistanceArrays``' groups. The backend ``plane_energy`` leaf builds each group's
     masked centroid + covariance, takes the smallest-eigenvalue plane normal
     (stop-gradient, like ``rmsd_energy``'s Kabsch rotation) and penalises the residual.
@@ -329,11 +320,8 @@ class RmsdArrays:
     geom_type: np.ndarray  # (n_rmsd,) int code (DIST_*: 0=harmonic .. 3=flat-bottomed2)
     weight: np.ndarray  # (n_rmsd,)
     start_sigma: np.ndarray  # (n_rmsd,) per-restraint; active when sigma<=start_sigma
-    # per-restraint LOWER noise bound: the restraint is RELEASED for sigma < stop_sigma,
-    # so the model's final low-sigma denoising steps re-idealise geometry the restraint
-    # would otherwise hold distorted (e.g. the peptide bond between a restrained residue
-    # and a free unmodeled tail). -1 = never released (active down to sigma=0 = old
-    # behaviour). The active window is stop_sigma <= sigma <= start_sigma.
+    # Release below stop_sigma so late denoising can repair boundary geometry.
+    # -1 keeps the restraint active down to sigma=0.
     stop_sigma: np.ndarray  # (n_rmsd,) per-restraint; active when sigma>=stop_sigma
     # per-restraint STEP window (ANDed with the sigma window); -inf/+inf = always.
     start_step: np.ndarray  # (n_rmsd,) step-window lower bound
@@ -486,12 +474,9 @@ class RestraintSpec:
     vdw: VdwArrays | None = None
     vdw_config: VdwConfig | None = None
     active_vdw_config: ActiveVdwConfig | None = None
-    # CG safety controls shared by static and dynamic VdW. The step cap prevents the
-    # quadratic one-sided penalty from accepting a large overshooting Armijo step. The
-    # interval is how often the CG CHECKS a dynamic Verlet-style list for staleness (it
-    # bounds the unchecked movement `max_atom_step * interval`, folded into the search
-    # cutoff); the skin is the extra listed radius AND the measured-displacement budget
-    # that actually triggers a rebuild.
+    # Shared VdW step cap and neighbor-list controls. The search cutoff includes
+    # unchecked travel (max_atom_step * interval); measured displacement against
+    # the skin triggers a rebuild.
     vdw_max_atom_step: float = VDW_MAX_ATOM_STEP_DEFAULT
     vdw_neighbor_rebuild_interval: int = VDW_NEIGHBOR_REBUILD_INTERVAL_DEFAULT
     vdw_neighbor_skin: float = VDW_NEIGHBOR_SKIN_DEFAULT
@@ -507,12 +492,8 @@ class RestraintSpec:
     # (plane_restraints_config) — same measured quantity as `plane` above but with the four
     # distance-style types and a per-entry gate (see GroupPlaneArrays).
     group_plane: GroupPlaneArrays | None = None
-    # one start_sigma for ALL conformer (bond/angle/chiral/plane/cistrans/vdw)
-    # restraints; each distance restraint carries its own in DistanceArrays.start_sigma.
-    # NOTE: this internal spec-field default stays -1.0 (= conformer OFF) on purpose,
-    # unlike the user-facing build_spec/config defaults (+inf = active every step):
-    # build_spec ALWAYS sets this field, so the default only applies to a hand-built spec
-    # that omits it, where failing OFF is the conservative choice.
+    # Shared conformer start_sigma. Hand-built specs default off; build_spec
+    # explicitly supplies the user-facing +inf default.
     conf_start_sigma: float = -1.0
     # shared conformer LOWER bound (mirrors conf_start_sigma): conformer terms are
     # released for sigma < conf_stop_sigma. -1 (default) = never released (off).
@@ -521,11 +502,8 @@ class RestraintSpec:
     # window). Active for conf_start_step <= step <= conf_stop_step; -inf/+inf = always.
     conf_start_step: float = float("-inf")
     conf_stop_step: float = float("inf")
-    # custom restraints (rgi_toolkit.custom): a list of CustomSpec (backend-agnostic — local
-    # index arrays + a config-formula AST or a code energy fn + weight/sigmas), each
-    # compiled to a closure and added to the CG objective by the optimizers. NOT numpy
-    # arrays (Python AST/fn live here), so this is a separate field, not part of the
-    # array-based terms above. Empty when no custom restraint is configured.
+    # Custom specs hold formula ASTs or energy functions and local selections.
+    # Optimizers compile them to closures; they cannot be packed as array terms.
     custom: list = field(default_factory=list)
     peptide_states: PeptideStateArrays | None = None
 

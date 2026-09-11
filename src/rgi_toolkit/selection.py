@@ -39,8 +39,7 @@ class ResId(SelectionNode):
 
     def eval(self, mol: Dict[str, Union[str, int]]) -> bool:
         resid = mol.get("resid")
-        # accept numpy ints too: isinstance(np.int64(5), int) is False, which would
-        # otherwise make every atom fail to match if an adapter yields a numpy scalar
+        # Adapters may supply NumPy integers, which are not instances of int.
         return isinstance(resid, (int, np.integer)) and int(resid) in self.ids
 
 
@@ -85,11 +84,8 @@ class Name(SelectionNode):
         return isinstance(name, str) and normalise_atom_name(name) in self.names
 
 
-# MDTraj-like backbone atom names, by polymer type, matched case-folded against
-# ``mol["name"]``. Protein = the peptide unit; nucleic = the full sugar-phosphate
-# backbone, listing BOTH modern (OP1/OP2/OP3) and legacy (O1P/O2P/O3P) phosphate-oxygen
-# names so a reference PDB written either way classifies the same. Primes ("O5'") are
-# fine here: these sets match the raw atom name, NOT the alnum-only ``name`` parser.
+# MDTraj-like backbone names, including modern and legacy phosphate-oxygen
+# spellings. Matching is case-folded and normalizes atom-name primes.
 _PROTEIN_BACKBONE = frozenset({"N", "CA", "C", "O", "OXT"})
 _NUCLEIC_BACKBONE = frozenset(
     {
@@ -191,7 +187,6 @@ class Bracket(SelectionNode):
         return self.selection.eval(mol)
 
 
-# --- Parser Error ---
 class ParseError(ValueError):
     pass
 
@@ -207,7 +202,6 @@ class SelectionError(ValueError):
     message."""
 
 
-# --- Parser Class ---
 RESERVED_KEYWORDS = {
     "and",
     "or",
@@ -243,12 +237,8 @@ class SelectionParser:
 
     def _consume_tag(self, tag: str):
         if self.text.startswith(tag, self.pos):
-            # Refuse to match an operator/keyword that is merely the prefix of a
-            # longer glued token (e.g. "not" in "notchain", "and" in "andresid"):
-            # in a valid selection a tag is always followed by space / "(" / ")" /
-            # end-of-string, never another alnum char. Without this the tag was
-            # silently stripped, yielding a wrong selection (e.g. "notchain A" ->
-            # Not(Chain(A))). The parser's backtracking recovers from this error.
+            # Do not consume keyword prefixes in glued tokens such as "notchain".
+            # Raise ParseError so the parser can backtrack.
             if tag.isalpha() and (
                 self.pos + len(tag) < len(self.text)
                 and self.text[self.pos + len(tag)].isalnum()
@@ -355,13 +345,8 @@ class SelectionParser:
                     f"Identifier cannot be a reserved keyword:"
                     f" '{identifier}' at position {start}"
                 )
-        # Reject an identifier whose prefix is an operator glued to a longer token
-        # (a missing space, e.g. "andresid", "orchain"): without this it is silently
-        # swallowed as a chain name and the operator/clause is dropped, yielding a
-        # WRONG selection with no error. Mirrors the glued-token guard in
-        # _consume_tag so the parser backtracks and the operator is parsed correctly
-        # (or the whole selection is rejected loudly). Chain ids are short tokens, so
-        # this never rejects a real name in practice.
+        # Reject glued operators such as "andresid" before they become chain names.
+        # This complements _consume_tag's keyword-boundary check.
         for op in ("and", "or", "not", "to"):
             if identifier.startswith(op) and len(identifier) > len(op):
                 raise ParseError(
@@ -392,9 +377,7 @@ class SelectionParser:
             self._skip_space1()
             last = self._parse_usize()
         except ParseError:
-            # not a range ("resid 5 6 7" list form) -> backtrack and parse a number list.
-            # The range-order check is deliberately NOT inside this try: a descending range
-            # must be a hard error, not something this `except` swallows into list form.
+            # Backtrack to a number list. Keep descending-range errors outside this catch.
             self.pos = saved_pos_for_to
             numbers = [first]
             while True:
@@ -406,10 +389,8 @@ class SelectionParser:
                     self.pos = saved_pos_loop
                     break
             return numbers
-        # committed to a range ("first to last"): a descending range is a hard error.
-        # Raise SelectionError (NOT ParseError) so the `except ParseError` backtracking in
-        # _parse_atom/_parse_primary can't swallow it into the list form and report a
-        # misleading "Expected an atomic selection at position 0".
+        # SelectionError bypasses ParseError backtracking so descending ranges
+        # retain their specific error message.
         if last < first:
             raise SelectionError(f"Range end {last} is less than start {first}")
         return range(first, last + 1)
@@ -430,11 +411,7 @@ class SelectionParser:
         return Chain(self._parse_list_of_identifiers())
 
     def _parse_name(self) -> SelectionNode:
-        # Atom-name selector, e.g. "name CA" / "name CA CB CG" / "name C1'". Uses its
-        # OWN token parser rather than the identifier one: atom names legally carry a
-        # prime (C1' / C1* / H2"), which the alphanumeric identifier parser rejects.
-        # It stops at and/or/not the same way, so "name C1' and resid 5" needs no
-        # special-casing.
+        # Atom names need a separate parser for primes; boolean operators still delimit them.
         self._consume_tag("name")
         self._skip_space1()
         return Name(self._parse_list_of_atom_names())
@@ -450,9 +427,6 @@ class SelectionParser:
     }
 
     def _parse_keyword_selector(self) -> SelectionNode:
-        # Bare-keyword selectors take no argument. _consume_tag's glued-token guard
-        # rejects a longer token (e.g. "proteinase" / "backbones"), so these never
-        # swallow a chain name that merely starts with the keyword.
         for kw, make in self._KEYWORD_SELECTORS.items():
             saved_pos = self.pos
             try:
@@ -465,7 +439,6 @@ class SelectionParser:
             f" at position {self.pos}"
         )
 
-    # --- Grammar hierarchy ---
     def _parse_atom(self) -> SelectionNode:
         atom_parsers = [
             self._parse_keyword_selector,
@@ -569,7 +542,6 @@ class SelectionParser:
         return parsed_node
 
 
-# --- Public API ---
 def parse_selection(selection_string: str) -> Union[SelectionNode, str]:
     try:
         parser = SelectionParser(selection_string)
@@ -580,7 +552,6 @@ def parse_selection(selection_string: str) -> Union[SelectionNode, str]:
         return str(e)
 
 
-# --- AtomSelector Class ---
 class AtomSelector:
     def __init__(self, selection_string: str) -> None:
         self.selection_string = selection_string

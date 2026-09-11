@@ -44,7 +44,6 @@ def test_multiligand_no_collision():
     assert {int(x) for x in spec.active_sites} == set(range(n)) | set(
         range(100, 100 + n)
     )
-    # all local indices are valid (the collision bug would push these out of range)
     assert int(spec.bond.idx.max()) < spec.n_active
 
 
@@ -115,7 +114,7 @@ def test_group_angle_dihedral_active_union_and_padding():
     ga = spec.group_angle
     assert ga is not None
     assert ga.grp1_idx.shape[1] == 3  # max_grp = largest group (group1 has 3 atoms)
-    assert list(ga.grp1_idx[0]) == [g2l[10], g2l[11], g2l[12]]  # remapped to local
+    assert list(ga.grp1_idx[0]) == [g2l[10], g2l[11], g2l[12]]
     assert list(ga.grp1_mask[0]) == [1.0, 1.0, 1.0]
     assert int(ga.grp2_idx[0, 0]) == g2l[20]  # group of 1: first slot valid
     assert list(ga.grp2_mask[0]) == [1.0, 0.0, 0.0]  # rest masked padding
@@ -191,7 +190,7 @@ def test_intramolecular_vdw_static_arrays():
     np.testing.assert_array_equal(spec.vdw.idx, [[0, 3], [0, 4], [1, 4]])
     np.testing.assert_allclose(spec.vdw.weight, 1 / 0.2**2)
     np.testing.assert_allclose(spec.vdw.r_min, [3.56, 3.88, 3.56])
-    assert int(spec.vdw.idx.max()) < spec.n_active  # valid local indices
+    assert int(spec.vdw.idx.max()) < spec.n_active
 
     # explicit mode=intermolecular keeps ONLY the dynamic/inter paths (no static intra);
     # a single ligand has no inter pairs, so spec.vdw stays None
@@ -202,7 +201,7 @@ def test_intramolecular_vdw_static_arrays():
 def test_vdw_both_modes_compose():
     """vdw mode='both' builds the static intramolecular spec.vdw AND the dynamic
     fixed-background vdw_config together (separate spec fields, scored independently)."""
-    m = Chem.MolFromSmiles("CCCCC")  # pentane: one retained pair (C1-C5)
+    m = Chem.MolFromSmiles("CCCCC")
     m = Chem.AddHs(m)
     AllChem.EmbedMolecule(m, randomSeed=1)
     m = Chem.RemoveHs(m)
@@ -223,10 +222,9 @@ def test_vdw_both_modes_compose():
         {"vdw": {"weight": 1.0, "mode": "both", "dmax": 10.0}},
         elements=elements,
     )
-    # BOTH flavours present and independent
     assert spec.vdw is not None  # static intramolecular (all backends)
     assert spec.vdw.idx.shape == (3, 2)  # two 1-4 pairs plus C1-C5
-    assert spec.vdw_config is not None  # dynamic fixed-background (torch)
+    assert spec.vdw_config is not None  # dynamic fixed-background pairs
     assert {int(x) for x in spec.vdw_config.background_global} == {n, n + 1}
 
 
@@ -277,15 +275,13 @@ def test_plane_perception():
     np.testing.assert_array_equal(spec.cistrans.period, [1, 2, 2, 2, 2])
     assert spec.plane.idx.shape == (2, 4)  # two 4-atom groups
     assert (spec.plane.grp_mask.sum(axis=1) == 4).all()  # no padding for 4-atom groups
-    assert int(spec.plane.idx.max()) < spec.n_active  # valid local indices
+    assert int(spec.plane.idx.max()) < spec.n_active
 
     # acetamide amide group (carbonyl C + methyl C + O + N = 4 coplanar atoms) -> plane=1
     assert nrow(build_spec([_lig_heavy("CC(=O)N")], [], cfg).plane) == 1
 
-    # aromatic ring: NOW restrained (the whole 6-membered ring is one plane group). This
-    # is the servalcat behaviour the old per-centre signed-volume term could not do (a
-    # ring CH has only 2 heavy neighbours). Detected via ring topology + reference
-    # coplanarity, NOT GetIsAromatic (benzene here even fails to kekulize, yet is caught).
+    # Aromatic rings are detected from topology and reference coplanarity,
+    # including when RDKit aromaticity perception fails.
     bz = build_spec([_lig_heavy("c1ccccc1")], [], cfg).plane
     assert nrow(bz) == 1 and int(bz.grp_mask.sum()) == 6  # one 6-atom ring group
 
@@ -303,8 +299,7 @@ def test_plane_perception():
     # coplanar (max out-of-plane deviation > _PLANE_TOL) and no plane fires.
     assert build_spec([_lig_heavy("C1CCCCC1")], [], cfg).plane is None
 
-    # OFF by default: no plane key -> no plane term even alongside other conformer terms
-    # (preserves every existing conformer run).
+    # Plane stays off when its weight is omitted.
     off = build_spec([_lig_heavy("CC(=O)N")], [], {"bond": {"weight": 0.05}})
     assert off.plane is None and off.bond is not None
 
@@ -339,7 +334,7 @@ def test_interligand_vdw_default_both():
     assert spec.vdw is not None
     assert spec.vdw_config is None  # no elements -> no protein background
     assert spec.vdw.idx.shape == (n * n, 2)  # inter cross product only
-    assert int(spec.vdw.idx.max()) < spec.n_active  # valid local indices
+    assert int(spec.vdw.idx.max()) < spec.n_active
     # every pair has one local index from each ligand's block (crosses molecules)
     g2l = {int(g): i for i, g in enumerate(spec.active_sites)}
     locA = {g2l[g] for g in range(n)}
@@ -394,8 +389,7 @@ def test_vdw_mode_intermolecular_excludes_intra():
 
 
 def test_vdw_mode_ligand_protein_removed():
-    """The old 'ligand_protein' mode value is removed -> raises a migration hint pointing
-    to 'intermolecular' (mirrors the rejected `backend:` key)."""
+    """Reject ligand_protein with a migration hint pointing to intermolecular."""
     lcA, _ = _lig_heavy_at("CC", base=0)
     with pytest.raises(ValueError, match="ligand_protein.*renamed to 'intermolecular'"):
         build_spec([lcA], [], {"vdw": {"weight": 1.0, "mode": "ligand_protein"}})
@@ -403,12 +397,10 @@ def test_vdw_mode_ligand_protein_removed():
 
 @pytest.mark.parametrize("term,default", [("bond", 0.0), ("chiral", 0.05)])
 def test_conf_slack_null_handling_uniform(term, default):
-    """slack: omitted/null -> per-term default; explicit 0 -> 0.0 (the truthiness trap).
+    """Omitted/null slack uses each term's default; an explicit zero stays zero.
 
-    Guards the consistency fix that routed all conformer terms through _conf_slack so the
-    null/zero handling can't drift (it previously diverged: only some terms had an `or 0.0`
-    guard, so `slack: null` crashed bond/angle and silently zeroed a non-zero default). The
-    chiral case (default 0.05) exercises the trap that a zero default cannot."""
+    The chiral default of 0.05 distinguishes correct parsing from truthiness coercion.
+    """
     from rgi_toolkit.featurizer import _conf_slack
 
     assert _conf_slack({}, term, default) == default  # key absent

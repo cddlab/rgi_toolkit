@@ -57,10 +57,7 @@ logger = logging.getLogger(__name__)
 # ``ref_geom_restr_data.is_ref_anchored`` so a reference group can sit in any slot.
 MAX_PLANE_GROUPS = 4
 
-# A best-fit plane needs at least 3 atoms to define a normal at all (3 are trivially
-# coplanar, so the restraint is a no-op then — but an explicit user selection of 3 is not
-# an error, unlike the conformer term's perceived groups, which require >= 4 because a
-# trivially-planar group exerts no force and would only pad the arrays).
+# Three-atom selections are valid but exert no planarity force.
 _MIN_PLANE_ATOMS = 3
 
 _KNOWN_PLANE_KEYS = {
@@ -154,7 +151,6 @@ class PlaneRestraintData:
         self.atom_selections = [
             config[f"atom_selection{i}"] for i in range(1, n_groups + 1)
         ]
-        # weight + the mutually-exclusive sigma/step gate windows (shared parse).
         apply_window_params(self, config, label)
         # move: default = every group free (a plane has no anchor group to pin, unlike
         # the angle vertex / dihedral axis).
