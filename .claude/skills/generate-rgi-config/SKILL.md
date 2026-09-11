@@ -4,7 +4,7 @@ description: >-
   Create and validate a ready-to-run restraints_config for Restraint-Guided
   Inference (RGI), placing it correctly for boltz, protenix, OpenDDE, chai-lab,
   alphafold3, openfold-3, or esmfold2. Use when a user wants to run RGI, write
-  a restraint file, constrain a distance, angle, dihedral, ligand conformer,
+  a restraint file, constrain a distance, angle, dihedral, chiral volume, ligand conformer,
   RMSD, or custom energy, or translate a plain-language structural goal into
   the selection DSL, target, and activation window. Use only for an
   already-integrated tool; use implement-rgi when adding RGI support to a new
@@ -22,7 +22,7 @@ before they spend a GPU run on it**. The engine (`rgi_toolkit`) does all the mat
 only write config.
 
 RGI nudges the atoms during diffusion sampling so the final structure satisfies the
-restraints. There are **seven direct built-in restraint types**, a base-pair macro, and a
+restraints. There are **eight direct built-in restraint types**, a base-pair macro, and a
 custom one:
 
 | the user wants to… | restraint type | block |
@@ -30,6 +30,7 @@ custom one:
 | keep two parts of the structure at a set distance | **distance** | `distance_restraints_config` |
 | set the angle / twist between three / four parts | **angle** / **dihedral** | `angle_` / `dihedral_restraints_config` |
 | restrain an improper angle between four groups | **improper** | `improper_restraints_config` |
+| set the signed volume or handedness of four atom groups | **chiral** | `chiral_restraints_config` |
 | keep a group flat, or two groups coplanar / stacked | **plane** | `plane_restraints_config` |
 | keep a ligand at a chemically sensible shape | **conformer** | `conformer_restraints_config` |
 | pull a region onto a reference structure (PDB/mmCIF) | **RMSD** | `rmsd_restraints_config` |
@@ -86,6 +87,9 @@ two decisions that recur:
   → flat-bottomed1.
 - **Angles are in degrees** in the config (not radians) — `target_angle: 90`,
   `target_dihedral: 180`.
+- **Chiral targets are Angstrom cubed** — `target_chiral`, with group 1 as the center
+  and no division by six. Four selections are required; each may select one atom or a
+  group. All groups move by default. Confirm the ordered selections and signed target.
 
 ### 3. Which atoms? → selection DSL
 
@@ -100,7 +104,7 @@ silent failures:
 
 ### 4. Targets, gating, weight
 
-- **Target**: the distance (Å), angle/dihedral (degrees), or `target_rmsd` (Å).
+- **Target**: the distance (Å), angle/dihedral (degrees), chiral volume (Å³), or `target_rmsd` (Å).
 - **Sigma window** (`start_sigma` / `stop_sigma`): omit for "active every step" (the usual
   case). There is **no top-level `start_sigma`** — it goes on each entry (and once for all
   conformer terms). Setting one at the top level is an error.
@@ -185,6 +189,7 @@ plainly what validation does **not** prove:
 - [ ] Tool identified; config placed correctly (nested vs chai sidecar vs esmfold2 dict).
 - [ ] Every protein selection is qualified with `chain ...`.
 - [ ] Angles/dihedrals in **degrees**; distances/RMSD in **Å**.
+- [ ] Chiral volume in **Å³**, centered on selection 1; custom `chiral(A,B,C,D)` uses the same units.
 - [ ] If a conformer block exists, the intended sequence entity has its opt-in flag.
 - [ ] `verbose: true` is set (so the user can confirm the spec counts at run time).
 - [ ] The validator passes.

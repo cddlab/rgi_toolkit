@@ -235,7 +235,7 @@ def _validate_one(location: str, cfg: dict, enclosing: dict, *, base_dir=None) -
     print(
         f"  ✓ schema ok — distance={len(rc.distance_data)} "
         f"angle={len(rc.angle_data)} dihedral={len(rc.dihedral_data)} "
-        f"improper={len(rc.improper_data)} "
+        f"improper={len(rc.improper_data)} chiral={len(rc.chiral_data)} "
         f"plane={len(rc.plane_data)} base_pair={len(rc.base_pair_data)} "
         f"rmsd={len(rc.rmsd_data)} custom={len(rc.custom_data)}"
     )

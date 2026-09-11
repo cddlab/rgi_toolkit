@@ -29,6 +29,10 @@ class _AxisOps:
     def const(self, value):
         return self._wrap(value)
 
+    def prepare_constant(self, value):
+        """Keep host precision until the query dtype is known."""
+        return value
+
     def const_like(self, value, like):
         return self.xp.asarray(value, dtype=like.dtype)
 
@@ -156,6 +160,10 @@ class _TorchOps:
 
     def const(self, value):
         return value
+
+    def prepare_constant(self, value):
+        """Convert host arrays before entering grad transforms or compilation."""
+        return self.t.as_tensor(value, device=self._device)
 
     def const_like(self, value, like):
         return self.t.as_tensor(value, dtype=like.dtype, device=like.device)

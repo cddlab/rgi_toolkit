@@ -37,7 +37,7 @@ per-tool prerequisites.
 > instead of hand-writing from this README when you're unsure. (For adding RGI support to a
 > *new* tool's code, use the separate `implement-rgi` skill.)
 
-Eight **built-in** restraint types, all minimized during the denoising loop to guide coordinate optimization:
+Nine **built-in** restraint types, all minimized during the denoising loop to guide coordinate optimization:
 
 - **conformer** — ligand and polymer-local bond / angle / chiral-volume / VdW;
   ligand E/Z, protein side-chain χ, peptide ω, acyclic sp2 torsions, and plane
@@ -56,6 +56,8 @@ Eight **built-in** restraint types, all minimized during the denoising loop to g
   the angular analogue of the distance restraint.
 - **dihedral** — the dihedral of four atom groups' centroids (axis = groups 2–3), in degrees.
 - **improper** — the signed out-of-plane angle of four atom groups' centroids, in degrees.
+- **chiral** — the signed volume of four atom groups' centroids, centered on group 1,
+  in Angstrom cubed; the selection-driven counterpart of conformer `chiral`.
 - **plane** — best-fit-plane flatness of any atom group you select (out-of-plane RMS, Angstrom):
   hold a nucleobase or aromatic side chain flat, make two groups share one plane, or pull a group
   onto a plane taken from a reference structure. The selection-driven form of the conformer `plane`
@@ -65,7 +67,7 @@ Eight **built-in** restraint types, all minimized during the denoising loop to g
 - **base-pair** — a named Watson–Crick nucleotide pair expanded into H-bond distance
   restraints and an optional base-coplanarity restraint.
 
-Beyond these eight built-ins you can define your **own** restraint — see
+Beyond these nine built-ins you can define your **own** restraint — see
 [Custom restraints](#custom-restraints) below.
 
 The default `method='CG'` solver (a nonlinear conjugate gradient with autodiff gradients)
@@ -159,6 +161,7 @@ restraints_config = {
     # "rmsd_restraints_config": [{"ref_pdb": "ref.pdb", "harmonic": {"target_rmsd": 0.0}}],
     # "dihedral_restraints_config": [...],   # group-centroid dihedral: 4 groups, axis = 2-3
     # "improper_restraints_config": [...],   # signed out-of-plane angle: 4 groups
+    # "chiral_restraints_config": [...],     # signed volume: 4 groups, center = 1
 }
 
 # ONE instance per structure (not a singleton). setup() takes the config dict.
@@ -241,6 +244,29 @@ but targets are in **degrees** (`target_angle` / `target_dihedral` / `target_imp
 the arms move, the anchor group is pinned). With ref groups, references stay fixed and
 `move` selects prediction-side group indices; omitted/`all`/`both` moves every prediction group.
 
+### Chiral restraints
+
+`chiral_restraints_config` restrains `(c2-c1) dot ((c3-c1) cross (c4-c1))`, where each
+`c` is a selected atom group's geometric centroid. This is the same signed volume as
+conformer `chiral`, in **Angstrom cubed without division by six**. Single-atom selections
+use the same convention. All four groups move by default; `move` can pin any subset.
+The four distance-style penalties use `target_chiral` / `target_chiral1` / `target_chiral2`.
+Each entry has its own weight and sigma/step window and supports reference groups.
+
+```yaml
+chiral_restraints_config:
+  - atom_selection1: "chain A and resid 10 and name CA"
+    atom_selection2: "chain A and resid 10 and name N"
+    atom_selection3: "chain A and resid 10 and name C"
+    atom_selection4: "chain A and resid 10 and name CB"
+    harmonic: {target_chiral: 2.0}
+```
+
+Choose the sign for the ordered selections; swapping two groups reverses it.
+Custom formulas provide `chiral(A,B,C,D)`, for example `harmonic(chiral(A,B,C,D), 2.0)`;
+Python callables provide `ctx.chiral("A", "B", "C", "D")`. See
+[`doc/config.md`](doc/config.md#chiral_restraints_config-list) for group and reference examples.
+
 ### Plane restraints
 
 `plane_restraints_config` restrains the **out-of-plane RMS deviation** of a group you select
@@ -322,7 +348,7 @@ restr.setup(adapter, config=restraints_config)   # add_custom BEFORE setup
 def energy(ctx): ...
 ```
 
-`ctx` / the formula expose one **vocabulary**: geometry (`distance` `angle` `dihedral` `improper` `centroid`
+`ctx` / the formula expose one **vocabulary**: geometry (`distance` `angle` `dihedral` `improper` `chiral` `centroid`
 `rg` `norm` `dot`), penalty (`harmonic` `flat_bottomed` `flat_bottomed1` `flat_bottomed2`), and math
 (`sqrt` `exp` `log` `abs` `sin` `cos` `clip` `minimum` `maximum` `where` `sum` + arithmetic). Branch with
 `where(cond, a, b)` or the conditional expression `a if cond else b` (the same thing — `if` is lowered to

@@ -25,7 +25,7 @@ check their spelling against this page. Source of truth:
 - [Atom-selection DSL](#atom-selection-dsl) and [penalty shapes](#penalty-shapes-shared)
 - [Distance](#distance_restraints_config-list), [group angle](#angle_restraints_config-list),
   [group dihedral](#dihedral_restraints_config-list), [improper](#improper_restraints_config-list),
-  and [plane](#plane_restraints_config-list)
+  [chiral](#chiral_restraints_config-list), and [plane](#plane_restraints_config-list)
 - [Base pairs](#base_pair_restraints_config-list)
 - [Conformer geometry and VdW](#conformer_restraints_config-single-dict)
 - [RMSD](#rmsd_restraints_config-list)
@@ -45,6 +45,7 @@ restraints_config:
   angle_restraints_config:    [ ... ]   # list  (group-centroid angle)
   dihedral_restraints_config: [ ... ]   # list  (group-centroid dihedral)
   improper_restraints_config: [ ... ]   # list  (out-of-plane angle)
+  chiral_restraints_config:   [ ... ]   # list  (signed group-centroid volume)
   plane_restraints_config:    [ ... ]   # list  (best-fit-plane flatness / coplanarity)
   base_pair_restraints_config: [ ... ]  # list  (nucleic-acid Watson-Crick base pairs)
   conformer_restraints_config: { ... }  # single dict (ligand/polymer local geometry)
@@ -55,13 +56,13 @@ restraints_config:
 A restraint type is active only if its block is present (and, for conformer terms, the term's
 `weight > 0`).
 
-Distance, angle, dihedral, improper, plane, conformer, RMSD, and base-pair are the eight built-in restraint
+Distance, angle, dihedral, improper, chiral, plane, conformer, RMSD, and base-pair are the nine built-in restraint
 types (base-pair expands into distance and plane restraints under the hood).
 `custom_restraints_config` defines an original restraint as a math formula or Python callable.
 
 ## External configuration files
 
-Use the same `config_path` key at the whole-config level or at any of the nine
+Use the same `config_path` key at the whole-config level or at any of the ten
 `*_restraints_config` sections. A referenced JSON/YAML file contains the replacement
 value itself: a dictionary for the whole config or conformer, a list for other sections.
 
@@ -156,6 +157,7 @@ themselves are shared across the batch.
 | `angle_restraints_config` | `R` entries, padded group width `G` | `O(RG)` | `O(RG)` | Three group centroids plus one constant-size angle. |
 | `dihedral_restraints_config` | `R` entries, padded group width `G` | `O(RG)` | `O(RG)` | Four group centroids plus one constant-size torsion. |
 | `improper_restraints_config` | `R` entries, padded group width `G` | `O(RG)` | `O(RG)` | Same four-group kernel shape as group dihedral. |
+| `chiral_restraints_config` | `R` entries, padded group width `G` | `O(RG)` | `O(RG)` | Four geometric centroids and one scalar triple product. |
 | `plane_restraints_config` | `R` entries, maximum pooled atoms per entry `G` | `O(RG)` | `O(RG)` | One 3 x 3 covariance eigendecomposition per entry is `O(R)` in addition to the linear atom work. |
 | `base_pair_restraints_config` | `H` generated H-bond distances, `P` generated coplanarity planes of padded width `G` | `O(H + PG)` | `O(H + PG)` | A config-time macro only: it expands to ordinary one-atom distance and pooled-plane rows. |
 | conformer `bond` | `B` bond tuples | `O(B)` | `O(B)` | Each tuple gathers two atoms. |
@@ -501,6 +503,105 @@ improper_restraints_config:
     move: [1, 4]
     harmonic: {target_improper: 0.0}
 ```
+
+## `chiral_restraints_config` (list)
+
+Restrains the **signed scalar triple product of four group centroids**, with group 1
+as the center. It uses the same measured quantity as conformer `chiral`, with atom
+selections and an independent entry window. Each selection may contain one atom or
+several atoms; the latter use their geometric (unweighted) centroid:
+
+```math
+V = (c_2-c_1)\cdot\big((c_3-c_1)\times(c_4-c_1)\big)
+```
+
+The unit is **Angstrom cubed**, and there is **no division by six**. Swapping any two
+groups reverses the sign. The sign follows the ordered selections; it does not directly
+encode an R/S label. All four centroids coincident or collinear give zero volume and
+zero gradient; no artificial displacement is added to escape that stationary geometry.
+
+| key | type | default | meaning |
+|---|---|---|---|
+| `atom_selection1..4` | str | required | four groups; group 1 is the center |
+| `weight` | float | `1.0` | least-squares energy scale |
+| `move` | `"all"` / int / list / `"2,3,4"` | `"all"` | movable groups; remaining groups contribute geometry but no gradient for this term |
+| `start_sigma` / `stop_sigma` | float | `+inf` / `-1` | inclusive sigma window |
+| `start_step` / `stop_step` | int | `-inf` / `+inf` | inclusive step window, mutually exclusive with a sigma window |
+| one restraint-type block | dict | required | signed target or bounds in Angstrom cubed; there is no `unit` key |
+
+| block | params |
+|---|---|
+| `harmonic` | `target_chiral` |
+| `flat-bottomed` | `target_chiral1`, `target_chiral2`, with lower < upper |
+| `flat-bottomed1` | `target_chiral1` (lower bound) |
+| `flat-bottomed2` | `target_chiral2` (upper bound) |
+
+Positive, negative and zero targets are accepted. Energy is `weight * delta(V)**2`
+with the shared penalty shapes. A conformer target `vol0` with slack `s > 0` is equivalent
+to `flat-bottomed` bounds `[vol0-s, vol0+s]`; zero slack is `harmonic`. This standalone
+block activates without a conformer block or entity opt-in.
+
+```yaml
+chiral_restraints_config:
+  # Four atoms, centered on CA. Choose the signed target for this atom order.
+  - atom_selection1: "chain A and resid 10 and name CA"
+    atom_selection2: "chain A and resid 10 and name N"
+    atom_selection3: "chain A and resid 10 and name C"
+    atom_selection4: "chain A and resid 10 and name CB"
+    harmonic: {target_chiral: 2.0}
+  # Four whole groups; each group contributes its geometric centroid.
+  - atom_selection1: "chain A and resid 1 to 10"
+    atom_selection2: "chain A and resid 20 to 30"
+    atom_selection3: "chain A and resid 40 to 50"
+    atom_selection4: "chain A and resid 60 to 70"
+    flat-bottomed1: {target_chiral1: 10.0}
+```
+
+The array term and diagnostic name are `group_chiral`. As with group angles, the
+built-in centroid gradient is multiplied by each group's atom count `N`; an isolated
+entry translates each free group uniformly. Other restraints sharing those atoms
+can also move or deform them. Targets and bounds are specified explicitly.
+
+### Reference groups
+
+Up to three distinct references can supply groups. At least one group must select
+prediction atoms. Omitted/`all`/`both` moves every prediction group; an explicit `move`
+must select only prediction-side group indices. Each reference supports its usual
+independent fit and file-relative `config_path` resource resolution.
+
+```yaml
+chiral_restraints_config:
+  - atom_selection1: "ref1 and chain A"
+    atom_selection2: "chain B"
+    atom_selection3: "chain C"
+    atom_selection4: "chain D"
+    refs:
+      ref1: {ref_cif: reference.cif}
+    harmonic: {target_chiral: 2.0}
+```
+
+### Custom form
+
+`chiral(A,B,C,D)` returns the same signed volume, centered on `A`, in Angstrom cubed.
+It supports prediction/reference selections and custom `move` by selection name.
+Like other custom centroid functions, its gradient is the ordinary mean derivative,
+without the built-in `N` rescaling; the reported energy agrees between the two forms.
+
+```yaml
+custom_restraints_config:
+  - selections: {A: "chain A", B: "chain B", C: "chain C", D: "chain D"}
+    energy: "harmonic(chiral(A,B,C,D), 2.0)"
+```
+
+The Python callable API uses the same function:
+
+```python
+def energy(ctx):
+    return ctx.harmonic(ctx.chiral("A", "B", "C", "D"), 2.0)
+```
+
+`harmonic(abs(chiral(A,B,C,D)), 2.0)` accepts either sign with target magnitude 2.
+All four penalty functions compose with `chiral`; no angular wrapping is needed.
 
 ## `plane_restraints_config` (list)
 
@@ -1226,6 +1327,7 @@ $\lVert\cdot\rVert$ is the Euclidean norm:
 | `angle(A,B,C)` | scalar (rad) | $\arccos\big( (c_A - c_B)\cdot(c_C - c_B) / (\lVert c_A - c_B \rVert\,\lVert c_C - c_B \rVert) \big)$, vertex $B$ | the bend of three groups about the vertex $B$ |
 | `dihedral(A,B,C,D)` | scalar (rad) | torsion about the B–C centroid axis, range $\pm\pi$ | the twist / handedness across four groups — a **periodic** quantity: wrap its deviation, see below |
 | `improper(A,B,C,D)` | scalar (rad) | signed out-of-plane angle about the B–C centroid axis, range $\pm\pi$ | the custom-form counterpart of `improper_restraints_config`; wrap its deviation |
+| `chiral(A,B,C,D)` | scalar (Angstrom cubed) | $(c_B-c_A)\cdot((c_C-c_A)\times(c_D-c_A))$ | signed volume about A, identical to conformer chiral for single atoms; no division by six |
 | `rg(A)` | scalar | $\sqrt{\frac{1}{\lvert A\rvert}\sum_i \lVert x_i - c_A \rVert^2}$ — radius of gyration | the compactness of one group (collapse vs extension) |
 | `norm(v)` | scalar | $\lVert v \rVert$ | the length of a vector you built, e.g. `centroid(A) - centroid(B)` |
 | `dot(u,v)` | scalar | $u \cdot v$ | projections and cosine-like terms |

@@ -26,6 +26,8 @@ def _geom_value(ops, geom, blocks):
         return V.dihedral(ops, blocks[0], blocks[1], blocks[2], blocks[3])
     if geom == "improper":
         return V.improper(ops, blocks[0], blocks[1], blocks[2], blocks[3])
+    if geom == "chiral":
+        return V.chiral(ops, blocks[0], blocks[1], blocks[2], blocks[3])
     raise ValueError(f"ref_geom: unknown geom {geom!r}")
 
 
@@ -67,15 +69,17 @@ def build_closure(spec, ops):
         return lambda coords: ops.scalar_like(0.0, coords)
     selections = {key: ops.asint(value) for key, value in spec.selections.items()}
     refs = {
-        key: (ops.asint(indices), ref_coords)
+        key: (ops.asint(indices), ops.prepare_constant(ref_coords))
         for key, (indices, ref_coords) in spec.refs.items()
     }
     selection_refs = dict(spec.selection_refs)
     ref_fits = {
-        ref_name: (ops.asint(indices), fit_ref)
+        ref_name: (ops.asint(indices), ops.prepare_constant(fit_ref))
         for ref_name, (indices, fit_ref) in spec.ref_fits.items()
     }
-    ref_blocks = dict(spec.ref_blocks)
+    ref_blocks = {
+        key: ops.prepare_constant(block) for key, block in spec.ref_blocks.items()
+    }
     move_free = dict(spec.move_free)
     weight = spec.weight
 

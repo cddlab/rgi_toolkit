@@ -24,6 +24,7 @@ from rgi_toolkit.custom.data import CustomData
 from rgi_toolkit.distance_restr_data import DistanceData
 from rgi_toolkit.group_geom_restr_data import (
     AngleRestraintData,
+    ChiralRestraintData,
     DihedralRestraintData,
     ImproperRestraintData,
 )
@@ -58,6 +59,12 @@ _ENTRY_ROUTES = (
         "improper_data",
         ImproperRestraintData,
         "improper",
+    ),
+    _EntryRoute(
+        "chiral_restraints_config",
+        "chiral_data",
+        ChiralRestraintData,
+        "chiral",
     ),
     _EntryRoute(
         "plane_restraints_config",
@@ -118,6 +125,7 @@ class RestraintsConfig:
     base_pair_data: list = field(
         default_factory=list
     )  # nucleic-acid base-pair restraints (expand to distance + plane)
+    chiral_data: list = field(default_factory=list)
 
     def iter_resolvable_data(self):
         """Yield every ordinary built-in entry that resolves against an adapter."""

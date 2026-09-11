@@ -44,6 +44,7 @@ from rgi_toolkit.spec import (
     CisTransArrays,
     DistanceArrays,
     GroupAngleArrays,
+    GroupChiralArrays,
     GroupDihedralArrays,
     GroupImproperArrays,
     GroupPlaneArrays,
@@ -789,14 +790,15 @@ def build_spec(
     improper_restraints: list | None = None,
     atom_records=(),
     reference_uids=None,
+    chiral_restraints: list | None = None,
 ) -> RestraintSpec:
     """Build a RestraintSpec. ``distance_restraints`` are DistanceData with
     ``target_sites1``/``target_sites2`` already resolved to global indices;
     ``rmsd_restraints`` are RmsdData with fit/calc target sites and paired reference
     coordinates resolved;
-    ``angle_restraints``/``dihedral_restraints``/``improper_restraints`` carry
+    ``angle_restraints``/``dihedral_restraints``/``improper_restraints``/``chiral_restraints`` carry
     resolved per-group global indices (N=3 for angle, N=4 for
-    dihedral/improper). ``plane_restraints`` are
+    dihedral/improper/chiral). ``plane_restraints`` are
     PlaneRestraintData with ``target_sites`` (a LIST of per-group global-index lists)
     resolved — the standalone ``plane_restraints_config`` term, which is independent of
     the conformer ``plane`` sub-block (its own weight/type/gate per entry). The base-pair
@@ -837,6 +839,9 @@ def build_spec(
     ]
     improper_restraints = [
         ir for ir in (improper_restraints or []) if getattr(ir, "run_restr", False)
+    ]
+    chiral_restraints = [
+        cr for cr in (chiral_restraints or []) if getattr(cr, "run_restr", False)
     ]
     plane_restraints = [
         pr for pr in (plane_restraints or []) if getattr(pr, "run_restr", False)
@@ -957,6 +962,7 @@ def build_spec(
         angle_restraints,
         dihedral_restraints,
         improper_restraints,
+        chiral_restraints,
         plane_restraints,
         custom_restraints,
     )
@@ -1195,6 +1201,14 @@ def build_spec(
         else None
     )
 
+    group_chiral = (
+        _build_group_geom_arrays(
+            chiral_restraints, 4, GroupChiralArrays, g2l, conf_start_sigma
+        )
+        if chiral_restraints
+        else None
+    )
+
     group_plane = None
     if plane_restraints:
         n = len(plane_restraints)
@@ -1257,6 +1271,7 @@ def build_spec(
         vdw=vdw_arrays,
         vdw_config=vdw_config,
         group_improper=group_improper,
+        group_chiral=group_chiral,
         active_vdw_config=active_vdw_config,
         vdw_max_atom_step=float(
             (cfg.get("vdw", {}) or {}).get("max_atom_step", VDW_MAX_ATOM_STEP_DEFAULT)
@@ -1301,7 +1316,7 @@ def build_spec(
     logger.info(
         "built spec: n_active=%d bonds=%d angles=%d chirals=%d plane=%d cistrans=%d "
         "distances=%d rmsd=%d group_angle=%d group_dihedral=%d "
-        "group_improper=%d group_plane=%d "
+        "group_improper=%d group_plane=%d group_chiral=%d "
         "vdw=%s custom=%d relax_ff=%s",
         spec.n_active,
         len(spec.bond.idx) if spec.bond is not None else 0,
@@ -1315,6 +1330,7 @@ def build_spec(
         len(dihedral_restraints),
         len(improper_restraints),
         len(plane_restraints),
+        len(chiral_restraints),
         vdw_desc,
         len(custom_specs),
         relax_ff,

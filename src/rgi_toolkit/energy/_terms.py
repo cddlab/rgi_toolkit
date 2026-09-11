@@ -32,7 +32,7 @@ _GROUP_TARGET_FIELDS = (
     ("weight", "f"),
     ("mask", "f"),
 ) + _WINDOW_FIELDS
-_TORSION_GROUP_FIELDS = (
+_FOUR_GROUP_FIELDS = (
     ("grp1_idx", "i"),
     ("grp2_idx", "i"),
     ("grp3_idx", "i"),
@@ -42,7 +42,7 @@ _TORSION_GROUP_FIELDS = (
     ("grp3_mask", "f"),
     ("grp4_mask", "f"),
 ) + _GROUP_TARGET_FIELDS
-_TORSION_ARGS = (
+_FOUR_GROUP_ARGS = (
     "grp1_idx",
     "grp2_idx",
     "grp3_idx",
@@ -235,17 +235,25 @@ TERM_DEFS = (
     TermDef(
         "group_dihedral",
         "group_dihedral",
-        _TORSION_GROUP_FIELDS,
+        _FOUR_GROUP_FIELDS,
         "group_dihedral_energy",
-        _TORSION_ARGS,
+        _FOUR_GROUP_ARGS,
         "entry",
     ),
     TermDef(
         "group_improper",
         "group_improper",
-        _TORSION_GROUP_FIELDS,
+        _FOUR_GROUP_FIELDS,
         "group_improper_energy",
-        _TORSION_ARGS,
+        _FOUR_GROUP_ARGS,
+        "entry",
+    ),
+    TermDef(
+        "group_chiral",
+        "group_chiral",
+        _FOUR_GROUP_FIELDS,
+        "group_chiral_energy",
+        _FOUR_GROUP_ARGS,
         "entry",
     ),
     TermDef(
@@ -363,6 +371,7 @@ BREAKDOWN_KEYS = (
     "group_dihedral",
     "group_plane",
     "group_improper",
+    "group_chiral",
 )
 CONF_KEYS = frozenset(term.key for term in TERM_DEFS if term.gate == "conf")
 PER_ENTRY_KEYS = frozenset(term.key for term in TERM_DEFS if term.gate != "conf")

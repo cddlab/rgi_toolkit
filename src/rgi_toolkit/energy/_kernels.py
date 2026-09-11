@@ -45,11 +45,13 @@ def angle_energy(ops, positions, idx, th0, slack, weight, mask):
 
 
 def chiral_energy(ops, positions, idx, vol0, slack, weight, mask, both=None):
-    center = positions[..., idx[:, 0], :]
-    first = positions[..., idx[:, 1], :] - center
-    second = positions[..., idx[:, 2], :] - center
-    third = positions[..., idx[:, 3], :] - center
-    volume = ops.vdot(first, ops.cross(second, third))
+    volume = G.chiral_points(
+        ops,
+        positions[..., idx[:, 0], :],
+        positions[..., idx[:, 1], :],
+        positions[..., idx[:, 2], :],
+        positions[..., idx[:, 3], :],
+    )
     if both is not None:
         volume = ops.where(both > 0.5, ops.abs(volume), volume)
     delta = G.symmetric_flat_bottom_delta(ops, volume - vol0, slack)
@@ -204,6 +206,39 @@ def group_dihedral_energy(
 
 
 group_improper_energy = group_dihedral_energy
+
+
+def group_chiral_energy(
+    ops,
+    positions,
+    grp1_idx,
+    grp2_idx,
+    grp3_idx,
+    grp4_idx,
+    grp1_mask,
+    grp2_mask,
+    grp3_mask,
+    grp4_mask,
+    target1,
+    target2,
+    geom_type,
+    move_free,
+    weight,
+    mask,
+):
+    groups = (
+        (grp1_idx, grp1_mask),
+        (grp2_idx, grp2_mask),
+        (grp3_idx, grp3_mask),
+        (grp4_idx, grp4_mask),
+    )
+    points = [
+        _move_centroid(ops, positions, idx, group_mask, move_free[..., index])
+        for index, (idx, group_mask) in enumerate(groups)
+    ]
+    volume = G.chiral_points(ops, *points)
+    delta = G.restraint_delta(ops, volume, target1, target2, geom_type)
+    return ops.sum(weight * delta * delta * mask)
 
 
 def rmsd_energy(

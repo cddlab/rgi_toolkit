@@ -150,15 +150,18 @@ def test_nonfinite_base_pair_values_fail_at_parse(field):
 
 
 @pytest.mark.parametrize("selection,expected", [("index 3", 0), ("index", 1)])
-def test_validator_discovers_and_checks_improper(validator, selection, expected):
+@pytest.mark.parametrize("kind", ["improper", "chiral"])
+def test_validator_discovers_and_checks_four_group_geometry(
+    validator, selection, expected, kind
+):
     cfg = {
-        "improper_restraints_config": [
+        f"{kind}_restraints_config": [
             {
                 "atom_selection1": "index 0",
                 "atom_selection2": "index 1",
                 "atom_selection3": "index 2",
                 "atom_selection4": selection,
-                "harmonic": {"target_improper": 0},
+                "harmonic": {f"target_{kind}": 0},
             }
         ]
     }

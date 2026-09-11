@@ -218,6 +218,7 @@ class CombinedRestraints:
             angle_restraints=cfg.angle_data,
             dihedral_restraints=cfg.dihedral_data,
             improper_restraints=cfg.improper_data,
+            chiral_restraints=cfg.chiral_data,
             custom_restraints=custom_data,
             polymer_geometry=polymer_geometry,
             plane_restraints=plane_data,
@@ -248,6 +249,7 @@ class CombinedRestraints:
             n_grp_dihedral = term_counts.get("group_dihedral", 0)
             n_grp_improper = term_counts.get("group_improper", 0)
             n_grp_plane = term_counts.get("group_plane", 0)
+            n_grp_chiral = term_counts.get("group_chiral", 0)
             vc = self.spec.vdw_config
             avc = self.spec.active_vdw_config
             sv = self.spec.vdw  # static intra + inter-ligand pairs (energy layer)
@@ -286,6 +288,7 @@ class CombinedRestraints:
                 f" ref_improper={sum(c.geom == 'improper' for c in _rg)}"
                 f" ref_dihedral={sum(c.geom == 'dihedral' for c in _rg)}"
                 f" ref_plane={sum(c.geom == 'plane' for c in _rg)}"
+                f" ref_chiral={sum(c.geom == 'chiral' for c in _rg)}"
                 if _rg
                 else ""
             )
@@ -296,6 +299,7 @@ class CombinedRestraints:
                 f"n_rmsd={n_rmsd} n_group_angle={n_grp_angle} "
                 f"n_group_dihedral={n_grp_dihedral} "
                 f"n_group_improper={n_grp_improper} n_group_plane={n_grp_plane} "
+                f"n_group_chiral={n_grp_chiral} "
                 f"n_custom={len(self.spec.custom)}"
                 f"{ref_geom_s} "
                 f"vdw={vdw_s} conf_start_sigma={self.spec.conf_start_sigma:g} "
@@ -355,6 +359,7 @@ class CombinedRestraints:
             "group_dihedral": "group dihedral",
             "group_improper": "group improper",
             "group_plane": "group plane",
+            "group_chiral": "group chiral",
         }
         for term, array in iter_spec_terms(spec, PER_ENTRY_KEYS):
             label = labels[term.key]
@@ -608,6 +613,7 @@ class CombinedRestraints:
                 f"group_dihedral={bd.get('group_dihedral', 0.0):.5f} "
                 f"group_improper={bd.get('group_improper', 0.0):.5f} "
                 f"group_plane={bd.get('group_plane', 0.0):.5f} "
+                f"group_chiral={bd.get('group_chiral', 0.0):.5f} "
                 + "".join(f"{n}={v:.5f} " for n, v in custom_bd.items())
                 + f"total={total:.5f}"
             )

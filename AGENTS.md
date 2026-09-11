@@ -48,7 +48,7 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
    ops facade; `energy/{numpy,torch,jax}_energy.py` are thin public API adapters. The
    single `energy/_terms.py` `TermDef` registry drives spec packing, dispatch, gating,
    and breakdown for
-   `bond/angle/chiral/plane/cistrans/vdw/distance/rmsd/group_angle/group_dihedral/group_improper/group_plane`
+   `bond/angle/chiral/plane/cistrans/vdw/distance/rmsd/group_angle/group_dihedral/group_improper/group_chiral/group_plane`
    (cistrans = periodic torsions for E/Z, protein chi, peptide omega and acyclic sp2 axes; plane = [servalcat](https://github.com/keitaroyam/servalcat)-style best-fit
    plane over whole planar atom GROUPS (aromatic/conjugated rings + non-ring sp2 groups),
    penalising each group's out-of-plane RMS deviation via the smallest-eigenvalue plane
@@ -335,6 +335,30 @@ under *References*) — but the four distance-style types
   the reference's plane. `config.py` counts the entry's groups (`count_plane_groups`) before
   constructing `RefGeomData` so `n_groups` stays a plain int in all five places it is read.
 
+#### Standalone chiral restraints
+
+`chiral_restraints_config` measures `(c2-c1) dot ((c3-c1) cross (c4-c1))` for four
+selection-resolved geometric centroids. Group 1 is the center; targets are Angstrom
+cubed without division by six. The four shared penalty shapes use `target_chiral` /
+`target_chiral1` / `target_chiral2`; `unit` is rejected. All four groups move by default.
+`ChiralRestraintData` uses the shared group parser without angular conversion,
+`build_spec(chiral_restraints=...)` packs `GroupChiralArrays`, and `group_chiral` is a
+per-entry registered term, independent of conformer opt-in or gating.
+
+`_geometry.chiral_points` supplies the same scalar triple product to conformer chiral,
+the standalone kernel, reference closures and custom `chiral(A,B,C,D)` / `ctx.chiral`.
+Keep conformer slack and dictionary `both` semantics unchanged. Built-in groups use
+the existing `N` centroid-gradient rescale; custom groups use ordinary mean derivatives.
+References use the usual four-group `RefGeomData` route (up to three references,
+at least one prediction group). `tests/test_chiral.py` checks independent determinants,
+single-atom conformer equality, custom finite differences and CPU/GPU optimization.
+
+Custom reference arrays are converted to Torch tensors when the closure is built,
+before `torch.func.grad_and_value` and compilation. Converting captured NumPy arrays
+inside that transform can fail Dynamo dispatch-key guards. `const_like` still casts
+these prepared constants to the query dtype; optimizer device/dtype changes rebuild
+the closures as usual. NumPy/JAX retain host constants until query-time conversion.
+
 #### Atom selection DSL
 
 (`selection.py`): `AtomSelector` parses
@@ -488,7 +512,7 @@ energy `energy(ctx) -> scalar`. Two authoring paths, ONE mechanism:
 - **config (expression DSL)**: a `custom_restraints_config` entry with an `energy` formula string
   over a shared vocabulary + named `selections` (e.g. `"(distance(A,B) - distance(C,D))**2"`).
   A selection value may be reference-backed as `refN and <selection>` with an entry-local
-  `refs.refN` definition; the same geometry vocabulary consumes it (`distance`/`angle`/`dihedral`/`improper`/
+  `refs.refN` definition; the same geometry vocabulary consumes it (`distance`/`angle`/`dihedral`/`improper`/`chiral`/
   `centroid`/`rg`/`norm`/`dot`/`coords`/`kabsch`/`rmsd`/`plane` + penalties + math incl.
   periodicity-safe `wrap`; full table in `doc/config.md`). External-reference RMSD is `rmsd(A,B)`
   (prediction A, reference-backed B); rigid superposition is `kabsch(A,B)`; best-fit-plane flatness is

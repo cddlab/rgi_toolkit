@@ -16,6 +16,8 @@ Recurring decisions, in plain terms:
   applied late, once the pocket exists).
 - **Degrees, not radians.** `angle` / `dihedral` targets are in degrees in the config
   (`distance` / `plane` / `rmsd` are in Angstrom).
+- **Signed volume.** `chiral` targets are Angstrom cubed, centered on group 1, with
+  no division by six; switching two groups reverses the sign.
 
 ---
 
@@ -250,7 +252,7 @@ custom_restraints_config:
 ```
 
 Vocabulary (geometry on centroids; **angles here are in radians**, unlike the built-in
-configs): `centroid` `distance` `angle` `dihedral` `rg` `norm` `dot` `coords` `kabsch` `rmsd`;
+configs): `centroid` `distance` `angle` `dihedral` `chiral` `rg` `norm` `dot` `coords` `kabsch` `rmsd`;
 penalties `harmonic` `flat_bottomed{,1,2}`; math `sqrt exp log abs sin cos wrap clip sum minimum
 maximum where` (`wrap(x)` = `atan2(sin x, cos x)` folds a dihedral deviation into ±π). Branch with
 `where(cond, a, b)` or the conditional expression `a if cond else b` (identical — `if` lowers to
@@ -263,6 +265,33 @@ omitted/`all`/`both` moves all prediction selections. A reference-backed selecti
 `refN and <selection>` and works with every geometry primitive; external-reference RMSD is
 `rmsd(A,B)` with prediction A and reference-backed B. Full list +
 semantics: config.md "custom_restraints_config".
+
+## Chiral volume — ordered atoms or group centroids
+
+Use `chiral_restraints_config` for the scalar triple product of four selections,
+centered on selection 1. This is the same signed volume as conformer chiral; every
+selection may contain one atom or a group. Confirm the intended atom order and signed
+target in Angstrom cubed. An R/S label alone does not specify this ordered volume.
+
+```yaml
+chiral_restraints_config:
+  - atom_selection1: "chain A and resid 10 and name CA"
+    atom_selection2: "chain A and resid 10 and name N"
+    atom_selection3: "chain A and resid 10 and name C"
+    atom_selection4: "chain A and resid 10 and name CB"
+    harmonic: {target_chiral: 2.0}
+```
+
+The four penalty shapes use `target_chiral` / `target_chiral1` / `target_chiral2`.
+All groups move by default; `move: [2,3,4]` pins the center. Group selections, entry
+windows, external `config_path` files and `refN and ...` reference groups work as for
+other built-in geometry. No conformer entity opt-in is needed.
+
+Custom formulas use `harmonic(chiral(A,B,C,D), 2.0)`; Python functions use
+`ctx.harmonic(ctx.chiral("A", "B", "C", "D"), 2.0)`. Both accept references and custom
+`move` by selection name. Custom centroid gradients are ordinary mean derivatives;
+built-in group gradients include the group-size rescaling. See `doc/config.md` for
+complete group/reference examples and sign conventions.
 
 ---
 

@@ -10,6 +10,7 @@ GEOMETRY = (
     "angle",
     "dihedral",
     "improper",
+    "chiral",
     "centroid",
     "rg",
     "norm",
@@ -55,6 +56,17 @@ def dihedral(ops, block_a, block_b, block_c, block_d):
 def improper(ops, block_a, block_b, block_c, block_d):
     """Signed improper angle using the ordered dihedral convention."""
     return dihedral(ops, block_a, block_b, block_c, block_d)
+
+
+def chiral(ops, block_a, block_b, block_c, block_d):
+    """Signed scalar triple product about A's centroid, in Angstrom cubed."""
+    return G.chiral_points(
+        ops,
+        centroid(ops, block_a),
+        centroid(ops, block_b),
+        centroid(ops, block_c),
+        centroid(ops, block_d),
+    )
 
 
 def _kabsch_R(ops, moving_centered, target_centered):

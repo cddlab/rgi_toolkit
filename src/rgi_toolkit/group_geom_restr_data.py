@@ -1,4 +1,4 @@
-"""Parse + resolve group-centroid angle / dihedral / improper restraints.
+"""Parse + resolve group-centroid angle / dihedral / improper / chiral restraints.
 
 These restrain the angle (3 groups) / dihedral or improper (4 groups) formed by centroids
 of atom groups — the angular analogue of the centroid-distance restraint in
@@ -8,6 +8,9 @@ types ``harmonic`` / ``flat-bottomed`` / ``flat-bottomed1`` / ``flat-bottomed2``
 ``unit: radians`` on the entry to give them in radians) and stored in RADIANS here
 (matching the energy layer, and symmetric with the distance restraint storing
 Angstroms).
+
+Chiral restraints measure the scalar triple product about group 1 in Angstrom cubed,
+without division by six. All four groups move by default; targets use native units.
 
 Each entry is gated on EITHER a sigma window (``start_sigma`` / ``stop_sigma``, noise
 level) OR a step window (``start_step`` / ``stop_step``, diffusion step index) — the two
@@ -67,6 +70,7 @@ _KNOWN_ANGLE_KEYS = {
 }
 _KNOWN_DIHEDRAL_KEYS = _KNOWN_ANGLE_KEYS | {"atom_selection4"}
 _KNOWN_IMPROPER_KEYS = _KNOWN_DIHEDRAL_KEYS
+_KNOWN_CHIRAL_KEYS = _KNOWN_DIHEDRAL_KEYS - {"unit"}
 
 
 def resolve_group_sites(
@@ -125,31 +129,33 @@ def _parse_common(
     base: str,
     default_free: tuple,
     label: str,
+    angular: bool = True,
 ) -> None:
-    """Shared parse of weight / start_sigma / stop_sigma / move / type for both classes
-    (``self`` is the angle, dihedral, or improper data object being filled).
-    ``default_free`` is the per-group free mask used when ``move`` is omitted."""
+    """Parse shared windows, movement and targets for group geometry restraints."""
     apply_window_params(self, config, f"{label}_restraints_config entry")
     self.move_free = _parse_move(config, n_groups, default_free)
-    # Validate bounds before conversion; targets default to degrees.
-    unit = str(config.get("unit", "degrees")).strip().lower()
-    if unit not in ("degrees", "radians"):
-        raise ValueError(
-            f"{label} 'unit' must be 'degrees' or 'radians' "
-            f"(got {config.get('unit')!r})"
-        )
-    conv = float if unit == "radians" else (lambda x: math.radians(float(x)))
+    conv = float
+    if angular:
+        unit = str(config.get("unit", "degrees")).strip().lower()
+        if unit not in ("degrees", "radians"):
+            raise ValueError(
+                f"{label} 'unit' must be 'degrees' or 'radians' "
+                f"(got {config.get('unit')!r})"
+            )
+        if unit == "degrees":
+            conv = math.radians
     self.geom_type, self.target1, self.target2 = parse_geom_type(config, base, conv)
 
 
 class _GroupGeomRestraintData:
-    """Shared parser and resolver for centroid-based angular restraints."""
+    """Shared parser and resolver for centroid-based geometry restraints."""
 
     _n_groups: int
     _geom_name: str
     _target_base: str
     _known_keys: set
     _default_free: tuple
+    _angular = True
 
     def __init__(self):
         for group in range(1, self._n_groups + 1):
@@ -168,6 +174,8 @@ class _GroupGeomRestraintData:
 
     def set_config(self, config: dict):
         label = f"{self._geom_name}_restraints_config entry"
+        if not self._angular and "unit" in config:
+            raise ValueError(f"{label}: targets are in Angstrom cubed; omit 'unit'")
         warn_unknown_keys(config, self._known_keys, label, logger)
         for group in range(1, self._n_groups + 1):
             setattr(
@@ -182,6 +190,7 @@ class _GroupGeomRestraintData:
             base=self._target_base,
             default_free=self._default_free,
             label=self._geom_name,
+            angular=self._angular,
         )
         self.run_restr = self.geom_type is not None and all(
             getattr(self, f"atom_selection{group}") is not None
@@ -247,3 +256,14 @@ class ImproperRestraintData(DihedralRestraintData):
     _geom_name = "improper"
     _target_base = "target_improper"
     _known_keys = _KNOWN_IMPROPER_KEYS
+
+
+class ChiralRestraintData(_GroupGeomRestraintData):
+    """Signed chiral volume of four group centroids, centered on group 1."""
+
+    _n_groups = 4
+    _geom_name = "chiral"
+    _target_base = "target_chiral"
+    _known_keys = _KNOWN_CHIRAL_KEYS
+    _default_free = (True, True, True, True)
+    _angular = False

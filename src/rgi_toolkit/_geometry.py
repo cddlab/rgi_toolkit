@@ -30,6 +30,11 @@ def angle_points(ops, first, vertex, third):
     return ops.arccos(cosine)
 
 
+def chiral_points(ops, center, first, second, third):
+    """Signed scalar triple product about ``center``, without division by six."""
+    return ops.vdot(first - center, ops.cross(second - center, third - center))
+
+
 def dihedral_points(ops, p0, p1, p2, p3):
     """Signed ordered torsion in radians about the p1-p2 axis."""
     b1, b2, b3 = p1 - p0, p2 - p1, p3 - p2

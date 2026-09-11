@@ -42,7 +42,7 @@ def test_every_section_and_nested_paths(tmp_path, monkeypatch, extension):
             }
         ],
     }
-    for kind in ("dihedral", "improper"):
+    for kind in ("dihedral", "improper", "chiral"):
         entries[kind] = [
             {
                 **{f"atom_selection{i + 1}": f"index {i}" for i in range(4)},
@@ -67,7 +67,7 @@ def test_every_section_and_nested_paths(tmp_path, monkeypatch, extension):
     assert resolved["rmsd_restraints_config"][0]["ref_pdb"] == str(folder / "ref.pdb")
     parsed = RestraintsConfig.from_dict(reference, base_dir=tmp_path)
     assert parsed.conformer_config == {}
-    assert len(list(parsed.iter_resolvable_data())) == 6
+    assert len(list(parsed.iter_resolvable_data())) == 7
     assert len(parsed.custom_data) == len(parsed.base_pair_data) == 1
 
 

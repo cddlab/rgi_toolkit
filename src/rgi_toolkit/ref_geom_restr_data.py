@@ -45,6 +45,7 @@ from rgi_toolkit.spec import DIST_TYPE_CODES
 logger = logging.getLogger(__name__)
 
 _GEOM_SPEC = {
+    "chiral": (4, "target_chiral"),
     "distance": (2, "target_distance"),
     "angle": (3, "target_angle"),
     "dihedral": (4, "target_dihedral"),
@@ -123,14 +124,16 @@ class RefGeomData:
         }
         if self.geom == "distance":
             keys.add("calc_method")
-        elif self.geom != "plane":
-            keys.add("unit")  # plane targets are Angstrom only, like distance
+        elif self.geom in ("angle", "dihedral", "improper"):
+            keys.add("unit")
         for i in range(1, self.n_groups + 1):
             keys.add(f"atom_selection{i}")
         return keys
 
     def set_config(self, config: dict) -> None:
         label = f"{self.geom}_restraints_config entry"
+        if self.geom == "chiral" and "unit" in config:
+            raise ValueError(f"{label}: targets are in Angstrom cubed; omit 'unit'")
         warn_unknown_keys(config, self._known_keys(), label, logger)
         if (
             self.geom == "distance"
@@ -196,8 +199,8 @@ class RefGeomData:
         )
 
         apply_window_params(self, config, label)
-        if self.geom in ("distance", "plane"):
-            conv = float  # native Angstrom
+        if self.geom in ("distance", "plane", "chiral"):
+            conv = float
         else:
             unit = str(config.get("unit", "degrees")).strip().lower()
             if unit not in ("degrees", "radians"):

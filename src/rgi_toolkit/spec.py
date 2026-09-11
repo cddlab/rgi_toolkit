@@ -415,6 +415,35 @@ class GroupImproperArrays(GroupDihedralArrays):
 
 
 @dataclass
+class GroupChiralArrays:
+    """Padded four-centroid scalar triple products, centered on group 1.
+
+    Group indices/masks have shape ``(n, max_group)`` and use active-site local
+    indices. Targets are Angstrom cubed; ``move_free`` is ``(n, 4)``. Every other
+    field has shape ``(n,)``. Penalties and windows follow the shared entry types.
+    """
+
+    grp1_idx: np.ndarray
+    grp2_idx: np.ndarray
+    grp3_idx: np.ndarray
+    grp4_idx: np.ndarray
+    grp1_mask: np.ndarray
+    grp2_mask: np.ndarray
+    grp3_mask: np.ndarray
+    grp4_mask: np.ndarray
+    target1: np.ndarray
+    target2: np.ndarray
+    geom_type: np.ndarray
+    move_free: np.ndarray
+    weight: np.ndarray
+    mask: np.ndarray
+    start_sigma: np.ndarray
+    stop_sigma: np.ndarray
+    start_step: np.ndarray
+    stop_step: np.ndarray
+
+
+@dataclass
 class GroupPlaneArrays:
     """Standalone best-fit-plane restraints over selection-resolved atom groups (padded).
 
@@ -506,6 +535,7 @@ class RestraintSpec:
     # Optimizers compile them to closures; they cannot be packed as array terms.
     custom: list = field(default_factory=list)
     peptide_states: PeptideStateArrays | None = None
+    group_chiral: GroupChiralArrays | None = None
 
     def has_array_term(self, key: str) -> bool:
         """Return whether one registered array-backed term is active."""
@@ -546,6 +576,10 @@ class RestraintSpec:
     def has_group_plane(self) -> bool:
         """Return whether a standalone best-fit-plane restraint is active."""
         return self.has_array_term("group_plane")
+
+    def has_group_chiral(self) -> bool:
+        """Return whether a group-centroid chiral restraint is active."""
+        return self.has_array_term("group_chiral")
 
     def has_custom(self) -> bool:
         """Return whether any custom restraint closure is configured."""

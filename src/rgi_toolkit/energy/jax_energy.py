@@ -24,6 +24,7 @@ distance_energy = partial(K.distance_energy, _OPS)
 group_angle_energy = partial(K.group_angle_energy, _OPS)
 group_dihedral_energy = partial(K.group_dihedral_energy, _OPS)
 group_improper_energy = group_dihedral_energy
+group_chiral_energy = partial(K.group_chiral_energy, _OPS)
 rmsd_energy = partial(K.rmsd_energy, _OPS)
 plane_energy = partial(K.plane_energy, _OPS)
 group_plane_energy = partial(K.group_plane_energy, _OPS)
@@ -64,6 +65,7 @@ _LEAF_FNS = {
     "group_angle_energy": group_angle_energy,
     "group_dihedral_energy": group_dihedral_energy,
     "group_improper_energy": group_improper_energy,
+    "group_chiral_energy": group_chiral_energy,
     "group_plane_energy": group_plane_energy,
 }
 

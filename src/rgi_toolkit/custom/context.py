@@ -115,6 +115,15 @@ class RestraintContext:
     def centroid(self, a):
         return V.centroid(self._ops, self._coords_of(a))
 
+    def chiral(self, a, b, c, d):
+        return V.chiral(
+            self._ops,
+            self._coords_of(a),
+            self._coords_of(b),
+            self._coords_of(c),
+            self._coords_of(d),
+        )
+
     def rg(self, a):
         return V.rg(self._ops, self._coords_of(a))
 
@@ -245,6 +254,10 @@ class ResolveContext:
 
     def centroid(self, a):
         return np.mean(self._block_of(a), axis=-2)
+
+    def chiral(self, a, b, c, d):
+        self._block_of(a), self._block_of(b), self._block_of(c), self._block_of(d)
+        return 1.0
 
     def rg(self, a):
         self._block_of(a)

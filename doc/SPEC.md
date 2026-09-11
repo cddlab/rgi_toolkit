@@ -178,6 +178,7 @@ the exact constants and branch rules live in `_geometry.py` and `_kernels.py`.
 | `group_angle` | Three centroids, vertex at group 2; user target/bounds | Radians internally; config defaults to degrees; four shared shapes | Per entry |
 | `group_dihedral` | Ordered four-centroid torsion about groups 2-3 | Same angular units; harmonic deviation wraps at pi | Per entry |
 | `group_improper` | The same ordered torsion convention as `group_dihedral`, with separate config and diagnostics | Same angular units and periodicity behavior | Per entry |
+| `group_chiral` | Signed scalar triple product of four geometric centroids about group 1; explicit user target/bounds | Angstrom cubed; no division by six; four shared shapes | Per entry |
 | `group_plane` | RMS from one plane fitted to the pooled selected atoms | Angstrom; four shared shapes, default harmonic target zero | Per entry |
 
 `group_improper` is not a separate arcsine elevation or chiral-volume formula.
@@ -251,15 +252,26 @@ A reference plane is fitted to the reference atoms alone and measures prediction
 distances from that plane; it is a different objective from pooling both groups
 into a freely fitted plane.
 
+Standalone `chiral_restraints_config` uses four selections, each of any nonzero size,
+with the same signed scalar triple product as conformer chiral. All groups are free
+by default; reference groups are fixed. Targets/bounds are `target_chiral`/`target_chiral1`/
+`target_chiral2` in Angstrom cubed, and `unit` is rejected. It has its own `group_chiral`
+array term and entry windows, independent of conformer opt-in and conformer windows.
+
 Custom entries may be a restricted formula, a registered Python function, or an
 `add_custom` callable. They resolve named selections and references during setup
 and create backend closures returning a scalar, including reduction over batches.
 The formula parser permits the documented geometry/math/penalty vocabulary and
 rejects arbitrary Python evaluation. Python callables are trusted code and should
 use the supplied context to remain portable across backends. Custom angular
-functions return radians. Custom `move` stops gradients through unlisted
+functions return radians; `chiral(A,B,C,D)` / `ctx.chiral(...)` returns the signed
+scalar triple product about A in Angstrom cubed. Custom `move` stops gradients through unlisted
 prediction selections; reference coordinates remain fixed. Custom centroid
 functions use ordinary mean derivatives, without the built-in group rescaling.
+
+Torch custom closures prepare reference-coordinate tensors before differentiation
+and compilation, avoiding NumPy conversion inside a grad transform. Evaluation casts
+them to the coordinate dtype; the optimizer rebuilds closures on device/dtype changes.
 
 The base-pair configuration is a macro for named nucleotide H-bond distances and
 optional pooled coplanarity. It expands into ordinary distance and plane entries
@@ -271,7 +283,7 @@ Gradients come from Torch/JAX autodiff. Several deliberate transformations affec
 how they should be checked:
 
 - Built-in centroid terms preserve energy values while scaling centroid gradients.
-  Group angle/dihedral/improper multiply by the group atom count `N`, removing the
+  Group angle/dihedral/improper/chiral multiply by the group atom count `N`, removing the
   mean's `1/N` dilution. Distance uses `N` when only one group moves and
   `N1*N2/(N1+N2)` when both move. For an isolated pair this gives equal translation
   within each group and a displacement ratio `N2:N1`, preserving the atom-count
@@ -292,6 +304,14 @@ Backend agreement, ordinary finite differences, and these movement conventions
 are distinct checks. CG can stall on a surrogate direction even when its reported
 energy is finite; general convergence proofs for smooth gradients do not establish
 convergence for every RGI combination.
+
+Chiral geometry is implemented once in `_geometry.chiral_points` for conformer,
+standalone, reference and custom paths. An odd permutation of the four points reverses
+the sign; proper rotations and translations preserve it. Collinear or coincident
+centroids have zero volume and zero gradient; no escape displacement is introduced.
+Single-atom standalone harmonic/interval restraints match conformer chiral at the same
+target, weight and slack. Existing dictionary `both` still acts on the absolute volume;
+custom formulas express that objective using `abs(chiral(...))`.
 
 ## Activation windows
 
@@ -519,6 +539,7 @@ global minimum for general molecular objectives.
 | Additional contract | Existing verification |
 | --- | --- |
 | Backend energy/gradient agreement and fixed-fit geometry | [`test_backend_parity.py`](../tests/test_backend_parity.py), [`test_shared_geometry.py`](../tests/test_shared_geometry.py) |
+| Chiral volume, independent determinant, conformer equivalence, custom derivatives, and CPU/GPU entry paths | [`test_chiral.py`](../tests/test_chiral.py) |
 | Selection grammar, atom names, reference pairing | [`test_selection.py`](../tests/test_selection.py), [`test_reference_atom_names.py`](../tests/test_reference_atom_names.py), [`test_align.py`](../tests/test_align.py), [`test_ref_config.py`](../tests/test_ref_config.py) |
 | Config rejection and activation bounds | [`test_config_validation.py`](../tests/test_config_validation.py), [`test_window_params.py`](../tests/test_window_params.py) |
 | Public state, adapters, and scan wrapper | [`test_combined_restraints.py`](../tests/test_combined_restraints.py), [`test_adapters_shared.py`](../tests/test_adapters_shared.py), [`test_scan_runner.py`](../tests/test_scan_runner.py) |
