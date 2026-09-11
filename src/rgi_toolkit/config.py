@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from numbers import Integral
 
 from rgi_toolkit import monlib_geom
+from rgi_toolkit._config_paths import resolve_restraints_config
 from rgi_toolkit._config_util import (
     check_window_exclusive,
     coerce_bool,
@@ -102,7 +103,7 @@ class RestraintsConfig:
     # Mutually exclusive with the conformer sigma window.
     conf_start_step: float = float("-inf")
     conf_stop_step: float = float("inf")
-    conformer_config: dict = field(default_factory=dict)
+    conformer_config: dict | None = None
     distance_data: list = field(default_factory=list)
     rmsd_data: list = field(default_factory=list)
     angle_data: list = field(default_factory=list)  # group-centroid angle restraints
@@ -128,7 +129,8 @@ class RestraintsConfig:
             yield from getattr(self, route.destination)
 
     @classmethod
-    def from_dict(cls, config: dict | None) -> "RestraintsConfig":
+    def from_dict(cls, config: dict | None, *, base_dir=None) -> "RestraintsConfig":
+        config = resolve_restraints_config(config, base_dir=base_dir)
         config = {} if config is None else config
         if not isinstance(config, dict):
             raise ValueError("restraints_config must be a mapping")
@@ -326,7 +328,11 @@ class RestraintsConfig:
             conf_stop_sigma=conf_stop_sigma,
             conf_start_step=conf_start_step,
             conf_stop_step=conf_stop_step,
-            conformer_config=conformer_config,
+            conformer_config=(
+                conformer_config
+                if config.get("conformer_restraints_config") is not None
+                else None
+            ),
         )
         # Parse every ordinary built-in entry through one routing table. Reference-
         # anchored entries keep their distinct closure path but share the same dispatch.

@@ -155,7 +155,17 @@ def test_get_elements_failure_loud_only_when_vdw_requested(caplog):
         cr.setup(_ThrowingElementsAdapter(atoms))
 
 
-@pytest.mark.parametrize("conformer", [{}, {"bond": {"weight": 0}}, {"start_sigma": 1}])
+@pytest.mark.parametrize(
+    "conformer",
+    [
+        None,
+        {key: {"weight": 0} for key in ("bond", "angle", "chiral", "cistrans", "vdw")},
+        {
+            key: {"weight": None}
+            for key in ("bond", "angle", "chiral", "cistrans", "vdw")
+        },
+    ],
+)
 def test_setup_skips_unused_conformer_adapter_work(conformer):
     class ExpensiveAdapter(MockAdapter):
         def iter_ligand_confs(self):

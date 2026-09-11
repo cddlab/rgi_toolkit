@@ -242,3 +242,12 @@ With `verbose: true`, the log prints `built spec: n_active=.. bonds=.. ... dista
 group_angle=.. group_dihedral=..` — confirm the counts are non-zero for what you requested. AF3's
 venv lacks gemmi, so run the workspace `check_dist.py` / `check_conf.py` with a gemmi-enabled venv
 (e.g. `../chai-lab_restr/.venv/bin/python ../check_dist.py <pred.cif>`).
+
+## External restraint configuration
+
+The shared `config_path` wrapper can replace the whole `restraints_config` or any
+individual restraint section with a JSON/YAML file. Relative includes are resolved at
+the input-file boundary (the working directory for Python input). See
+[shared file-reference syntax](config.md#external-configuration-files).
+An empty `conformer_restraints_config: {}` enables bond/angle/chiral/cistrans/vdw at
+weight 1 on opted-in molecules; plane requires an explicit positive weight.

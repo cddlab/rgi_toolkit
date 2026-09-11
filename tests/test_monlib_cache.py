@@ -179,4 +179,5 @@ def test_unused_dictionary_setting_does_not_download(monkeypatch):
         {"monomer_library": True, "vdw": {}},
         {"monomer_library": True, "bond": {"weight": 0}},
     ):
+        config.update({key: {"weight": 0} for key in monlib_geom.KINDS})
         assert not _load_library(config, [], []).atoms

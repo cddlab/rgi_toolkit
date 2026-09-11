@@ -240,7 +240,12 @@ class _NucleotideAdapter:
 
 
 def _config(library=None, on_missing=None):
-    conformer = {"bond": {}, "angle": {}, "plane": {}}
+    conformer = {
+        "bond": {},
+        "angle": {},
+        "plane": {"weight": 1},
+        **{key: {"weight": 0} for key in ("chiral", "cistrans", "vdw")},
+    }
     if library is not None:
         conformer["monomer_library"] = (
             library

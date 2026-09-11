@@ -193,3 +193,12 @@ cistrans=.. distances=.. rmsd=.. group_angle=.. group_dihedral=..` — confirm t
 Cross-check the result with the workspace helpers (any gemmi/rdkit venv): `../check_dist.py
 <pred.cif>` (centroid distance vs 25 Å) and `../check_conf.py <pred.cif> GLN` (ligand geometry). If
 the output is all-NaN, you almost certainly ran on Blackwell — re-run on an sm_89 GPU.
+
+## External restraint configuration
+
+The shared `config_path` wrapper can replace the whole `restraints_config` or any
+individual restraint section with a JSON/YAML file. Relative includes are resolved at
+the input-file boundary (the working directory for Python input). See
+[shared file-reference syntax](config.md#external-configuration-files).
+An empty `conformer_restraints_config: {}` enables bond/angle/chiral/cistrans/vdw at
+weight 1 on opted-in molecules; plane requires an explicit positive weight.

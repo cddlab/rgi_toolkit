@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "numpy",
+    "pyyaml>=6",
     "rdkit>=2024.3.2",
     # RMSD-reference structure I/O (pdb_ref.py) + sequence alignment (_align.py). Both are
     # imported lazily inside their modules so `import rgi_toolkit` stays numpy-only. Loose
@@ -32,7 +33,6 @@ jax = [
 dev = [
     "pytest>=9.0.2",
     "scipy==1.17.1",
-    "pyyaml>=6",
     "ruff>=0.15.7",
 ]
 

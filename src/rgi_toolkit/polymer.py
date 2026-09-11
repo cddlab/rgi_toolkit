@@ -23,6 +23,7 @@ import numpy as np
 
 from rgi_toolkit import monlib_geom
 from rgi_toolkit._atom_names import normalise_atom_name as _normalise_name
+from rgi_toolkit._config_util import conformer_weight
 from rgi_toolkit._mol_build import build_ligand_mol
 from rgi_toolkit._moltype import polymer_type
 from rgi_toolkit.atom_context import LigandConf
@@ -169,7 +170,7 @@ def build_polymer_geometry(
     restraints would otherwise look like a successful run.
     """
 
-    cfg_present = any(not str(key).startswith("_") for key in (conformer_config or {}))
+    cfg_present = conformer_config is not None
     if not cfg_present:
         return None
     if not hasattr(adapter, "iter_atoms"):
@@ -303,11 +304,7 @@ def build_polymer_geometry(
                 connections.append((previous, current))
 
     targets = _load_library(conformer_config, residue_meta, connections)
-    torsion_config = (conformer_config or {}).get("cistrans") or {}
-    if (
-        "cistrans" in (conformer_config or {})
-        and (torsion_config.get("weight", 1.0) or 0) > 0
-    ):
+    if conformer_weight(conformer_config, "cistrans") > 0:
         from rgi_toolkit._polymer_torsions import add_polymer_torsions
 
         add_polymer_torsions(targets, residue_meta, connections, ref_pos)
@@ -333,11 +330,8 @@ def build_polymer_geometry(
 def _load_library(conformer_config, residue_meta, connections):
     """Load dictionary targets only when an enabled geometry term needs them."""
     spec = monlib_geom.parse_config(conformer_config)
-    cfg = conformer_config or {}
     enabled = {
-        k
-        for k in monlib_geom.KINDS
-        if k in cfg and ((cfg.get(k) or {}).get("weight", 1.0) or 0) > 0
+        k for k in monlib_geom.KINDS if conformer_weight(conformer_config, k) > 0
     }
     if spec is None or not enabled:
         return monlib_geom.LibraryTargets()

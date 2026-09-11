@@ -541,3 +541,30 @@ GPU-marked cases require a CUDA/JAX accelerator environment and a compute-node
 allocation; CPU execution of the functional CUDA loop does not validate GPU
 compilation, device synchronization, or accelerator performance. Full predictor
 sampling and structural/scientific validation remain separate from toolkit E2E.
+
+## Conformer activation and torsion priority
+
+`RestraintsConfig.conformer_config` is `None` for an absent/null block and a dictionary
+for an explicit block, including `{}`. The shared `conformer_weight` helper supplies
+weights 1 for bond/angle/chiral/cistrans/vdw and 0 for plane. Explicit nonpositive/null
+weights disable a term. Molecule opt-in remains mandatory. Dictionary collection,
+reference featurization and VdW consume the same effective weights.
+
+After collecting enabled torsions and snapshotting topology exclusions, discard any
+conformer plane containing all four atoms of an enabled torsion. Local dictionary
+conditions are subtracted as disjoint conjunctions, without whole-chain enumeration;
+surviving reference planes retain their original weights and slack. The existing
+per-invocation peptide selector binds these conditions once per minimization. No backend
+kernel, standalone group-plane, base-pair or custom energy semantics change.
+
+## External configuration resolution
+
+`resolve_restraints_config(config, *, base_dir=None)` is public from `rgi_toolkit` and
+`rgi_toolkit.config`. `RestraintsConfig.from_dict` accepts the same keyword. A mapping
+containing only `config_path` replaces the root configuration or one whole registered
+restraint section with a JSON/YAML value. File-local paths propagate through nested
+includes and external structure/dictionary references; inline resource behavior is
+preserved. Python dictionaries default to the working directory. The resolver copies
+input data, rejects mixed wrappers and cycles, and leaves schema validation to the
+existing parser. Predictor file loaders resolve before input location is discarded or
+preprocessed inputs are serialized. Chai extracts its chain opt-in map after expansion.

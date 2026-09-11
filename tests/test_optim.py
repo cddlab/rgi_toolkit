@@ -270,12 +270,11 @@ def _distorted_ethane():
     lc = LigandConf(
         mol=m, conf_coords=c, global_indices=np.arange(n), conformer_restraints=True
     )
-    # non-empty conformer_config so the opt-in gate builds conformer terms;
-    # conf_start_sigma large so they are active at any sigma
+    # Isolate the bond/angle objective; activate it at every tested sigma.
     spec = build_spec(
         [lc],
         [],
-        {"bond": {"weight": 1.0}, "angle": {"weight": 1.0}},
+        {"chiral": {"weight": 0}, "cistrans": {"weight": 0}, "vdw": {"weight": 0}},
         conf_start_sigma=1e30,
     )
 

@@ -102,6 +102,11 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
 
 #### `featurizer.py`
 
+An empty conformer block enables bond/angle/chiral/cistrans/vdw at weight 1; absent/null
+blocks disable the layer. Plane defaults to 0 even with an empty sub-block. Positive
+cistrans rows suppress only conformer plane groups containing their four atoms, using
+local peptide conditions where necessary. VdW topology planes are preserved.
+
 `build_spec(ligand_confs, distance_restraints, conformer_config,
 elements, conf_start_sigma, rmsd_restraints)` — the single place RDKit mols become bond/angle/
 chiral/cistrans restraints (global indices, multi-ligand) and the dynamic
@@ -194,7 +199,7 @@ there is an absence (`conformer=False`, `n_rmsd=2`).
 
 #### `config.py`
 
-`RestraintsConfig.from_dict()` parses the shared
+`resolve_restraints_config(config, base_dir=...)` expands root/section `config_path` JSON/YAML references. Paths in external files are file-relative; Chai extracts its opt-in map after expansion. `RestraintsConfig.from_dict()` parses the shared
 `restraints_config` (one source of truth for boltz YAML / protenix JSON / AF3).
 
 #### `combined.py`
@@ -439,9 +444,9 @@ NOT once per diffusion step); restrained-ligand pairs remain statically enumerat
 (intramolecular + intermolecular); the explicit values pick one category. **The old
 `mode: ligand_protein` is REMOVED** — it was only the fixed-background half; it now raises a
 migration hint pointing to `intermolecular` (which additionally repels other restrained
-ligands), mirroring the rejected `backend:` key. An unknown mode raises. VdW is **off unless
-a `vdw:` block is present** (then `weight` defaults to 1.0, like every conformer term — see
-`featurizer._conf_weight`); omit the block to leave it off. The `built spec: ...
+ligands), mirroring the rejected `backend:` key. An unknown mode raises. VdW defaults to
+weight 1 whenever the conformer block is present; set `vdw: {weight: 0}` to disable it
+(see `featurizer._conf_weight`). The `built spec: ...
 vdw=Iintra+Jinter+Llig/Mbg/Knn` log breaks the counts down: `intra` = intramolecular, `inter`
 + `lig/bg` together = intermolecular (`inter` = restrained-ligand pairs, `lig/bg` =
 fixed background) — confirm `Jinter>0` when you expect ligand-ligand repulsion.

@@ -110,7 +110,7 @@ silent failures:
 - **Polymer dictionary geometry**: `conformer_restraints_config.monomer_library: true`
   acquires and caches the public CCP4 library when setup needs it. Use a path for an existing
   snapshot; `{on_missing: error}` requests the automatic cache with strict coverage. Keep
-  each requested term and entity opt-in explicit. Dictionary bond/angle/chiral/plane and
+  the entity opt-in explicit. An empty conformer block enables bond/angle/chiral/cistrans/vdw at weight 1; plane requires an explicit positive weight. Dictionary bond/angle/chiral/plane and
   chi/omega/sp2 torsions use ESD-based inverse-variance weights automatically, with default
   slack zero. ESD is relative strength, not a tolerance band. Do not copy ESD into `slack`;
   consult `doc/config.md` for units, peptide state selection and offline cache behavior.
@@ -130,6 +130,12 @@ silent failures:
   their sequences/ligand. Tell them which fields are theirs to replace.
 - For **chai**, write the sidecar YAML *and* remind them it pairs with a FASTA.
 - For **esmfold2**, write the Python dict + the `.fold(..., restraints_config=...)` call.
+
+Use `config_path` to reuse the entire restraints config or one whole section. The
+reference wrapper contains only this key; never merge local overrides into it. JSON/YAML
+paths are relative to their containing file, including external reference structures.
+The validator resolves the same files as inference. Read `doc/config.md` under
+*External configuration files* for the file shapes and examples.
 
 ### 6. CONFORMER OPT-IN — the #1 silent no-op
 

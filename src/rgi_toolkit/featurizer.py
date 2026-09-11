@@ -28,9 +28,12 @@ from rgi_toolkit._config_util import (
     VDW_NEIGHBOR_REBUILD_INTERVAL_DEFAULT,
     VDW_NEIGHBOR_SKIN_DEFAULT,
     VDW_SCALE_DEFAULT,
+    conformer_weight,
     validate_vdw_config,
 )
+from rgi_toolkit._conformer_planes import prefer_cistrans
 from rgi_toolkit._mol_build import ff_relax, parse_relax_force_field, repair_stereo
+from rgi_toolkit._monlib_records import validate_target
 from rgi_toolkit._monlib_spec import append_library_arrays, used_peptides
 from rgi_toolkit.atom_context import LigandConf
 from rgi_toolkit.monlib_geom import LibraryTargets, missing_geometry
@@ -457,20 +460,8 @@ def _vdw_radius(z: int) -> float:
 
 
 def _conf_weight(conformer_config: dict | None, key: str) -> float:
-    """Weight of a conformer sub-term (bond/angle/chiral/cistrans/vdw/plane).
-
-    Uniform "default 1.0, off if not configured" rule, shared with every other
-    restraint type (distance/rmsd/angle/dihedral/custom all default weight 1.0): a
-    sub-block PRESENT in ``conformer_restraints_config`` defaults its weight to 1.0
-    (override with an explicit ``weight``); an ABSENT sub-block is OFF (weight 0). An
-    explicit ``weight: 0`` / null also disables the term. (A bare ``key:`` with no
-    body — None in YAML — counts as present, so it activates the term at 1.0.)
-    """
-    cfg = conformer_config or {}
-    if key not in cfg:
-        return 0.0
-    w = (cfg.get(key) or {}).get("weight", 1.0)
-    return float(w) if w is not None else 0.0
+    """Delegate conformer defaults to the backend-independent configuration helper."""
+    return conformer_weight(conformer_config, key)
 
 
 def _conf_slack(conformer_config: dict | None, key: str, default: float) -> float:
@@ -854,8 +845,8 @@ def build_spec(
     # tool: (1) with no conformer_restraints_config (e.g. a distance-only run) build no
     # conformer at all; (2) otherwise restrain only ligand conformers whose chain opted
     # in. Every tool defaults the per-chain flag to False.
-    # A config holding only documentation keys ("_comment") counts as absent.
-    cfg_present = any(not str(k).startswith("_") for k in cfg)
+    # An empty mapping explicitly requests the five default-on terms.
+    cfg_present = conformer_config is not None
     if not cfg_present:
         ligand_confs = []
     all_ligand_confs = list(ligand_confs)
@@ -898,24 +889,17 @@ def build_spec(
     custom_restraints = [
         c for c in (custom_restraints or []) if getattr(c, "run_restr", False)
     ]
-    # Every conformer sub-term follows the uniform "default 1.0, off if not configured"
-    # rule (see _conf_weight): a sub-block PRESENT in the conformer config is active at
-    # weight 1.0 (override with an explicit weight); an ABSENT sub-block is OFF. So a
-    # ligand that opts in but lists e.g. only `bond:` gets ONLY bond — angle/chiral/
-    # cistrans/vdw/plane stay off until their own sub-block is added. slack defaults
-    # stay per-term (chiral flat-bottom ~0.05 signed-volume; bond/angle/cistrans/plane
-    # 0.0 = pure harmonic toward the reference; cistrans slack is in radians, plane in
-    # Angstrom out-of-plane deviation).
-    bw = _conf_weight(cfg, "bond")
+    # Resolve weights from the original value: None and {} have different meanings.
+    bw = _conf_weight(conformer_config, "bond")
     bsl = _conf_slack(cfg, "bond", 0.0)
-    aw = _conf_weight(cfg, "angle")
+    aw = _conf_weight(conformer_config, "angle")
     asl = _conf_slack(cfg, "angle", 0.0)
-    cw = _conf_weight(cfg, "chiral")
+    cw = _conf_weight(conformer_config, "chiral")
     csl = _conf_slack(cfg, "chiral", 0.05)
-    dw = _conf_weight(cfg, "cistrans")
+    dw = _conf_weight(conformer_config, "cistrans")
     dsl = _conf_slack(cfg, "cistrans", 0.0)
-    vdw_weight = _conf_weight(cfg, "vdw")
-    pw = _conf_weight(cfg, "plane")
+    vdw_weight = _conf_weight(conformer_config, "vdw")
+    pw = _conf_weight(conformer_config, "plane")
     psl = _conf_slack(cfg, "plane", 0.0)
 
     # Which force field idealises the reference conformer before the targets are measured
@@ -983,8 +967,7 @@ def build_spec(
     exclusion_planes = list(planes)
     # weight<=0 means "disable": drop the term BEFORE the active_sites union so its
     # atoms do not become optimisable and it is never iterated — uniform across all
-    # conformer terms. weight<=0 now also covers an ABSENT sub-block (_conf_weight -> 0),
-    # so an unlisted term is simply dropped here.
+    # conformer terms. Plane alone defaults to zero.
     if bw <= 0:
         bonds = []
     if aw <= 0:
@@ -995,6 +978,18 @@ def build_spec(
         cistrans = []
     if pw <= 0:
         planes = []  # OFF by default (pw defaults to 0): opt-in plane term
+
+    # Disabled energies must not add active atoms; topology survives for VdW.
+    library = replace(
+        library,
+        terms={
+            key: [row for row in rows if validate_target(row, key)]
+            if _conf_weight(conformer_config, key) > 0
+            else []
+            for key, rows in library.terms.items()
+        },
+    )
+    planes, plane_conditions, library = prefer_cistrans(planes, cistrans, library)
 
     # ---- collect every referenced global atom -> active_sites -----------------
     active: set[int] = set()
@@ -1011,7 +1006,7 @@ def build_spec(
     for rows in library.terms.values():
         for row in rows:
             active.update(row.atoms)
-    for selector in used_peptides(library):
+    for selector in used_peptides(library, plane_conditions):
         active.update(library.peptides[selector].atoms)
     resolved_restraints = itertools.chain(
         distance_restraints,
@@ -1076,19 +1071,25 @@ def build_spec(
             exclusion_planes,
         )
     vdw_intra = (
-        _build_intramolecular_vdw(ligand_confs, cfg, g2l, chemistry)
+        _build_intramolecular_vdw(ligand_confs, conformer_config, g2l, chemistry)
         if vdw_mode in ("intramolecular", "both")
         else None
     )
     vdw_inter = (
-        _build_interligand_vdw(ligand_confs, cfg, g2l, chemistry)
+        _build_interligand_vdw(ligand_confs, conformer_config, g2l, chemistry)
         if vdw_mode in ("intermolecular", "both")
         else None
     )
     vdw_arrays = _concat_vdw_arrays(vdw_intra, vdw_inter)
     vdw_config = (
         _build_vdw_config(
-            ligand_confs, polymer_atoms, cfg, active_sites, g2l, elements, chemistry
+            ligand_confs,
+            polymer_atoms,
+            conformer_config,
+            active_sites,
+            g2l,
+            elements,
+            chemistry,
         )
         if vdw_mode in ("intermolecular", "both")
         or (chemistry is not None and len(polymer_atoms))
@@ -1096,7 +1097,7 @@ def build_spec(
     )
     active_vdw_config = _build_active_vdw_config(
         polymer_atoms,
-        cfg,
+        conformer_config,
         active_sites,
         elements,
         exclusion_bonds,
@@ -1352,7 +1353,13 @@ def build_spec(
         conf_stop_step=conf_stop_step,
         custom=custom_specs,
     )
-    append_library_arrays(spec, library, cfg, g2l)
+    append_library_arrays(
+        spec,
+        library,
+        conformer_config,
+        g2l,
+        reference_plane_conditions=plane_conditions,
+    )
     vdw_parts = []
     if vdw_intra is not None:
         vdw_parts.append(f"{len(vdw_intra.idx)}intra")

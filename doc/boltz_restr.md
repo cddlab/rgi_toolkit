@@ -197,3 +197,12 @@ a silent no-op, not "satisfied"). Cross-check with the workspace helper scripts 
 gemmi/rdkit-enabled venv): `.venv/bin/python ../check_dist.py out_restr_example/**/*.cif` (centroid
 dist of the two groups vs 25 Å) and `.venv/bin/python ../check_conf.py out_restr_example/**/*.cif
 GLN` (ligand bond/angle RMS vs RDKit ideal).
+
+## External restraint configuration
+
+The shared `config_path` wrapper can replace the whole `restraints_config` or any
+individual restraint section with a JSON/YAML file. Relative includes are resolved at
+the input-file boundary (the working directory for Python input). See
+[shared file-reference syntax](config.md#external-configuration-files).
+An empty `conformer_restraints_config: {}` enables bond/angle/chiral/cistrans/vdw at
+weight 1 on opted-in molecules; plane requires an explicit positive weight.

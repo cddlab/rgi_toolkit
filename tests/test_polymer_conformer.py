@@ -118,7 +118,8 @@ def _config():
             "bond": {},
             "angle": {},
             "chiral": {},
-            "plane": {},
+            "plane": {"weight": 1},
+            "cistrans": {"weight": 0},
             "vdw": {"max_neighbors": 8},
         },
     }
@@ -218,7 +219,13 @@ def test_polymer_residue_local_aromatic_ring_builds_plane():
     config = {
         "gpu": False,
         "max_iter": 100,
-        "conformer_restraints_config": {"plane": {}},
+        "conformer_restraints_config": {
+            "plane": {"weight": 1},
+            **{
+                key: {"weight": 0}
+                for key in ("bond", "angle", "chiral", "cistrans", "vdw")
+            },
+        },
     }
     restr = CombinedRestraints()
     restr.setup(_PolymerAdapter("protein", _RING_NAMES, _RING_COORDS), config=config)
@@ -290,7 +297,7 @@ def test_polymer_restraint_repairs_peptide_link_at_high_sigma():
     restr = CombinedRestraints()
     # Isolate reference-link repair; typed VdW has its own ESD-weighted objective.
     config = _config()
-    del config["conformer_restraints_config"]["vdw"]
+    config["conformer_restraints_config"]["vdw"] = {"weight": 0}
     restr.setup(_PolymerAdapter("protein", _ALA_NAMES, _ALA_COORDS), config=config)
     coords = np.concatenate([_ALA_COORDS, _ALA_COORDS + np.array([5.0, 0.0, 0.0])])
     coords = torch.tensor(coords, dtype=torch.float64)

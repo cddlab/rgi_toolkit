@@ -147,17 +147,8 @@ restraints_config = {
     ],
     "conformer_restraints_config": {
         # Applied only to sequence/chain objects with conformer_restraints: true.
-        # Omit start_sigma to enable it from step 0.
-        "bond": {"weight": 1.0},
-        "angle": {"weight": 1.0},
-        "chiral": {"weight": 1.0},
-        "cistrans": {"weight": 1.0},         # ligand E/Z and conjugated sp2 torsions
-        "plane": {"weight": 1.0},            # best-fit plane: rings + sp2 groups (off by default)
-        "vdw": {
-            "weight": 1.0, "max_neighbors": 32,  # mode defaults to "both"
-            "max_atom_step": 0.1,
-            "neighbor_rebuild_interval": 10, "neighbor_skin": 2.0,
-        },
+        # An empty mapping enables bond/angle/chiral/cistrans/vdw at weight 1.
+        # "plane": {"weight": 1.0},          # optional; overlapping cistrans takes priority
     },
     "custom_restraints_config": [            # define your OWN restraint as a formula (DSL)
         {"name": "symmetric",               # keep two inter-domain distances equal
@@ -179,6 +170,10 @@ coords = restr.minimize(coords, step, sigma)   # torch/numpy: mutates in place +
 # After sampling (optional per-term energy log when verbose):
 restr.finalize(coords, step)
 ```
+
+Use `{"config_path": "configs/restraints.yaml"}` at the root or in an individual
+restraint section to load a JSON/YAML configuration. Includes resolve relative to
+their containing file; see [external configuration files](doc/config.md#external-configuration-files).
 
 For a **JAX** tool whose loop runs inside `lax.scan` (no Python callbacks), build the
 spec outside the scan and grab the pure closure with `restr.get_minimizer()`

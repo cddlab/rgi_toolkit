@@ -110,26 +110,23 @@ dict (not a list).
 ```yaml
 conformer_restraints_config:
   start_sigma: 1            # often applied late, once the pocket exists (optional)
-  bond:     {weight: 1.0}
-  angle:    {weight: 1.0}
-  chiral:   {weight: 1.0}
-  cistrans: {weight: 1.0}
-  vdw:      {weight: 1.0}   # mode defaults to "both"
   # plane: {weight: 1.0}  # OFF by default; add it to flatten aromatic rings + sp2 groups (best-fit plane)
 ```
 
-Each sub-block is **off unless present** (a listed term defaults to `weight: 1.0`). Include
-only the terms the user wants; `bond` + `angle` + `chiral` is a sensible default set.
+An empty conformer block enables bond/angle/chiral/cistrans/vdw at weight 1. Omit their
+sub-blocks unless overriding values; disable unwanted terms explicitly with weight 0.
+Plane stays off even with `plane: {}` and requires an explicit positive weight.
+Overlapping conformer planes yield to cistrans; unrelated planes remain active.
 
 > ⚠ **A conformer block does nothing without the per-ligand opt-in flag** (placement
 > differs per tool — see `tools.md`). This is the single most common silent no-op. Always
 > write the opt-in alongside the block.
 
-Notes worth telling the user: `cistrans` only fires on ligands that actually have acyclic
-non-aromatic double bonds (ATP/NAD/caffeine have none → `cistrans=0`, which is correct, not a
-bug). `plane` instead fires on planar GROUPS — aromatic/conjugated rings AND non-ring sp2
-groups — so ATP's adenine gives `plane=2` (its fused 6+5 rings) while a saturated/aliphatic
-ligand gives `plane=0`. A glutamine/sugar CCD drops a leaving atom, changing counts.
+Ligand `cistrans` covers acyclic non-aromatic double bonds and conjugated single
+sp2-sp2 axes; it requires real bond orders. Enabled `plane` covers aromatic/conjugated
+rings and non-ring sp2 groups, except groups containing all four atoms of an active
+cistrans torsion. Report the built spec's counts, which depend on the modeled atoms,
+reference relaxation, dictionary geometry, and overlap filtering.
 
 ---
 

@@ -1,6 +1,7 @@
 """Regression coverage for config parsing and the bundled standalone validator."""
 
 import ast
+import json
 import runpy
 from pathlib import Path
 
@@ -9,6 +10,35 @@ import pytest
 from rgi_toolkit.config import RestraintsConfig
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_validator_resolves_chai_sidecar_before_optin_check(
+    validator, tmp_path, capsys
+):
+    (tmp_path / "sidecar.json").write_text(
+        json.dumps(
+            {
+                "conformer_restraints": {"B": True},
+                "conformer_restraints_config": {},
+            }
+        )
+    )
+    wrapper = tmp_path / "restraints.yaml"
+    wrapper.write_text("config_path: sidecar.json\n")
+    assert validator["main"]([str(wrapper)]) == 0
+    output = capsys.readouterr().out
+    assert "conformer terms: bond, angle, chiral, cistrans, vdw" in output
+    assert "NO sequence entity opts in" not in output
+
+
+def test_validator_checks_selection_in_external_section(validator, tmp_path, capsys):
+    (tmp_path / "distance.json").write_text(
+        json.dumps([_distance(atom_selection1="chain (")])
+    )
+    wrapper = tmp_path / "restraints.yaml"
+    wrapper.write_text("distance_restraints_config:\n  config_path: distance.json\n")
+    assert validator["main"]([str(wrapper)]) == 1
+    assert "SELECTION SYNTAX ERROR" in capsys.readouterr().out
 
 
 @pytest.fixture(scope="module")
@@ -183,4 +213,6 @@ def test_example_configs_pass_validator(validator, path):
         data = validator["_load"](path)
     found = list(validator["_find_configs"](data))
     assert found, path
-    assert all(validator["_validate_one"](*entry) == 0 for entry in found)
+    assert all(
+        validator["_validate_one"](*entry, base_dir=path.parent) == 0 for entry in found
+    )

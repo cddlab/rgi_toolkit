@@ -6,6 +6,7 @@ from dataclasses import fields
 
 import numpy as np
 
+from rgi_toolkit._config_util import conformer_weight
 from rgi_toolkit.spec import (
     AngleArrays,
     BondArrays,
@@ -16,22 +17,23 @@ from rgi_toolkit.spec import (
 )
 
 
-def used_peptides(targets):
+def used_peptides(targets, extra_conditions=()):
     return sorted(
         {i for rows in targets.terms.values() for r in rows for i, _ in r.conditions}
+        | {i for condition in extra_conditions for i, _ in condition}
     )
 
 
-def append_library_arrays(spec, targets, config, g2l):
+def append_library_arrays(spec, targets, config, g2l, *, reference_plane_conditions=()):
     """Append effective inverse-variance weights, preserving every legacy row."""
-    chosen = used_peptides(targets)
+    chosen = used_peptides(targets, reference_plane_conditions)
     selector_map = {g: i for i, g in enumerate(chosen)}
-    conditions = {}
+    condition_rows = {"plane": list(reference_plane_conditions)}
     for kind, rows in targets.terms.items():
         if not rows:
             continue
-        block = config.get(kind) or {}
-        weight = float(block.get("weight", 1.0) or 0)
+        block = (config or {}).get(kind) or {}
+        weight = conformer_weight(config, kind)
         if weight <= 0:
             continue
         n = len(rows)
@@ -91,12 +93,16 @@ def append_library_arrays(spec, targets, config, g2l):
                 packed[f.name] = np.concatenate((a, b), axis=0)
             array = type(array)(**packed)
         setattr(spec, kind, array)
-        width = max(len(r.conditions) for r in rows)
+        prior = condition_rows.get(kind) or [()] * n_old
+        condition_rows[kind] = [*prior, *(r.conditions for r in rows)]
+    conditions = {}
+    for kind, rows in condition_rows.items():
+        width = max((len(row) for row in rows), default=0)
         if width:
-            cidx = np.full((n_old + n, width), -1, dtype=np.int64)
-            cis = np.zeros((n_old + n, width))
-            for row, target in enumerate(rows, n_old):
-                for col, (selector, state) in enumerate(target.conditions):
+            cidx = np.full((len(rows), width), -1, dtype=np.int64)
+            cis = np.zeros((len(rows), width))
+            for row, target in enumerate(rows):
+                for col, (selector, state) in enumerate(target):
                     cidx[row, col] = selector_map[selector]
                     cis[row, col] = state
             conditions[kind] = (cidx, cis)

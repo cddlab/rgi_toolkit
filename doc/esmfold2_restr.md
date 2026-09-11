@@ -268,3 +268,12 @@ gemmi, so run the centroid check with another tool's venv: `../chai-lab_restr/.v
 ../check_dist.py out_esm.cif`. If setup/finalize log but the structure is unchanged (an unrestrained
 "stall"), the imported `transformers` lacks the esmfold2 hook — confirm the `transformers_restr` dep
 installed (a co-dev editable needs the copy-over from the Install section).
+
+## External restraint configuration
+
+The shared `config_path` wrapper can replace the whole `restraints_config` or any
+individual restraint section with a JSON/YAML file. Relative includes are resolved at
+the input-file boundary (the working directory for Python input). See
+[shared file-reference syntax](config.md#external-configuration-files).
+An empty `conformer_restraints_config: {}` enables bond/angle/chiral/cistrans/vdw at
+weight 1 on opted-in molecules; plane requires an explicit positive weight.

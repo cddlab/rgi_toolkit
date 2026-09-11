@@ -19,7 +19,7 @@ check their spelling against this page. Source of truth:
 
 ## Quick navigation
 
-- [Config shape](#shape) and [top-level keys](#top-level-keys)
+- [Config shape](#shape), [external files](#external-configuration-files), and [top-level keys](#top-level-keys)
 - [Computational cost](#computational-cost-current-implementation)
 - [Activation windows](#sigma-gating-start_sigma--stop_sigma) and [step gating](#step-gating-start_step--stop_step-alternative-to-sigma)
 - [Atom-selection DSL](#atom-selection-dsl) and [penalty shapes](#penalty-shapes-shared)
@@ -58,6 +58,50 @@ A restraint type is active only if its block is present (and, for conformer term
 Distance, angle, dihedral, improper, plane, conformer, RMSD, and base-pair are the eight built-in restraint
 types (base-pair expands into distance and plane restraints under the hood).
 `custom_restraints_config` defines an original restraint as a math formula or Python callable.
+
+## External configuration files
+
+Use the same `config_path` key at the whole-config level or at any of the nine
+`*_restraints_config` sections. A referenced JSON/YAML file contains the replacement
+value itself: a dictionary for the whole config or conformer, a list for other sections.
+
+```yaml
+# input.yaml
+restraints_config:
+  config_path: configs/rgi.yaml
+```
+
+```yaml
+# configs/rgi.yaml
+conformer_restraints_config: {}
+distance_restraints_config:
+  config_path: distances.json
+```
+
+```json
+[
+  {"atom_selection1": "chain A and resid 1", "atom_selection2": "chain B and resid 1",
+   "harmonic": {"target_distance": 5}}
+]
+```
+
+Paths are relative to the file containing them, including nested includes. Within an
+external file, `ref_pdb`, `ref_cif`, named `refs` structures and monomer-library paths
+also resolve relative to that file. Existing inline resource paths retain their behavior.
+The supported extensions are `.json`, `.yaml` and `.yml`. `config_path` cannot share a
+block with inline settings; there is no override merge. References replace entire
+sections, not individual list entries. Missing files, malformed values and reference
+cycles raise with the section and file chain; expanded data passes the normal schema.
+
+All seven predictors use the shared resolver. Chai's root sidecar can itself contain
+`config_path`; a referenced sidecar may include its `conformer_restraints` chain map.
+For Python input, use `resolve_restraints_config(config, base_dir=...)` or
+`RestraintsConfig.from_dict(config, base_dir=...)`; the default base is the current
+working directory. Resolution returns a new mapping without changing the caller's
+dictionary. YAML is loaded safely and lazily. Inline-only parsing performs no file I/O.
+
+Runnable examples: [whole config](../example/distance/alphafold3/qbp_25.00.json)
+and [one section](../example/distance/boltz-2/qbp_25.00.yaml).
 
 ## Top-level keys
 
@@ -700,16 +744,7 @@ sidecar map keyed by chain id because FASTA cannot carry the flag. Missing/false
 remain unrestrained, including when another chain of the same polymer type is enabled.
 
 ```yaml
-conformer_restraints_config:
-  # No start_sigma: all four terms, including VdW, are active from the first step.
-  bond: {}
-  angle: {}
-  chiral: {}
-  vdw:
-    max_neighbors: 32
-    max_atom_step: 0.1
-    neighbor_rebuild_interval: 10
-    neighbor_skin: 2.0
+conformer_restraints_config: {}  # Five terms at weight 1; plane off; active every step.
 ```
 
 Intra-residue bond, angle, chiral, and planar-group targets come from each predictor's residue-local
@@ -725,24 +760,33 @@ sub-block): residue-local aromatic rings — His/Phe/Tyr/Trp side chains and nuc
 the protein **peptide plane**, the canonical inter-residue four-atom group `{C, CA, O}` (previous
 residue) `+ {N}` (current), scored by the best-fit-plane `plane` term (this replaces the old
 peptide-plane zero-volume impropers that rode the `chiral` term — so a `chiral`-only config no longer
-flattens the peptide plane; add a `plane` sub-block). Polymer `cistrans` includes side-chain χ,
+flattens the peptide plane; set `plane: {weight: 1}`). Polymer `cistrans` includes side-chain χ,
 peptide ω and selected sp2 torsions, with dictionary or approximate targets as described below.
 
 Top-level (shared by all terms): `start_sigma` (`+inf`), `stop_sigma` (`-1`) — or the step-window
 alternative `start_step` (`-inf`) / `stop_step` (`+inf`) (mutually exclusive with the sigma window).
 
-Each term is a sub-dict and is **off unless its sub-block is present**: a listed term
-defaults to `weight` 1.0 (override it, or set `weight <= 0` to disable a listed term); an
-absent term is not built. So a ligand that opts in but lists only `bond:` gets ONLY the
-bond term — add each other sub-block to activate it. This is the same "default 1.0, off if
-not configured" rule the other restraint types follow.
+An omitted or null conformer block disables the entire layer. An empty mapping,
+`conformer_restraints_config: {}`, enables **bond, angle, chiral, cistrans and vdw at
+weight 1** on opted-in molecules. Their sub-blocks need only be written for overrides.
+**Plane defaults to weight 0 even when `plane: {}` is present**; enable it explicitly
+with `plane: {weight: 1}`. For every term, an explicit `weight <= 0` or `weight: null`
+disables its energy. To request only one term, explicitly disable the other default-on
+terms. This changes the former presence-based defaults; check older partial configs.
+
+When an enabled cistrans tuple's four atoms all belong to a conformer plane group,
+the plane group is suppressed and the torsion is retained. Nonoverlapping plane groups
+remain active. Reference-derived and dictionary-derived geometry follow this same rule;
+local peptide conditions suppress the plane only in states where the torsion is active.
+The original plane membership remains available for VdW topology exclusions. Standalone
+`plane_restraints_config`, base-pair planes and custom energies are independent.
 
 | term | keys (default) | meaning |
 |---|---|---|
 | `bond` | `weight` (1.0), `slack` (0.0 Å) | bond lengths toward ideal; flat-bottomed by `slack` |
 | `angle` | `weight` (1.0), `slack` (0.0 rad) | bond angles toward ideal; targets within 0.5° of 180° use a stable cosine residual |
 | `chiral` | `weight` (1.0), `slack` (0.05 Å³ reference / 0.0 Å³ library) | signed chiral volume; the library may also allow either sign |
-| `plane` | `weight` (1.0), `slack` (0.0 Å) | **best-fit-plane** flatness of whole planar atom groups ([servalcat](https://github.com/keitaroyam/servalcat)-style) — penalises each group's out-of-plane RMS deviation toward 0. Fires on (a) aromatic/conjugated rings (whole ring) and (b) non-ring sp2 groups (an acyclic double-bond centre + its heavy neighbors: carbonyl / amide / ester / carboxyl / trisubstituted alkene). Group membership is confirmed by the reference conformer being coplanar (not the RDKit aromaticity flag). Add a `plane:` block to activate |
+| `plane` | `weight` (0.0), `slack` (0.0 Å) | **best-fit-plane** flatness of whole planar atom groups ([servalcat](https://github.com/keitaroyam/servalcat)-style) — penalises each group's out-of-plane RMS deviation toward 0. Fires on (a) aromatic/conjugated rings (whole ring) and (b) non-ring sp2 groups (an acyclic double-bond centre + its heavy neighbors: carbonyl / amide / ester / carboxyl / trisubstituted alkene). Group membership is confirmed by the reference conformer being coplanar (not the RDKit aromaticity flag). Set `plane: {weight: 1}` to activate |
 | `cistrans` | `weight` (1.0), `slack` (0.0 rad) | ligand E/Z, protein side-chain χ, peptide ω and acyclic sp2 torsions, with explicit periodicity |
 | `vdw` | `weight` (1.0), `mode` (`"both"`), `scale` (1.0), `dmax` (5.0 Å), `max_neighbors` (32), `max_atom_step` (0.1 Å), `neighbor_rebuild_interval` (10), `neighbor_skin` (2.0 Å) | chemical contact distances and ESD-based clash penalties, with bounded CG steps and displacement-triggered Verlet neighbor rebuilds |
 

@@ -58,8 +58,12 @@ except ImportError:
             break
 
 try:
-    from rgi_toolkit._config_util import coerce_bool
-    from rgi_toolkit.config import RESTRAINT_SECTIONS, RestraintsConfig
+    from rgi_toolkit._config_util import coerce_bool, conformer_weight
+    from rgi_toolkit.config import (
+        RESTRAINT_SECTIONS,
+        RestraintsConfig,
+        resolve_restraints_config,
+    )
     from rgi_toolkit.ref_config import split_ref_selection
     from rgi_toolkit.selection import AtomSelector
 except ImportError as exc:  # pragma: no cover
@@ -121,7 +125,9 @@ def _find_configs(obj, path="<root>"):
             yield from _find_configs(q, f"{path}.queries.{name}")
     # chai sidecar / bare dict: the object itself is the restraints_config
     _restraint_keys = set(RESTRAINT_SECTIONS)
-    if "restraints_config" not in obj and (_restraint_keys & set(obj)):
+    if "restraints_config" not in obj and (
+        (_restraint_keys & set(obj)) or "config_path" in obj
+    ):
         yield (path, obj, obj)
 
 
@@ -206,9 +212,15 @@ def _has_conformer_optin(enclosing: dict, cfg: dict) -> bool:
     return found[0]
 
 
-def _validate_one(location: str, cfg: dict, enclosing: dict) -> int:
+def _validate_one(location: str, cfg: dict, enclosing: dict, *, base_dir=None) -> int:
     print(f"\n=== {location} ===")
     errors = 0
+
+    try:
+        cfg = resolve_restraints_config(cfg, base_dir=base_dir)
+    except ValueError as exc:
+        print(f"  ✗ CONFIG PATH ERROR: {exc}")
+        return 1
 
     # chai sidecar carries the opt-in map as a top-level key; chai strips it before
     # from_dict, so strip it here too or from_dict rejects the unknown key.
@@ -227,9 +239,11 @@ def _validate_one(location: str, cfg: dict, enclosing: dict) -> int:
         f"plane={len(rc.plane_data)} base_pair={len(rc.base_pair_data)} "
         f"rmsd={len(rc.rmsd_data)} custom={len(rc.custom_data)}"
     )
-    conf = cfg_for_schema.get("conformer_restraints_config") or {}
+    conf = rc.conformer_config
     conf_terms = [
-        t for t in ("bond", "angle", "chiral", "plane", "cistrans", "vdw") if t in conf
+        t
+        for t in ("bond", "angle", "chiral", "plane", "cistrans", "vdw")
+        if conformer_weight(conf, t) > 0
     ]
     if conf_terms:
         print(f"    conformer terms: {', '.join(conf_terms)}")
@@ -284,7 +298,7 @@ def main(argv: list[str]) -> int:
             continue
         for location, cfg, enclosing in found:
             n_configs += 1
-            rc |= _validate_one(location, cfg, enclosing)
+            rc |= _validate_one(location, cfg, enclosing, base_dir=path.parent)
 
     print(
         "\n"

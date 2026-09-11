@@ -28,7 +28,10 @@ def _pack(rows, peptides=(), config=None):
     active = np.asarray(sorted(atoms), dtype=np.int64)
     spec = RestraintSpec(len(active), active, conf_start_sigma=float("inf"))
     append_library_arrays(
-        spec, targets, config or {}, {g: i for i, g in enumerate(active)}
+        spec,
+        targets,
+        {k: {"weight": 1} for k in rows} if config is None else config,
+        {g: i for i, g in enumerate(active)},
     )
     return spec
 
@@ -375,7 +378,9 @@ def test_compiled_cuda_dictionary_energy_and_gradients_match_eager():
     additions = LibraryTargets()
     additions.terms["plane"] = [GeometryTarget(tuple(range(6)), 0, 0.02)]
     additions.terms["chiral"] = [GeometryTarget((0, 1, 2, 3), 0.8, 0.1, both=True)]
-    append_library_arrays(spec, additions, {}, {i: i for i in range(6)})
+    append_library_arrays(
+        spec, additions, {"plane": {"weight": 1}}, {i: i for i in range(6)}
+    )
     spec.cistrans.period[:] = 3
     base = torch_energy.prepare_spec(spec, device="cuda", dtype=torch.float64)
     value_and_grad = torch.func.grad_and_value(torch_energy.total_energy, argnums=0)

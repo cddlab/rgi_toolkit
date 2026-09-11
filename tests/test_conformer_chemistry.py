@@ -132,7 +132,7 @@ def test_dictionary_free_chi_omega_and_sp2_keep_reference_periods(monkeypatch):
 
     monkeypatch.setattr(monlib_geom.MonomerLibrary, "load", no_download)
     adapter, coords = _peptide("SFR")
-    config = {"cistrans": {}}
+    config = {key: {"weight": 0} for key in ("bond", "angle", "chiral", "vdw")}
     geometry = build_polymer_geometry(adapter, config)
     targets = geometry.library
     assert not targets.atoms
@@ -193,7 +193,8 @@ def test_ligand_sp2_uses_relaxed_coords_and_preserves_double_bond_ez(monkeypatch
     relaxed = ligand.conf_coords.copy()
     relaxed[4, 2] += 0.4
     monkeypatch.setattr(featurizer, "ff_relax", lambda *args, **kwargs: relaxed)
-    spec = build_spec([ligand], conformer_config={"cistrans": {}})
+    config = {key: {"weight": 0} for key in ("bond", "angle", "chiral", "vdw")}
+    spec = build_spec([ligand], conformer_config=config)
     assert 1 in spec.cistrans.period
     assert 2 in spec.cistrans.period
     assert numpy_energy.total_energy(

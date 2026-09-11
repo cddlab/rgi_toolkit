@@ -546,9 +546,10 @@ def test_conformer_targets_and_minima_match_scipy(solver, kind, capsys):
     )
     config = {
         "relax_force_field": {"ligand": "none"},
+        **{key: {"weight": 0} for key in ("chiral", "cistrans", "vdw")},
         "bond": {},
         "angle": {},
-        kind: {"slack": 0.0},
+        kind: {"weight": 1, "slack": 0.0},
     }
     cr = setup(adapter, {"conformer_restraints_config": config}, solver, max_iter=5000)
     # Explicit topology of the three fixtures, independent of the spec builder.
@@ -621,6 +622,10 @@ def test_intramolecular_vdw_matches_dense_scipy(solver, capsys):
             "conformer_restraints_config": {
                 "relax_force_field": {"ligand": "none"},
                 "vdw": {"mode": "intramolecular", "weight": 0.04, "max_atom_step": 2.0},
+                **{
+                    key: {"weight": 0}
+                    for key in ("bond", "angle", "chiral", "cistrans")
+                },
             }
         },
         solver,
