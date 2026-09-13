@@ -1,4 +1,4 @@
-"""Public termination diagnostics, strict step bounds, and neighbor-block lifetime."""
+"""Public termination diagnostics, unrestricted steps, and exact neighbour-cache lifetime."""
 
 import jax
 import jax.numpy as jnp
@@ -48,7 +48,7 @@ def native(points, backend):
     return np.array(points, dtype=float)
 
 
-def configured(*, max_iter=100, gate=None, dynamic=False, interval=2, skin=2.0):
+def configured(*, max_iter=100, gate=None, dynamic=False, skin=2.0):
     def quadratic(ctx):
         xyz = ctx.coords("index 1")
         return (
@@ -70,8 +70,6 @@ def configured(*, max_iter=100, gate=None, dynamic=False, interval=2, skin=2.0):
             "relax_force_field": {"ligand": "none"},
             "vdw": {
                 "mode": "intermolecular",
-                "max_atom_step": 1.0,
-                "neighbor_rebuild_interval": interval,
                 "neighbor_skin": skin,
             },
         }
@@ -157,45 +155,26 @@ def test_info_is_one_record_for_the_entire_batch(backend):
     assert int(info.nfev) == 1
 
 
-def test_failure_after_accepted_step_ends_all_neighbor_blocks(backend):
-    cr = configured(dynamic=True, interval=2)
+@pytest.mark.parametrize("skin", [0.0, 2.0])
+def test_rebuild_preserves_cg_history_and_counts(backend, skin):
+    from scipy.optimize import minimize
+
+    cr = configured(dynamic=True, skin=skin)
     initial = coords([1, 5, 0])
     out, info = apply(cr, native(initial, backend), backend)
-    # This quadratic accepts the first bounded step, but the next soft-axis
-    # direction needs more than 1 A to reduce its slope to 40 percent.
-    assert int(info.status) == CGStatus.LINE_SEARCH_FAILED
-    assert int(info.nit) == 1
-    assert int(info.nfev) == int(info.njev) == 3
-    gradient = np.asarray(out)[1] * [16, 1, 1]
-    previous_gradient = initial[1] * [16, 1, 1]
-    beta = max(
-        0,
-        gradient
-        @ (gradient - previous_gradient)
-        / (previous_gradient @ previous_gradient),
+    weights = np.array([16, 1, 1])
+    ref = minimize(
+        lambda x: np.sum(weights * x**2) / 2,
+        initial[1],
+        jac=lambda x: weights * x,
+        method="CG",
+        options={"gtol": 1e-7, "maxiter": 100},
     )
-    direction = -gradient - beta * previous_gradient
-    slope = gradient @ direction
-    curvature = direction @ (direction * [16, 1, 1])
-    assert 1 / np.linalg.norm(direction) < -0.6 * slope / curvature
-    assert float(info.grad_norm) == pytest.approx(np.abs(gradient).max())
-    assert float(info.grad_norm) > 1
-    limited = configured(max_iter=2, dynamic=True, interval=2)
-    short, short_info = apply(limited, native(initial, backend), backend)
-    np.testing.assert_allclose(out, short, atol=1e-12)
-    np.testing.assert_allclose(info, short_info, atol=1e-12)
-
-
-def test_rebuild_preserves_aggregate_evaluation_counts(backend):
-    cr = configured(dynamic=True, interval=1, skin=0.0)
-    out, info = apply(cr, native(coords([1, 1, 0]), backend), backend)
+    assert ref.success
     assert int(info.status) == CGStatus.CONVERGED
-    assert int(info.nit) > 1
-    # Every accepted move triggers a new block/list and a fresh initial f/g call.
-    # Dropping the prior block's counters would report only the final block here.
-    assert int(info.nfev) >= 2 * int(info.nit)
-    assert int(info.nfev) == int(info.njev)
-    np.testing.assert_allclose(np.asarray(out)[1], 0, atol=1e-6)
+    assert int(info.nit) == ref.nit
+    assert int(info.nfev) == int(info.njev) == ref.nfev
+    np.testing.assert_allclose(np.asarray(out)[1], ref.x, atol=1e-8)
 
 
 def test_jax_info_can_be_collected_inside_scan():

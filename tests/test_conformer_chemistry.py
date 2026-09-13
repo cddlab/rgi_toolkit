@@ -525,7 +525,7 @@ def _typed_optimizer_spec(custom=False):
     )
     config = {
         # This fixture checks typed scoring and caches, independently of cap failure.
-        "conformer_restraints_config": {"vdw": {"max_atom_step": 2.0}},
+        "conformer_restraints_config": {"vdw": {}},
         "distance_restraints_config": [
             {
                 "atom_selection1": "index 0",

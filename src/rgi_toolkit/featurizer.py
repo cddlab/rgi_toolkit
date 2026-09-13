@@ -22,8 +22,6 @@ import numpy as np
 from rdkit import Chem
 
 from rgi_toolkit._config_util import (
-    VDW_MAX_ATOM_STEP_DEFAULT,
-    VDW_NEIGHBOR_REBUILD_INTERVAL_DEFAULT,
     VDW_NEIGHBOR_SKIN_DEFAULT,
     VDW_SCALE_DEFAULT,
     conformer_weight,
@@ -1273,14 +1271,6 @@ def build_spec(
         group_improper=group_improper,
         group_chiral=group_chiral,
         active_vdw_config=active_vdw_config,
-        vdw_max_atom_step=float(
-            (cfg.get("vdw", {}) or {}).get("max_atom_step", VDW_MAX_ATOM_STEP_DEFAULT)
-        ),
-        vdw_neighbor_rebuild_interval=int(
-            (cfg.get("vdw", {}) or {}).get(
-                "neighbor_rebuild_interval", VDW_NEIGHBOR_REBUILD_INTERVAL_DEFAULT
-            )
-        ),
         vdw_neighbor_skin=float(
             (cfg.get("vdw", {}) or {}).get("neighbor_skin", VDW_NEIGHBOR_SKIN_DEFAULT)
         ),

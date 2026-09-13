@@ -237,7 +237,7 @@ def build_active_vdw_pairs(
 
     Exclusions are applied before K candidates are selected by smallest VdW clearance.
     Mutual directed rows receive weight 1/2 and one-sided KNN rows weight 1, so every
-    physical pair contributes once. The caller holds the list fixed for one CG block.
+    physical pair contributes once. VdwRuntime handles overflow and trial validity.
     Sorting is O(N log N); the 27 neighbouring hash buckets are traversed in bounded
     chunks without a capacity cutoff. Normal molecular density is therefore O(N log N)
     time and O(N*K) memory, while a fully collapsed cell correctly degrades to O(N^2).
@@ -284,7 +284,7 @@ def build_fixed_vdw_pairs(
     scale=None,
     chemistry=None,
 ):
-    """Build moving-ligand to fixed-background neighbours for the current CG block."""
+    """Build moving-ligand to fixed-background neighbours at a trial point."""
 
     n_active = active.shape[-2]
     batch = active.reshape(-1, n_active, 3).detach()
@@ -502,7 +502,6 @@ def _cg_minimize_torch(
     x0,
     max_iter,
     gtol=GTOL,
-    max_atom_step=None,
     state=None,
     return_state=False,
     return_info=False,
@@ -516,7 +515,6 @@ def _cg_minimize_torch(
         x0,
         max_iter,
         gtol=gtol,
-        max_atom_step=max_atom_step,
         state=state,
         **search_options,
     )
@@ -531,7 +529,6 @@ def gpu_cg(
     max_iter,
     vdw=None,
     active_vdw=None,
-    max_atom_step=None,
     state=None,
     return_state=False,
 ):
@@ -570,7 +567,6 @@ def gpu_cg(
                 vg,
                 x0,
                 max_iter,
-                max_atom_step=max_atom_step,
                 state=state,
                 return_state=return_state,
             )
@@ -591,7 +587,6 @@ def gpu_cg(
         torch.func.grad_and_value(e_of),
         x0,
         max_iter,
-        max_atom_step=max_atom_step,
         state=state,
         return_state=return_state,
     )

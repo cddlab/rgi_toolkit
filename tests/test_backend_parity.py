@@ -288,13 +288,8 @@ def test_grad_parity():
 
     from rgi_toolkit.energy import jax_energy, torch_energy
 
-    # group, distance AND plane terms excluded: group/distance have an intentionally
-    # N x-rescaled centroid gradient (centroid_eff — distance uses reduced-mass scale
-    # mu=N1*N2/(N1+N2)); plane stop-gradients its best-fit-plane normal. None match a numpy
-    # finite-difference of the true energy. Group grad parity is checked torch-vs-jax in
-    # test_optim; distance in test_distance_grad_parity_torch_jax; plane in
-    # test_plane_grad_parity_torch_jax below.
-    spec = _make_spec(include_groups=False, include_distance=False, include_plane=False)
+    # Centroid gradients are ordinary mean derivatives and must match finite differences.
+    spec = _make_spec(include_groups=True, include_distance=True, include_plane=False)
     pos = _positions()
 
     prep_np = numpy_energy.prepare_spec(spec)
@@ -471,13 +466,7 @@ def test_cistrans_degenerate_gradient_parity():
 
 
 def test_distance_grad_parity_torch_jax():
-    """Distance is now CG-minimised with the reduced-mass ``centroid_eff`` rescale
-    (``scale = N1*N2/(N1+N2)``), so its autodiff gradient is intentionally N×-rescaled and
-    does NOT match a numpy finite-difference of the true energy — the same carve-out as
-    rmsd/group. The contract that survives: the energy VALUE agrees across numpy/torch/jax
-    (centroid_eff leaves the value unchanged), and the autodiff GRADIENT agrees
-    torch-vs-jax (what the CG optimizers rely on). N1=3 != N2=1 so the rescale is genuinely
-    active (mu = 3/4 != 1, unlike the N1=N2=2 case where mu collapses to 1)."""
+    """Unequal centroid groups use the derivative of their actual scalar energy."""
     torch = pytest.importorskip("torch")
     jax = pytest.importorskip("jax")
     jax.config.update("jax_enable_x64", True)
@@ -513,7 +502,7 @@ def test_distance_grad_parity_torch_jax():
     prep_t = torch_energy.prepare_spec(spec, dtype=torch.float64)
     prep_j = jax_energy.prepare_spec(spec)
 
-    # energy value parity across the three backends (centroid_eff is value-preserving)
+    # Energy values agree across all three backends.
     e_np = float(numpy_energy.total_energy(pos, prep_np))
     e_t = float(
         torch_energy.total_energy(torch.tensor(pos, dtype=torch.float64), prep_t)
@@ -522,8 +511,6 @@ def test_distance_grad_parity_torch_jax():
     assert e_np > 0.0
     assert abs(e_np - e_t) < 1e-6 and abs(e_np - e_j) < 1e-6
 
-    # gradient parity: torch vs jax (both apply the reduced-mass rescale; a numpy-FD of the
-    # true energy would NOT match because the gradient is deliberately N×-rescaled).
     pt = torch.tensor(pos, dtype=torch.float64, requires_grad=True)
     torch_energy.total_energy(pt, prep_t).backward()
     g_t = pt.grad.numpy()
@@ -531,6 +518,11 @@ def test_distance_grad_parity_torch_jax():
         jax.grad(lambda x: jax_energy.total_energy(x, prep_j))(jnp.asarray(pos))
     )
     assert np.allclose(g_t, g_j, atol=1e-6), f"max|d|={np.abs(g_t - g_j).max()}"
+    g_fd = _fd_grad(
+        lambda x: float(numpy_energy.total_energy(x.reshape(pos.shape), prep_np)),
+        pos.flatten(),
+    ).reshape(pos.shape)
+    np.testing.assert_allclose(g_t, g_fd, atol=1e-6, rtol=1e-5)
 
 
 def test_plane_grad_parity_torch_jax():

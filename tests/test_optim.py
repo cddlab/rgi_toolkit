@@ -67,8 +67,6 @@ def test_solver_objective_tracks_new_contacts(backend, method, dynamic):
 
     spec = _distance_objective()
     spec.vdw_neighbor_skin = 0.0
-    # Isolate scoring from the strict step-bound failure policy tested below.
-    spec.vdw_max_atom_step = 20.0
     coords = np.array(
         [[0.0, 0.0, 0.0], [12.0, 0.0, 0.0], [10.0, 0.0, 0.0], [14.0, 0.0, 0.0]]
     )
@@ -166,11 +164,20 @@ def test_disabled_undefined_custom_does_not_block_distance(backend, disabled):
         out = torch.tensor(coords, dtype=torch.float64)
         if backend == "torch_compiled":
             _require_python_dev_headers()
+            from rgi_toolkit.optim._cg import torch_cg
+            from rgi_toolkit.optim._torch_cg_gpu import _get_cvg
+            from rgi_toolkit.optim.info import CGStatus
+
             opt._ensure(out.device, out.dtype)
-            active = out[spec.active_sites].clone().requires_grad_(True)
-            ok, _ = opt._minimize_custom_gpu(active, 1.0, 0, 50, None, None)
-            assert ok, "compiled path unexpectedly fell back to eager"
-            out[spec.active_sites] = active.detach()
+            active = out[spec.active_sites].clone()
+            assert opt._custom_energy(active, 1.0, 0) is None
+            # An empty enabled subset uses the ordinary compiled objective.
+            compiled = _get_cvg(0)
+            assert compiled is not None
+            prepared = opt._gated_prepared(1.0, 0)
+            result, state = torch_cg(lambda a: compiled(a, prepared), active, 50)
+            assert int(state.info.status) == CGStatus.CONVERGED
+            out[spec.active_sites] = result
         else:
             opt.minimize(out, sigma=1.0, step=0)
         out = out.numpy()
@@ -208,9 +215,11 @@ def test_gpu_custom_nan_gate_and_dtype_cache():
                 )
             assert torch.isfinite(coords).all()
             assert optimizer._dtype == dtype
-            assert optimizer._custom_cvg
+            if sigma == 0.0:
+                assert optimizer._custom_cvg
             assert all(value is not False for value in optimizer._custom_cvg.values())
-        assert {key[1] for key in optimizer._custom_cvg} == {(), (0,)}
+        # An empty custom subset shares the ordinary compiled built-in objective.
+        assert {key[1] for key in optimizer._custom_cvg} == {(0,)}
 
 
 def test_torch_scatter_accepts_autograd_leaf_and_fixed_background():
@@ -219,7 +228,6 @@ def test_torch_scatter_accepts_autograd_leaf_and_fixed_background():
     from rgi_toolkit.spec import VdwConfig
 
     spec = _distance_objective()
-    spec.vdw_max_atom_step = 2.0
     spec.vdw_config = VdwConfig(
         weight=1.0,
         ligand_local=np.array([0]),
@@ -923,7 +931,7 @@ def test_torch_vdw_pushes_ligand_off_fixed_protein():
     spec = build_spec(
         [lc],
         [],
-        {"vdw": {"weight": 1.0, "scale": 0.9, "max_atom_step": 10.0}},
+        {"vdw": {"weight": 1.0, "scale": 0.9}},
         elements=elements,
     )
     assert spec.vdw_config is not None
@@ -976,7 +984,7 @@ def test_jax_vdw_pushes_ligand_off_fixed_protein():
     spec = build_spec(
         [lc],
         [],
-        {"vdw": {"weight": 1.0, "scale": 0.9, "max_atom_step": 10.0}},
+        {"vdw": {"weight": 1.0, "scale": 0.9}},
         elements=elements,
         conf_start_sigma=1e30,
     )
@@ -1023,9 +1031,7 @@ def test_torch_interligand_vdw_separates_two_ligands():
     lcB = LigandConf(
         mol=m, conf_coords=c, global_indices=np.arange(n) + n, conformer_restraints=True
     )
-    spec = build_spec(
-        [lcA, lcB], [], {"vdw": {"weight": 1.0, "scale": 0.9, "max_atom_step": 10.0}}
-    )
+    spec = build_spec([lcA, lcB], [], {"vdw": {"weight": 1.0, "scale": 0.9}})
     assert spec.vdw is not None and spec.vdw.idx.shape[0] == n * n
     assert spec.vdw_config is None  # no elements -> inter-ligand only
 
@@ -1071,7 +1077,7 @@ def test_jax_interligand_vdw_separates_two_ligands():
     spec = build_spec(
         [lcA, lcB],
         [],
-        {"vdw": {"weight": 1.0, "scale": 0.9, "max_atom_step": 10.0}},
+        {"vdw": {"weight": 1.0, "scale": 0.9}},
         conf_start_sigma=1e30,
     )
     assert spec.vdw is not None and spec.vdw_config is None
@@ -1131,6 +1137,37 @@ def _rmsd_spec(n=6, seed=3):
     )
     pos = ref @ rz.T + np.array([2.0, 1.0, -1.0]) + rng.standard_normal((n, 3)) * 0.3
     return spec, pos.reshape(1, n, 3)
+
+
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+@pytest.mark.parametrize("autocast", [False, True])
+def test_rmsd_minimization_preserves_precision_under_predictor_settings(
+    device, autocast
+):
+    torch = pytest.importorskip("torch")
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
+
+    spec, points = _rmsd_spec(n=512)
+    coords = torch.tensor(points, dtype=torch.float32, device=device)
+    previous = torch.get_float32_matmul_precision()
+    try:
+        torch.set_float32_matmul_precision("high")
+        with torch.autocast(device, dtype=torch.bfloat16, enabled=autocast):
+            result = TorchRestraintOptimizer(spec).minimize(coords)
+            assert torch.is_autocast_enabled(device) == autocast
+        assert torch.get_float32_matmul_precision() == "high"
+    finally:
+        torch.set_float32_matmul_precision(previous)
+
+    moving = result[0].cpu().numpy().astype(np.float64)
+    target = spec.rmsd.fit_ref[0]
+    moving -= moving.mean(0)
+    target = target - target.mean(0)
+    u, _, vt = np.linalg.svd(moving.T @ target)
+    rotation = u @ np.diag([1, 1, np.linalg.det(u @ vt)]) @ vt
+    rmsd = np.sqrt(np.mean(np.sum((moving @ rotation - target) ** 2, axis=-1)))
+    assert result.dtype == coords.dtype
+    assert rmsd < 1e-3
 
 
 def test_func_grad_matches_backward_conformer():
@@ -1637,7 +1674,7 @@ def test_dynamic_vdw_pair_energy_matches_optimizer():
     spec = build_spec(
         [lc],
         [],
-        {"vdw": {"weight": 1.0, "scale": 0.9, "max_atom_step": 10.0}},
+        {"vdw": {"weight": 1.0, "scale": 0.9}},
         elements=elements,
     )
     assert spec.vdw_config is not None  # dynamic fixed-background VdW
@@ -2065,7 +2102,7 @@ def test_gpu_cg_matches_cpu_minimum():
 
 
 @pytest.mark.parametrize("weight", [1.0, 32.0])
-def test_torch_vdw_cg_step_cap_without_wolfe_point_stops(weight):
+def test_torch_vdw_cg_relieves_clash_without_a_step_cap(weight):
     torch = pytest.importorskip("torch")
     from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
     from rgi_toolkit.spec import RestraintSpec, VdwArrays
@@ -2080,7 +2117,6 @@ def test_torch_vdw_cg_step_cap_without_wolfe_point_stops(weight):
             mask=np.ones(1),
         ),
         conf_start_sigma=float("inf"),
-        vdw_max_atom_step=0.1,
     )
     coords = torch.tensor([[0.0, 0.0, 0.0], [0.5, 0.0, 0.0]], dtype=torch.float64)
 
@@ -2091,16 +2127,14 @@ def test_torch_vdw_cg_step_cap_without_wolfe_point_stops(weight):
 
     from rgi_toolkit import CGStatus
 
-    # Each atom can move only .1 A, reducing the overlap from 2.05 to >=1.85 A.
-    # Its slope magnitude stays >=1.85/2.05 > c2=.4: no Wolfe step exists.
-    assert 1.85 / 2.05 > 0.4
-    assert distance == 0.5
-    assert int(info.status) == CGStatus.LINE_SEARCH_FAILED
-    assert int(info.nit) == 0
+    assert distance >= 2.55 - 1e-7
+    assert int(info.status) == CGStatus.CONVERGED
+    assert int(info.nit) > 0
+    assert float(info.grad_norm) <= 1e-7
 
 
 @pytest.mark.parametrize("weight", [1.0, 32.0])
-def test_jax_vdw_cg_step_cap_without_wolfe_point_stops(weight):
+def test_jax_vdw_cg_relieves_clash_without_a_step_cap(weight):
     jax = pytest.importorskip("jax")
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
@@ -2118,7 +2152,6 @@ def test_jax_vdw_cg_step_cap_without_wolfe_point_stops(weight):
             mask=np.ones(1),
         ),
         conf_start_sigma=float("inf"),
-        vdw_max_atom_step=0.1,
     )
     coords = jnp.asarray([[0.0, 0.0, 0.0], [0.5, 0.0, 0.0]])
 
@@ -2129,12 +2162,10 @@ def test_jax_vdw_cg_step_cap_without_wolfe_point_stops(weight):
 
     from rgi_toolkit import CGStatus
 
-    # Each atom can move only .1 A, reducing the overlap from 2.05 to >=1.85 A.
-    # Its slope magnitude stays >=1.85/2.05 > c2=.4: no Wolfe step exists.
-    assert 1.85 / 2.05 > 0.4
-    assert distance == 0.5
-    assert int(info.status) == CGStatus.LINE_SEARCH_FAILED
-    assert int(info.nit) == 0
+    assert distance >= 2.55 - 1e-7
+    assert int(info.status) == CGStatus.CONVERGED
+    assert int(info.nit) > 0
+    assert float(info.grad_norm) <= 1e-7
 
 
 def test_torch_dynamic_vdw_rebuilds_before_new_contact():
@@ -2172,10 +2203,8 @@ def test_torch_dynamic_vdw_rebuilds_before_new_contact():
             max_neighbors=4,
         ),
         conf_start_sigma=float("inf"),
-        vdw_max_atom_step=10.0,
-        vdw_neighbor_rebuild_interval=1,
-        # Initial distance 15 A exceeds cutoff 2.55 + 10 = 12.55 A.
-        # The first accepted move triggers a rebuild before the contact turns on.
+        # Initial distance 15 A exceeds the 5 A cutoff. Trial coordinates trigger
+        # a rebuild before scoring any newly formed contact.
         vdw_neighbor_skin=0.0,
     )
     coords = torch.tensor(
@@ -2226,10 +2255,8 @@ def test_jax_dynamic_vdw_rebuilds_before_new_contact():
             max_neighbors=4,
         ),
         conf_start_sigma=float("inf"),
-        vdw_max_atom_step=10.0,
-        vdw_neighbor_rebuild_interval=1,
-        # Initial distance 15 A exceeds cutoff 2.55 + 10 = 12.55 A.
-        # The first accepted move triggers a rebuild before the contact turns on.
+        # Initial distance 15 A exceeds the 5 A cutoff. Trial coordinates trigger
+        # a rebuild before scoring any newly formed contact.
         vdw_neighbor_skin=0.0,
     )
     coords = jnp.asarray([[15.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
@@ -2269,8 +2296,6 @@ def test_torch_dynamic_vdw_stops_rebuilding_after_convergence(monkeypatch):
             max_neighbors=4,
         ),
         conf_start_sigma=float("inf"),
-        vdw_max_atom_step=0.1,
-        vdw_neighbor_rebuild_interval=1,
     )
     coords = torch.tensor([[3.0, 0.0, 0.0], [0.0, 0.0, 0.0]], dtype=torch.float64)
 
@@ -2286,10 +2311,10 @@ def test_torch_dynamic_vdw_stops_rebuilding_after_convergence(monkeypatch):
 def test_torch_dynamic_vdw_rebuild_follows_measured_displacement(
     monkeypatch, skin, expect_rebuilds
 ):
-    """A 1.5 A translation takes two Wolfe steps under a 1 A per-step bound.
+    """A 1.5 A translation must converge without a displacement bound.
 
-    Check after every accepted step. A 2 A skin retains the initial list; a .5 A
-    skin requires rebuilding after the first 1 A step. Both runs must converge.
+    Check before every trial evaluation. A 2 A skin retains the initial list; a .5 A
+    skin requires rebuilding when a trial travels beyond it. Both runs must converge.
     """
     torch = pytest.importorskip("torch")
     from rgi_toolkit.optim import _torch_cg_gpu
@@ -2335,8 +2360,6 @@ def test_torch_dynamic_vdw_rebuild_follows_measured_displacement(
             max_neighbors=4,
         ),
         conf_start_sigma=float("inf"),
-        vdw_max_atom_step=1.0,
-        vdw_neighbor_rebuild_interval=1,
         vdw_neighbor_skin=skin,
     )
     coords = torch.tensor(

@@ -8,20 +8,11 @@ Wolfe), shared with the JAX backend through ``optim/_cg.py``; ``"l-bfgs"`` ->
 and stays on whatever device the coordinates live on, so ``gpu: true`` runs
 entirely on GPU.
 
-The fixed-background VdW term (``spec.vdw_config``) is handled here rather than in
-the static energy layer: the ligand atoms come from the optimised ``active`` set
-while the background atoms (protein / DNA/RNA / non-restrained ligand) are a *fixed
-background* read from the full coordinate tensor. A fixed-width neighbour list is
-listed out to a Verlet skin beyond the contact cutoff and rebuilt when the atoms'
-MEASURED displacement since the last build exhausts that skin (only the ligand is
-pushed; the background is held fixed). ``vdw_neighbor_rebuild_interval`` is how often
-that check runs, not how often a rebuild happens; between checks the CG state is
-carried across the block boundary, so a block that does not rebuild costs neither a
-re-entry evaluation nor the conjugate direction.
+Dynamic VdW caches are validated before every trial evaluation by the shared
+``_vdw_runtime``. Fixed partners receive the full Verlet skin displacement budget;
+two moving partners each receive half. Overflow rows use complete pair sums in
+bounded chunks. Rebuilding preserves the objective and CG history.
 
-The active-active polymer half (``spec.active_vdw_config``) uses the same dynamic
-cell-list machinery, but both endpoints move and therefore each gets half the Verlet
-displacement budget.
 """
 
 from __future__ import annotations
@@ -31,11 +22,6 @@ import os
 
 import torch
 
-from rgi_toolkit._config_util import (
-    VDW_MAX_ATOM_STEP_DEFAULT,
-    VDW_NEIGHBOR_REBUILD_INTERVAL_DEFAULT,
-    VDW_NEIGHBOR_SKIN_DEFAULT,
-)
 from rgi_toolkit.energy import torch_energy
 from rgi_toolkit.energy._terms import CONF_KEYS, PER_ENTRY_KEYS, TERM_BY_KEY
 from rgi_toolkit.optim._cg_config import GTOL
@@ -71,6 +57,9 @@ class TorchRestraintOptimizer:
         # Compiled custom energy/gradient artifacts, keyed by VdW mode and active
         # custom subset. A failed artifact disables only its own key.
         self._custom_cvg = {}
+        from rgi_toolkit.optim._coordinates import CentroidCoordinates
+
+        self._coordinates = CentroidCoordinates(spec)
 
     def _custom_energy(self, active, sigma, step):
         """Per-entry gated sum of the custom-restraint closure energies at ``active``
@@ -134,61 +123,6 @@ class TorchRestraintOptimizer:
             self._custom_cvg[key] = False
             return None
         return self._custom_cvg[key]
-
-    def _minimize_custom_gpu(
-        self,
-        active,
-        sigma,
-        step,
-        mi,
-        vdw,
-        active_vdw,
-        max_atom_step=None,
-        state=None,
-        prepared_g=None,
-    ):
-        """GPU CG with the torch.compile'd custom-inclusive energy. ``vdw`` /
-        ``active_vdw`` are the same optional argument tuples ``gpu_cg`` takes; they select
-        the base energy so the dynamic VdW terms stay inside the compiled graph. Returns
-        ``(ok, state)``; ``ok`` is False (caller falls back to the eager CG) when compile is
-        unavailable or the artifact fails."""
-        mode = (1 if vdw is not None else 0) | (2 if active_vdw is not None else 0)
-        active_terms = tuple(
-            i
-            for i, (_n, s, st, sstep, estep, _c) in enumerate(self._custom_terms)
-            if (sigma is None or st <= sigma <= s)
-            and (step is None or sstep <= step <= estep)
-        )
-        cvg = self._get_custom_cvg(mode, active_terms)
-        if cvg is None:
-            return False, None
-        from rgi_toolkit.optim._torch_cg_gpu import _cg_minimize_torch
-
-        vdw_args = (vdw or ()) + (active_vdw or ())
-        if prepared_g is None:
-            prepared_g = torch_energy.bind_peptide_states(
-                active, self._gated_prepared(sigma, step)
-            )
-        try:
-            opt, out_state = _cg_minimize_torch(
-                lambda x: cvg(x, prepared_g, *vdw_args),
-                active.detach(),
-                mi,
-                max_atom_step=max_atom_step,
-                state=state,
-                return_state=True,
-            )
-            with torch.no_grad():
-                active.copy_(opt)
-            return True, out_state
-        except (
-            Exception
-        ) as exc:  # this artifact's runtime failure -> eager, permanently
-            logger.warning(
-                "custom GPU CG (compiled) failed at runtime (%s); eager", exc
-            )
-            self._custom_cvg[(mode, active_terms)] = False
-            return False, None
 
     def _ensure(self, device, dtype) -> None:
         if (
@@ -337,7 +271,7 @@ class TorchRestraintOptimizer:
             }
 
     def _fixed_vdw_pairs(self, active, bg_pos, dmax=None):
-        """Build the fixed-background neighbour list for the current CG block."""
+        """Build the fixed-background neighbour list at the supplied coordinates."""
         from rgi_toolkit.optim._torch_cg_gpu import build_fixed_vdw_pairs
 
         v = self._vdw
@@ -428,266 +362,114 @@ class TorchRestraintOptimizer:
         )
         vdw_active = self._vdw is not None and conformer_in_window
         active_vdw_active = self._active_vdw is not None and conformer_in_window
-        static_vdw_active = self.spec.has_array_term("vdw") and conformer_in_window
-        any_vdw_active = vdw_active or active_vdw_active or static_vdw_active
-        max_atom_step = (
-            float(getattr(self.spec, "vdw_max_atom_step", VDW_MAX_ATOM_STEP_DEFAULT))
-            if self._is_cg() and any_vdw_active
-            else None
-        )
-        # How often a dynamic neighbour list is CHECKED for staleness, in CG iterations.
-        # With no dynamic list there is nothing to check, so the whole budget is one block.
-        dynamic_vdw = vdw_active or active_vdw_active
-        check = (
-            int(
-                getattr(
-                    self.spec,
-                    "vdw_neighbor_rebuild_interval",
-                    VDW_NEIGHBOR_REBUILD_INTERVAL_DEFAULT,
-                )
-            )
-            if dynamic_vdw
-            else max(int(mi), 1)
-        )
+        from rgi_toolkit.optim import _torch_cg_gpu as gpu
+        from rgi_toolkit.optim._cg import torch_cg
+        from rgi_toolkit.optim._vdw_runtime import VdwRuntime
 
-        has_builtin = self.spec.has_conformer() or self.spec.has_per_entry()
-        has_custom = self.spec.has_custom()
-        prepared = self._prepared
-
-        # boltz / Lightning run prediction under torch.inference_mode, where leaf
-        # tensors cannot require grad. Re-enable autograd and copy the active sites
-        # into a normal tensor we can mutate / attach a graph to.
-        with torch.inference_mode(False), torch.enable_grad():
-            active = torch.empty(
-                coords[..., self._active_idx, :].shape,
-                dtype=work_dtype,
-                device=coords.device,
+        with (
+            torch.inference_mode(False),
+            torch.enable_grad(),
+            torch.autocast(device_type=coords.device.type, enabled=False),
+        ):
+            active = coords[..., self._active_idx, :].to(work_dtype).clone().detach()
+            prepared = torch_energy.bind_peptide_states(
+                active, self._gated_prepared(sigma, step)
             )
-            active.copy_(coords[..., self._active_idx, :])
-            # Bind before line searches and retain the same objective across VdW
-            # blocks. Never write these sample-dependent masks into either cache.
-            prepared = torch_energy.bind_peptide_states(active, prepared)
-            prepared_g = (
-                torch_energy.bind_peptide_states(
-                    active, self._gated_prepared(sigma, step)
-                )
-                if active.is_cuda
+            bg_pos = (
+                coords[..., self._vdw["bg_global"], :].to(work_dtype).clone().detach()
+                if vdw_active
                 else None
             )
-
-            if has_builtin or has_custom:
-                active = active.detach().clone()
-                active.requires_grad_(True)
-                bg_pos = None
-                if vdw_active:
-                    bg_pos = torch.empty(
-                        coords[..., self._vdw["bg_global"], :].shape,
-                        dtype=work_dtype,
-                        device=coords.device,
-                    )
-                    bg_pos.copy_(coords[..., self._vdw["bg_global"], :].detach())
-                fixed_vdw = None
-                active_vdw = None
-
-                # The search radius includes worst-case travel between staleness checks.
-                # The skin supplies an extra shell and the displacement budget for rebuilds.
-                skin = float(
-                    getattr(self.spec, "vdw_neighbor_skin", VDW_NEIGHBOR_SKIN_DEFAULT)
+            runtime = VdwRuntime(
+                "torch",
+                active,
+                fixed=self._vdw if vdw_active else None,
+                moving=self._active_vdw if active_vdw_active else None,
+                background=bg_pos,
+                skin=self.spec.vdw_neighbor_skin,
+            )
+            active_terms = tuple(
+                i
+                for i, (_n, start, stop, sstep, estep, _c) in enumerate(
+                    self._custom_terms
                 )
-                movement = (
-                    None if max_atom_step is None else max_atom_step * float(check)
+                if (sigma is None or stop <= sigma <= start)
+                and (step is None or sstep <= step <= estep)
+            )
+            base = gpu._ENERGY_BY_MODE[runtime.mode]
+
+            def sparse_energy(a, prepared, *args):
+                e = base(a, prepared, *args)
+                for i in active_terms:
+                    e = e + self._custom_terms[i][-1](a)
+                return e
+
+            eager = torch.func.grad_and_value(sparse_energy)
+            compiled = None
+            if active.is_cuda:
+                compiled = (
+                    self._get_custom_cvg(runtime.mode, active_terms)
+                    if active_terms
+                    else gpu._get_cvg(runtime.mode)
                 )
 
-                def _rebuild_fixed():
-                    nonlocal fixed_vdw
-                    v = self._vdw
-                    cutoff = v["dmax"]
-                    if movement is not None:
-                        max_r_min = v["contact"]
-                        cutoff = torch.maximum(cutoff, max_r_min + movement + skin)
-                    fixed_vdw = self._fixed_vdw_pairs(active, bg_pos, cutoff)
-
-                def _rebuild_active():
-                    nonlocal active_vdw
-                    from rgi_toolkit.optim._torch_cg_gpu import build_active_vdw_pairs
-
-                    av = self._active_vdw
-                    cutoff = av["dmax"]
-                    if movement is not None:
-                        max_r_min = av["contact"]
-                        # both endpoints move, hence 2x the one-sided travel allowance
-                        cutoff = torch.maximum(
-                            cutoff, max_r_min + 2.0 * movement + skin
-                        )
-                    neighbours, pair_factor = build_active_vdw_pairs(
-                        active,
-                        av["radii"],
-                        av["polymer_mask"],
-                        av["excluded_codes"],
-                        cutoff,
-                        av["max_neighbors"],
-                        av["scale"],
-                        av["chemistry"],
-                    )
-                    active_vdw = (neighbours, pair_factor)
-
-                def rebuild_dynamic_pairs():
-                    """Unconditional build of both halves (the l-bfgs entry point)."""
-                    if bg_pos is not None:
-                        _rebuild_fixed()
-                    if active_vdw_active:
-                        _rebuild_active()
-
-                def energy_fn():
-                    e = torch_energy.total_energy(active, prepared, sigma, step)
-                    if bg_pos is not None:
-                        e = e + self._vdw_energy(active, bg_pos, fixed_vdw)
-                    if active_vdw is not None:
-                        from rgi_toolkit.optim._torch_cg_gpu import (
-                            active_vdw_pair_energy,
-                        )
-
-                        av = self._active_vdw
-                        e = e + active_vdw_pair_energy(
-                            active,
-                            active_vdw[0],
-                            active_vdw[1],
-                            av["radii"],
-                            av["scale"],
-                            av["weight"],
-                            av["chemistry"],
-                        )
-                    ce = self._custom_energy(active, sigma, step)
-                    if ce is not None:
-                        e = e + ce
-                    return e
-
-                def dynamic_args():
-                    vdw = None
-                    if bg_pos is not None:
-                        v = self._vdw
-                        vdw = (
-                            bg_pos,
-                            v["lig_local"],
-                            fixed_vdw[0],
-                            fixed_vdw[1],
-                            v["lig_r"],
-                            v["bg_r"],
-                            v["scale"],
-                            v["weight"],
-                            v["chemistry"],
-                        )
-                    active_args = None
-                    if active_vdw is not None:
-                        av = self._active_vdw
-                        active_args = (
-                            active_vdw[0],
-                            active_vdw[1],
-                            av["radii"],
-                            av["scale"],
-                            av["weight"],
-                            av["chemistry"],
-                        )
-                    return vdw, active_args
-
-                def run_cg(block_iters, state):
-                    """Run one block; an invalid returned state terminates this call."""
-                    vdw, active_args = dynamic_args()
-                    if active.is_cuda and has_custom:
-                        ok, out_state = self._minimize_custom_gpu(
-                            active,
-                            sigma,
-                            step,
-                            block_iters,
-                            vdw,
-                            active_args,
-                            max_atom_step,
-                            state=state,
-                            prepared_g=prepared_g,
-                        )
-                        if ok:
-                            return out_state
-                        return self._minimize_cg(
-                            active,
-                            energy_fn,
-                            block_iters,
-                            max_atom_step=max_atom_step,
-                            state=state,
-                        )
-                    if active.is_cuda:
-                        from rgi_toolkit.optim._torch_cg_gpu import gpu_cg
-
-                        opt, out_state = gpu_cg(
-                            prepared_g,
-                            active.detach(),
-                            block_iters,
-                            vdw=vdw,
-                            active_vdw=active_args,
-                            max_atom_step=max_atom_step,
-                            state=state,
-                            return_state=True,
-                        )
-                        with torch.no_grad():
-                            active.copy_(opt)
-                        return out_state
-                    return self._minimize_cg(
-                        active,
-                        energy_fn,
-                        block_iters,
-                        max_atom_step=max_atom_step,
-                        state=state,
-                    )
-
-                if self._is_cg():
-                    remaining = int(mi)
-                    # Track only ligand displacement against the fixed background: bg_pos is
-                    # frozen for this invocation, so unrelated polymer motion cannot stale it.
-                    fixed_ref = active_ref = None
-                    cg_state = None
-                    while remaining > 0 or cg_state is None:
-                        rebuilt = False
-                        if bg_pos is not None:
-                            lig = active.detach()[..., self._vdw["lig_local"], :]
-                            if fixed_ref is None or _max_disp(lig, fixed_ref) > skin:
-                                _rebuild_fixed()
-                                fixed_ref = lig.clone()
-                                rebuilt = True
-                        if active_vdw_active:
-                            cur = active.detach()
-                            # both endpoints move, so half the budget each
-                            if active_ref is None or _max_disp(cur, active_ref) > (
-                                0.5 * skin
-                            ):
-                                _rebuild_active()
-                                active_ref = cur.clone()
-                                rebuilt = True
-                        if rebuilt:
-                            # Invalidate the CG history when pairs change. Capacity truncation can
-                            # make added/removed pairs contribute nonzero energy.
-                            if cg_state is not None:
-                                cg_state = cg_state._replace(valid=False)
-                        block_iters = min(check, remaining)
-                        cg_state = run_cg(block_iters, cg_state)
-                        remaining -= block_iters
-                        if not cg_state.valid:
-                            break
-                    info = cg_state.info
+            def value_grad(a, cache):
+                nonlocal compiled
+                args = runtime.args(cache)
+                if compiled is not None:
+                    try:
+                        g, f = compiled(a, prepared, *args)
+                    except Exception as exc:
+                        logger.warning("compiled CG objective failed (%s); eager", exc)
+                        if active_terms:
+                            self._custom_cvg[(runtime.mode, active_terms)] = False
+                        else:
+                            gpu._compile_failed[runtime.mode] = True
+                        compiled = None
+                        g, f = eager(a, prepared, *args)
                 else:
-                    opt = torch.optim.LBFGS(
-                        [active], max_iter=mi, line_search_fn="strong_wolfe"
-                    )
+                    g, f = eager(a, prepared, *args)
+                dg, df = runtime.dense_value_grad(a, cache)
+                return g + dg, f + df
 
-                    def closure():
-                        opt.zero_grad()
-                        # Line-search trials can move beyond the CG's Verlet bounds.
-                        rebuild_dynamic_pairs()
-                        e = energy_fn()
-                        if e.requires_grad:
-                            e.backward()
-                        return e
+            cache = runtime.empty(active)
+            if self._is_cg():
+                mapping = self._coordinates.bind(
+                    "torch", active, sigma, step, enabled=conformer_in_window
+                )
+                origin = active
 
-                    opt.step(closure)
-            new_active = active.detach().clone()
+                def physical(u):
+                    return u if mapping is None else mapping(u, origin)
+
+                def mapped_value_grad(u, cache):
+                    g, f = value_grad(physical(u), cache)
+                    return (g if mapping is None else mapping(g)), f
+
+                active, state = torch_cg(
+                    mapped_value_grad,
+                    active,
+                    mi,
+                    cache=cache,
+                    prepare=lambda u, c: runtime.prepare(physical(u), c),
+                )
+                active = physical(active)
+                info = state.info
+            else:
+                active.requires_grad_(True)
+                opt = torch.optim.LBFGS(
+                    [active], max_iter=mi, line_search_fn="strong_wolfe"
+                )
+
+                def closure():
+                    nonlocal cache
+                    cache = runtime.prepare(active.detach(), cache)
+                    g, f = value_grad(active.detach(), cache)
+                    active.grad = g.detach()
+                    return f.detach()
+
+                opt.step(closure)
+            new_active = active.detach()
 
         # Retain input coordinates if optimization produces non-finite values.
         if not torch.isfinite(new_active).all():
@@ -718,7 +500,6 @@ class TorchRestraintOptimizer:
         energy_fn,
         max_iter,
         gtol=GTOL,
-        max_atom_step=None,
         state=None,
         **search_options,
     ):
@@ -742,7 +523,6 @@ class TorchRestraintOptimizer:
             active.detach(),
             max_iter,
             gtol=gtol,
-            max_atom_step=max_atom_step,
             state=state,
             **search_options,
         )
@@ -782,38 +562,22 @@ class TorchRestraintOptimizer:
         self._ensure(coords.device, coords.dtype)
         if self._vdw is None and self._active_vdw is None:
             return 0.0
+        from rgi_toolkit.optim._vdw_runtime import VdwRuntime
+
         with torch.no_grad():
             active = coords[..., self._active_idx, :]
-            total = 0.0
-            if self._vdw is not None:
-                bg_pos = coords[..., self._vdw["bg_global"], :]
-                total += float(self._vdw_energy(active, bg_pos))
-            if self._active_vdw is not None:
-                from rgi_toolkit.optim._torch_cg_gpu import (
-                    active_vdw_pair_energy,
-                    build_active_vdw_pairs,
-                )
-
-                av = self._active_vdw
-                neighbours, pair_factor = build_active_vdw_pairs(
-                    active,
-                    av["radii"],
-                    av["polymer_mask"],
-                    av["excluded_codes"],
-                    av["dmax"],
-                    av["max_neighbors"],
-                    av["scale"],
-                    av["chemistry"],
-                )
-                total += float(
-                    active_vdw_pair_energy(
-                        active,
-                        neighbours,
-                        pair_factor,
-                        av["radii"],
-                        av["scale"],
-                        av["weight"],
-                        av["chemistry"],
-                    )
-                )
-            return total
+            runtime = VdwRuntime(
+                "torch",
+                active,
+                fixed=self._vdw,
+                moving=self._active_vdw,
+                background=coords[..., self._vdw["bg_global"], :]
+                if self._vdw
+                else None,
+                skin=self.spec.vdw_neighbor_skin,
+            )
+            cache = runtime.prepare(active, runtime.empty(active))
+            return float(
+                runtime.sparse_energy(active, cache)
+                + runtime.dense_value_grad(active, cache, gradient=False)[1]
+            )

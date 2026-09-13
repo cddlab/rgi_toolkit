@@ -16,8 +16,6 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from rgi_toolkit._config_util import (
-    VDW_MAX_ATOM_STEP_DEFAULT,
-    VDW_NEIGHBOR_REBUILD_INTERVAL_DEFAULT,
     VDW_NEIGHBOR_SKIN_DEFAULT,
     VDW_SCALE_DEFAULT,
 )
@@ -37,7 +35,7 @@ DIST_TYPE_CODES = {
     "flat-bottomed2": DIST_UPPER_BOUND,
 }
 
-# Distance move modes. For both groups free, reduced-mass scaling gives their
+# Distance move modes. For both groups free, ordinary mean derivatives give their
 # centroid displacements the ratio N2:N1. Modes 1/2 pin the other group.
 MOVE_BOTH = 0
 MOVE_GROUP1 = 1
@@ -213,7 +211,7 @@ class VdwConfig:
 class ActiveVdwConfig:
     """Dynamic active-active VdW neighbours involving conformer-restrained atoms.
 
-    A fixed-width Verlet-style neighbour list is rebuilt between bounded CG blocks.
+    A fixed-width Verlet-style neighbour cache is validated before every trial.
     Typed topology excludes 1-2/1-3 and same-plane 1-4 pairs before the K-neighbour
     cap. Without ``chemistry``, the explicit ``polymer_mask`` and ``excluded_codes``
     define eligibility, and the radii sum / 0.2-A ESD define the penalty.
@@ -503,11 +501,7 @@ class RestraintSpec:
     vdw: VdwArrays | None = None
     vdw_config: VdwConfig | None = None
     active_vdw_config: ActiveVdwConfig | None = None
-    # Shared VdW step cap and neighbor-list controls. The search cutoff includes
-    # unchecked travel (max_atom_step * interval); measured displacement against
-    # the skin triggers a rebuild.
-    vdw_max_atom_step: float = VDW_MAX_ATOM_STEP_DEFAULT
-    vdw_neighbor_rebuild_interval: int = VDW_NEIGHBOR_REBUILD_INTERVAL_DEFAULT
+    # Extra contact radius and displacement budget for exact per-trial VdW caches.
     vdw_neighbor_skin: float = VDW_NEIGHBOR_SKIN_DEFAULT
     distance: DistanceArrays | None = None
     rmsd: RmsdArrays | None = None

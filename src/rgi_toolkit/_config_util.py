@@ -16,12 +16,8 @@ _TRUE_STRINGS = ("1", "true", "yes", "on")
 
 
 VDW_SCALE_DEFAULT = 1.0
-VDW_MAX_ATOM_STEP_DEFAULT = 0.1
-# CG iterations between neighbor-list staleness checks. The search cutoff includes
-# the unchecked travel bound, max_atom_step * interval.
-VDW_NEIGHBOR_REBUILD_INTERVAL_DEFAULT = 10
 # Verlet skin in Angstroms: extra search radius and displacement budget for rebuilds.
-# Zero skin requires rebuilding after any movement; validate capacity bounds below.
+# Zero skin requires rebuilding after any movement.
 VDW_NEIGHBOR_SKIN_DEFAULT = 2.0
 
 
@@ -61,14 +57,20 @@ def validate_vdw_config(conformer_config: dict | None) -> None:
     if not isinstance(raw, dict):
         raise ValueError("conformer vdw must be a mapping")
 
+    retired = set(raw) & {"max_atom_step", "neighbor_rebuild_interval"}
+    if retired:
+        raise ValueError(
+            f"conformer vdw: remove retired key(s) {sorted(retired)}. "
+            "CG steps are unrestricted; neighbours are validated at every trial. "
+            "Use neighbor_skin and max_neighbors only to tune cache performance."
+        )
+
     known = {
         "weight",
         "mode",
         "scale",
         "dmax",
         "max_neighbors",
-        "max_atom_step",
-        "neighbor_rebuild_interval",
         "neighbor_skin",
     }
     unknown = set(raw) - known
@@ -104,23 +106,11 @@ def validate_vdw_config(conformer_config: dict | None) -> None:
 
     finite_real("weight", 1.0)
     finite_real("scale", VDW_SCALE_DEFAULT, positive=True)
-    dmax = finite_real("dmax", 5.0, positive=True)
-    finite_real("max_atom_step", VDW_MAX_ATOM_STEP_DEFAULT, positive=True)
+    finite_real("dmax", 5.0, positive=True)
     skin = finite_real("neighbor_skin", VDW_NEIGHBOR_SKIN_DEFAULT)
     if skin < 0.0:
         raise ValueError("conformer vdw neighbor_skin must be >= 0")
-    if skin > dmax:
-        # The K-nearest cap is applied after ranking by clearance, so a skin big enough to
-        # overflow `max_neighbors` drops contacting pairs silently rather than erroring.
-        raise ValueError(
-            "conformer vdw neighbor_skin must be <= dmax (a larger skin lists many more "
-            "candidates and can be silently truncated by max_neighbors)"
-        )
-
-    for key, default in (
-        ("max_neighbors", 32),
-        ("neighbor_rebuild_interval", VDW_NEIGHBOR_REBUILD_INTERVAL_DEFAULT),
-    ):
+    for key, default in (("max_neighbors", 32),):
         value = raw.get(key, default)
         if isinstance(value, bool) or not isinstance(value, Integral):
             raise ValueError(f"conformer vdw {key} must be an integer >= 1")

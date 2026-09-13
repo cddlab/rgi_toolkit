@@ -72,20 +72,36 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
    sufficient-descent check. `optim/_cg.py` and `_cg_linesearch.py` share the algorithm
    across eager/compiled Torch and JAX `lax.while_loop`; constants are in `_cg_config.py`.
    Runtime CG never imports SciPy. There is no Armijo-only fallback, energy-change stop,
-   or failed-search steepest-descent retry. VdW bounds one scalar step without clipping
-   atoms independently; an infeasible Wolfe search retains the last accepted coordinates
-   and ends the invocation. `return_info=True` on `minimize`/`get_minimizer` exposes
-   `CGInfo`/`CGStatus` (CG only). Neighbor blocks retain previous objective and counters;
-   rebuilds invalidate search history, while convergence/failure terminates all blocks.
-   `method='l-bfgs'` is opt-in (torch `LBFGS` strong-Wolfe / `jaxopt.LBFGS`, lazily
-   imported). Distance is CG-minimised like every other restraint (the old closed-form
-   `distance_shift.py` was removed); to stop the `1/N` centroid-gradient dilution from
-   freezing large groups, its centroid uses the same `_move_centroid` N×-rescale as the
-   group terms, with a reduced-mass scale `N1·N2/(N1+N2)` reproducing the old
-   minimal-displacement split. No `pure_callback`, no scipy. On CUDA the torch CG
+   or failed-search steepest-descent retry. There is no per-atom displacement cap.
+   A failed Wolfe search retains the last accepted coordinates and ends the invocation.
+   `return_info=True` on `minimize`/`get_minimizer` exposes `CGInfo`/`CGStatus` (CG only).
+   `_vdw_runtime.py` validates neighbour caches before every trial evaluation, including
+   rejected trials. Overflow rows use complete chunked pair sums; rebuilds preserve the
+   objective and CG history. `max_atom_step` and `neighbor_rebuild_interval` are retired
+   config keys and raise migration errors. `method='l-bfgs'` remains opt-in.
+   Array-backed and formula/callable custom centroids use ordinary mean derivatives,
+   with `_move_centroid` only controlling pinned groups. The scalar energy and
+   free-coordinate gradient agree; unrestricted CG steps move large groups.
+   Reference-anchored geometry closures retain their existing surrogate derivatives
+   and need termination diagnostics when they fail strict Wolfe.
+   Mixed distance/conformer CG uses `_coordinates.CentroidCoordinates`: a fixed
+   symmetric positive-definite affine map of relative centroid translations.
+   It minimizes the unchanged energy in transformed variables with the exact chain
+   rule, preserving weights, iteration limits and an isolated pair's mass split.
+   Maps are frozen per invocation and gated with the corresponding distance and
+   conformer windows. `CGInfo.grad_norm` is the gradient in optimizer coordinates.
+   No runtime `pure_callback` or SciPy. On CUDA the Torch objective
    runs through `optim/_torch_cg_gpu.py` — the same early-exit CG but with a `torch.compile`
    (inductor-fused, NOT cudagraph) energy+grad, so conformer/RMSD optimization is GPU-faster
-   than eager. Two cache invariants in `TorchRestraintOptimizer._ensure` that are easy to
+   than eager. JAX wraps the pure minimizer with `sequential_vmap`: an outer predictor
+   `vmap` must not turn conditional neighbour rebuilds and dense overflow sums into
+   unconditional work. Sample solves remain device-side loops with independent exits.
+   JAX fuses cheap scalar line-search transitions with pointwise selection; objective
+   evaluations and neighbour work still use conditional execution.
+   Torch minimization locally disables enclosing autocast. Geometry matrix products
+   use explicit reductions so predictor TF32 settings do not corrupt Kabsch/plane
+   fits; the predictor's global precision setting is unchanged.
+   Two cache invariants in `TorchRestraintOptimizer._ensure` that are easy to
    break: (1) every per-optimizer artifact — the prepared spec, the pre-gated `_prepared_g`,
    the custom closures and their compiled `_custom_cvg` — is keyed on **`(device, dtype)`**,
    not device alone, because they close over device- *and* dtype-resident constants; (2) the
@@ -170,7 +186,7 @@ periodicity (`<=0` becomes 1); convert angular values/ESDs to radians and **nega
 targets** because RGI and Gemmi use opposite signs. `TRANS/CIS`, `PTRANS/PCIS`, `NMTRANS/NMCIS`
 are local alternatives for all link geometry/modifications. `energy/_peptide.py` chooses per-sample
 state from the START of each minimize, with ties/degenerate geometry trans. Bound masks stay fixed
-through CG/L-BFGS trials and VdW blocks; never write them into device/dtype or gate caches. The next
+through CG/L-BFGS trials and VdW cache rebuilds; never write them into device/dtype or gate caches. The next
 invocation reselects. Local condition tables avoid exponential whole-chain enumeration.
 Tests: `tests/test_monlib_{geom,dictionary,esd,cache}.py` use self-contained fixtures; no installed
 CCP4 library or external download is needed by the suite.
@@ -324,10 +340,8 @@ under *References*) — but the four distance-style types
 - **`move` defaults to every group free** (a plane has no anchor group to pin, unlike the angle vertex
   / dihedral axis). Pinned atoms still shape the fit but get no gradient (value-preserving, so numpy
   parity holds).
-- **No N-rescale.** The centroid terms cancel their `1/N` gradient dilution via `_move_centroid`;
-  plane deliberately does NOT, because the plane RMS is a genuine least-squares fit rather than a
-  rigid-body translation (and matching the pre-migration base-pair convergence requires it). Cost:
-  a very large group is weak *relative to other restraints* — raise its `weight`.
+- Plane and centroid energies both retain their ordinary mean derivatives. Plane RMS
+  measures a least-squares fit; its weight balances it against other active terms.
 - **A `refN and <selection>` entry is a DIFFERENT energy** and is routed to `RefGeomData("plane")`
   (a `ref_geom` closure, `_GEOM_SPEC["plane"] = (None, "target_plane")` = caller-supplied group
   count) instead of the array path: the plane is fitted to the REFERENCE atoms alone and held fixed,
@@ -347,8 +361,8 @@ per-entry registered term, independent of conformer opt-in or gating.
 
 `_geometry.chiral_points` supplies the same scalar triple product to conformer chiral,
 the standalone kernel, reference closures and custom `chiral(A,B,C,D)` / `ctx.chiral`.
-Keep conformer slack and dictionary `both` semantics unchanged. Built-in groups use
-the existing `N` centroid-gradient rescale; custom groups use ordinary mean derivatives.
+Keep conformer slack and dictionary `both` semantics unchanged. Built-in and custom
+groups both use ordinary mean derivatives.
 References use the usual four-group `RefGeomData` route (up to three references,
 at least one prediction group). `tests/test_chiral.py` checks independent determinants,
 single-atom conformer equality, custom finite differences and CPU/GPU optimization.
@@ -410,10 +424,10 @@ restraint for the final low-sigma steps so the model re-idealises geometry the r
 held distorted — the fix for a **broken peptide bond between a restrained residue and a
 FREE unmodeled tail** (`target_rmsd=0` drives the restrained residue onto the ref every
 step while the free tail lags and the bond snaps in length AND omega; releasing late lets
-the model repair it without losing the global ref bias set over the earlier steps). The
-CG fully converges each step, so a per-atom RMSD weight only changes convergence RATE not
-the fixed point — it can NOT keep the terminus off the ref; releasing (stop_sigma) is what
-works. **Validated on boltz2: `stop_sigma: 1.0` fully heals the bond (ref Cα-RMSD ~0.3 Å);
+the model repair it without losing the global ref bias set over the earlier steps).
+At convergence, an isolated RMSD weight does not change that term's minimum; a
+finite iteration budget can affect whether it is reached. Releasing the restraint
+late addresses the tail problem. **Validated on boltz2: `stop_sigma: 1.0` fully heals the bond (ref Cα-RMSD ~0.3 Å);
 the same knob is available on distance + conformer restraints** (see the start_sigma note
 below). All tools share sigma_data=16, so the value transfers.
 
@@ -482,22 +496,17 @@ it reports the residual at the final coordinates regardless of the sigma/step wi
 `finalize` total is `sum(bd[k] for k in BREAKDOWN_KEYS)`, so a new `_TERMS` entry lands in the
 total automatically instead of needing a hand-written sum updated.
 
-The fixed-background and restrained-polymer active-active halves list fixed-width neighbors
-out to a **Verlet skin** (`vdw.neighbor_skin`, default 2 Å) beyond the contact cutoff, and
-rebuild only when the atoms' **measured** displacement since the last build exhausts that
-skin (the full skin for the fixed background, where one endpoint moves; half of it for
-active-active, where both do). `vdw.neighbor_rebuild_interval` (default 10) is how often
-that staleness CHECK runs, not how often a rebuild happens — it also bounds the unchecked
-movement folded into the search radius. Between checks the CG state is carried across the
-block boundary, so a block that does not rebuild costs neither a re-entry evaluation nor
-the conjugate direction. `neighbor_skin` is validated `<= dmax` because the `max_neighbors`
-K-cap is applied AFTER ranking by clearance: an oversized skin would silently drop
-contacting pairs instead of raising. The **initial** build is skipped when the conformer
-sigma/step window is inactive even though another restraint still runs the optimizer (jax
-`initial_dynamic_pairs` returns static-shape zero lists under `lax.cond`); this is safe only
-because `in_win` is computed from one minimizer call's `sigma`/`step` and is therefore
-loop-invariant for that call — a step-varying conformer window would let the empty lists
-survive into the active region and VdW would silently contribute zero.
+Dynamic VdW uses `_vdw_runtime.VdwRuntime` on Torch and JAX. Each value/gradient
+evaluation checks its own trial coordinates against a Verlet reference. Rebuild when
+the maximum Euclidean displacement exceeds `neighbor_skin` (default 2 Angstrom) for
+fixed partners, or half the skin for two moving partners. Search radius is at least
+`max_contact + neighbor_skin`; `dmax` may request a larger radius. The initial build
+is skipped outside the conformer window. Background positions, peptide states and
+gates remain fixed for the invocation. Cache changes never restart CG.
+`max_neighbors` is an acceleration capacity, not a truncation of the objective.
+Requesting one extra candidate detects overflowing query rows; their complete pair
+sums and gradients are accumulated in bounded chunks. Directed moving rows each
+have weight one half, including overflow rows. No contact is lost at capacity.
 Both halves use the same sort-based spatial cell-list primitive. Normal-density build time is `O(B log B + L log B)`
 for moving ligand/polymer atoms `L` against fixed background `B`, and `O(N log N)` for
 active-active atoms; energy evaluation is `O(L * max_neighbors)` / `O(N * max_neighbors)`.
@@ -543,8 +552,8 @@ whitelist, no `eval`), `registry.py` (`@custom_restraint`), `data.py` (`CustomDa
 index arrays — NOT numpy term arrays, hence a separate field); `has_custom()` joins `is_active()` /
 the solver-run condition / `max_start_sigma()`.
 
-Non-obvious invariants: custom energies use **plain centroids** (no `_move_centroid` rigid-translation
-trick), so autodiff grad == numpy-FD while every prediction selection is free. `move` pins unlisted
+Non-obvious invariants: custom and built-in energies use ordinary centroid derivatives,
+so autodiff grad == numpy-FD while every prediction selection is free. `move` pins unlisted
 selection blocks with stop-gradient, so pinned cases use torch-vs-jax grad parity instead. The same
 exception applies to the three primitives that stop-gradient part of their maths — `kabsch`/`rmsd`
 (rotation) and `plane` (normal, via the smallest-eigenvalue eigenvector from `ops.eigh`): a formula using them is
@@ -635,11 +644,9 @@ show up in the `distances=` / `n_group_plane=` counts). Full field surface: `doc
   replace at most one group with `ref1 and <selection>` and define it under `refs.ref1`; the
   normal `atom_selectionN` keys are retained. Ref groups are permanently fixed; omitted/`all`/`both`
   moves every prediction group, and explicit `move` indices may select prediction groups only.
-  **CG-minimised** like
-  the group terms (no longer closed-form): `distance_energy` builds each group's centroid via
-  `_move_centroid` with a **reduced-mass scale `N1·N2/(N1+N2)`**, so the per-atom gradient is
-  `O(1)` (no `1/N` dilution → rigid translation) AND the two groups' gradient magnitudes are in
-  ratio `N2:N1` — exactly the old **minimal-displacement** split. The per-entry `move` key picks
+  **CG-minimised** with ordinary centroid mean derivatives. For disjoint groups,
+  equal per-atom mobility gives the minimum squared-displacement split `N2:N1`.
+  The per-entry `move` key picks
   which group moves: `both` (default = minimal-displacement, both move) / `1` (only
   `atom_selection1`'s group) / `2` (only `atom_selection2`'s) — `1`/`2` PIN the other group via
   `_move_centroid(free=0)` (`stop_gradient`, the same mechanism as the group-restraint `move`),
@@ -678,7 +685,7 @@ show up in the `distances=` / `n_group_plane=` counts). Full field surface: `doc
   `target1/target2/geom_type` (reusing the distance `DIST_TYPE_CODES`) + `move_free` (a
   per-group `(n, n_groups)` {0,1} mask). `weight` defaults 1.0; per-restraint
   `start_sigma`/`stop_sigma` like distance/rmsd. Like distance these are **CG-solved
-  energy terms** using the shared `_move_centroid` rescale. The energy depends
+  energy terms** using ordinary mean derivatives and `_move_centroid` pinning. The energy depends
   only on the centroids, so every atom in a free group gets the same gradient → the CG translates
   it rigidly (verified in `test_backend_parity`). The dihedral `harmonic` wraps the deviation
   to +-180 (periodicity-safe); flat-bottomed enforces `target1<target2` so a window can't
@@ -698,17 +705,11 @@ show up in the `distances=` / `n_group_plane=` counts). Full field surface: `doc
   Caveat: a degenerate geometry — coincident centroids, or centroid1-centroid2-centroid3 collinear for the
   dihedral — gives a near-zero / ill-defined gradient (same failure mode as the conformer
   cistrans; the clip/atan2 guards keep it finite but it won't move), so pick groups whose
-  centroids are non-collinear. **Rigid group motion / weight independence** (`_move_centroid`
-  `centroid_eff`): the centroid gradient is naturally `1/N` per atom (dcentroid/datom = 1/N), so a large
-  group would barely move per CG step (needing weight ~ N). `_move_centroid` cancels the `1/N`
-  with `centroid_eff = centroid_d + N*(centroid - centroid_d)` (value == centroid, gradient N×), so the whole group
-  translates RIGIDLY by the full step and **`weight: 1` (the default) drives ANY group
-  size** — the same rigid-translation mechanism the distance restraint now uses (with a
-  reduced-mass scale). Cost: the group gradient is intentionally N×-rescaled, so it does NOT match a
-  numpy finite-difference of the true energy — group grad parity is therefore torch-vs-jax
-  (not numpy-FD), the same carve-out as rmsd's stop-gradient. Verified E2E on boltz: the
-  qbp 3-region angle (624/690/314 atoms) reaches 90.0° and the 4-region dihedral ±180° at
-  the default `weight: 1`.
+  centroids are non-collinear. Every free atom within a group receives the same
+  gradient, so an isolated group translates rigidly. The `1/N` mean derivative is
+  retained; unrestricted line search chooses the step length. Free-group gradients
+  are checked against independent finite differences and custom energy closures.
+  Weights can affect convergence speed and the compromise between competing terms.
 - Top-level `import rgi_toolkit` must not pull a compute backend — keep heavy imports lazy
   inside the backend modules. Measured (2026-08-21): the eager set is **numpy + rdkit**
   (`featurizer.py` `from rdkit import Chem`, and `__init__` imports `featurizer`); torch,

@@ -33,6 +33,7 @@ class CGState(NamedTuple):
     previous_f: object
     valid: object
     info: CGInfo
+    cache: object = None
 
 
 class Trial(NamedTuple):
@@ -46,9 +47,12 @@ class Trial(NamedTuple):
     finite: object
     moved: object
     nfev: object
+    cache: object = None
 
 
 class TorchCG:
+    prepare = None
+
     def __init__(self, like):
         import torch
 
@@ -62,11 +66,15 @@ class TorchCG:
     def dot(self, a, b):
         return self.s.scalar(self.t.sum(a * b))
 
-    def max_atom_norm(self, d):
-        return self.s.scalar(self.t.linalg.vector_norm(d, dim=-1).max())
+    def same_point(self, a, b):
+        return self.t.equal(a, b)
 
-    def evaluate(self, vg, x, xbase, d, alpha, count):
-        g, f = vg(x)
+    def evaluate(self, vg, x, xbase, d, alpha, count, cache=None):
+        if self.prepare is None:
+            g, f = vg(x)
+        else:
+            cache = self.prepare(x, cache)
+            g, f = vg(x, cache)
         g, f = g.detach(), f.detach()
         values = self.t.stack(
             (
@@ -92,10 +100,13 @@ class TorchCG:
             self.s.boolean(finite),
             self.s.boolean(moved),
             count + 1,
+            cache,
         )
 
 
 class JaxCG:
+    prepare = None
+
     def __init__(self, like, energy_fn):
         import jax
         import jax.numpy as jnp
@@ -110,11 +121,15 @@ class JaxCG:
     def dot(self, a, b):
         return self.s.scalar(self.j.sum(a * b))
 
-    def max_atom_norm(self, d):
-        return self.s.scalar(self.j.max(self.j.linalg.norm(d, axis=-1)))
+    def same_point(self, a, b):
+        return self.j.all(a == b)
 
-    def evaluate(self, vg, x, xbase, d, alpha, count):
-        g, f = vg(x)
+    def evaluate(self, vg, x, xbase, d, alpha, count, cache=None):
+        if self.prepare is None:
+            g, f = vg(x)
+        else:
+            cache = self.prepare(x, cache)
+            g, f = vg(x, cache)
         return Trial(
             alpha,
             x,
@@ -128,6 +143,7 @@ class JaxCG:
             & self.j.all(self.j.isfinite(x)),
             self.j.any(x != xbase),
             count + 1,
+            cache,
         )
 
 
@@ -138,20 +154,22 @@ def run_cg(
     max_iter,
     *,
     gtol=GTOL,
-    max_atom_step=None,
     state=None,
+    cache=None,
+    prepare=None,
     more_maxiter=WOLFE1_MAX_ITER,
     wolfe_maxiter=WOLFE2_MAX_ITER,
     zoom_maxiter=ZOOM_MAX_ITER,
 ):
     """Return coordinates and resumable state, including cumulative diagnostics."""
     s, xp = backend.s, backend.s.xp
+    backend.prepare = prepare
     zero, izero = s.scalar(0), s.integer(0)
     empty = CGInfo(s.integer(CGStatus.INACTIVE), izero, izero, izero, zero, zero)
     old_info = empty if state is None else state.info
 
     def fresh(_):
-        t = backend.evaluate(vg, x0, x0, x0 * 0, zero, izero)
+        t = backend.evaluate(vg, x0, x0, x0 * 0, zero, izero, cache)
         converged = t.finite & (t.grad_norm <= gtol)
         status = xp.where(
             t.finite,
@@ -167,7 +185,14 @@ def run_cg(
             t.grad_norm,
         )
         return CGState(
-            t.f, t.g, -t.g, t.gg, t.f + xp.sqrt(t.gg) / 2.0, t.finite & ~converged, info
+            t.f,
+            t.g,
+            -t.g,
+            t.gg,
+            t.f + xp.sqrt(t.gg) / 2.0,
+            t.finite & ~converged,
+            info,
+            t.cache,
         )
 
     current = (
@@ -183,10 +208,6 @@ def run_cg(
         x, st, iteration = loop
         slope = backend.dot(st.g, st.d)
         amax = global_amax
-        if max_atom_step is not None:
-            amax = xp.minimum(
-                amax, s.scalar(max_atom_step) / backend.max_atom_norm(st.d)
-            )
         prototype = Trial(
             s.scalar(float("nan")),
             x,
@@ -198,14 +219,21 @@ def run_cg(
             s.boolean(True),
             s.boolean(False),
             izero,
+            st.cache,
         )
 
         def evaluate(alpha, cached):
-            def calculate(_):
-                xt = x + backend.cast(alpha, x) * st.d
-                return backend.evaluate(vg, xt, x, st.d, alpha, cached.nfev)
-
-            return s.cond(alpha == cached.alpha, lambda _: cached, calculate, None)
+            xt = x + backend.cast(alpha, x) * st.d
+            # Different step lengths can round to identical coordinates.
+            # Match ScalarFunction's coordinate-based value/gradient cache.
+            return s.cond(
+                (alpha == cached.alpha) | backend.same_point(xt, cached.x),
+                lambda _: cached._replace(alpha=alpha),
+                lambda _: backend.evaluate(
+                    vg, xt, x, st.d, alpha, cached.nfev, cached.cache
+                ),
+                None,
+            )
 
         def next_direction(t):
             numerator = backend.dot(t.g, t.g - st.g)
@@ -265,7 +293,7 @@ def run_cg(
             )
             return (
                 t.x,
-                CGState(t.f, t.g, d, t.gg, st.f, ~converged, info),
+                CGState(t.f, t.g, d, t.gg, st.f, ~converged, info, t.cache),
                 iteration + 1,
             )
 
@@ -274,7 +302,7 @@ def run_cg(
                 ~t.finite | ~xp.isfinite(slope),
                 CGStatus.NONFINITE,
                 xp.where(
-                    usable & ~t.moved & (t.nfev > 0),
+                    usable & ~t.moved & xp.isfinite(t.alpha),
                     CGStatus.NO_PROGRESS,
                     CGStatus.LINE_SEARCH_FAILED,
                 ),
@@ -287,7 +315,11 @@ def run_cg(
                 st.f,
                 st.info.grad_norm,
             )
-            return x, st._replace(valid=s.boolean(False), info=info), iteration + 1
+            return (
+                x,
+                st._replace(valid=s.boolean(False), info=info, cache=t.cache),
+                iteration + 1,
+            )
 
         return s.cond(ok, accepted, failed, None)
 

@@ -72,9 +72,11 @@ Beyond these nine built-ins you can define your **own** restraint — see
 
 The default `method='CG'` solver (a nonlinear conjugate gradient with autodiff gradients)
 runs on GPU or CPU via the same torch/jax backend (`gpu: false` runs it on CPU); all
-restraints — distance included — are minimised by this solver (distance uses a
-reduced-mass-rescaled centroid gradient so each group translates rigidly toward the
-target). Each restraint is gated by an optional `start_sigma` (active once
+restraints — distance included — are minimised by this solver.
+CG uses SciPy-style PR+ and strong Wolfe without a per-atom
+displacement cap. Mixed distance/conformer CG uses a fixed coordinate transformation
+to improve conditioning while preserving every energy and weight. Dynamic VdW caches
+remain exact at every trial point. Each restraint is gated by an optional `start_sigma` (active once
 `sigma <= start_sigma`) and `stop_sigma` (released once `sigma < stop_sigma`).
 
 ## Installation

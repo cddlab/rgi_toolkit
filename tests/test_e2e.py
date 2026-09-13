@@ -211,7 +211,7 @@ def test_distance_penalties_groups_and_batch(solver, kind, move, capsys):
     out = drive(cr, coords, solver)[-1]
     np.testing.assert_array_equal(out[:, unused], coords[:, unused])
     for group in (first, second):
-        # Gradient rescaling translates each group rigidly, even for unequal sizes.
+        # Equal per-atom mean derivatives translate each disjoint group rigidly.
         np.testing.assert_allclose(
             out[:, group] - out[:, group].mean(1, keepdims=True),
             coords[:, group] - coords[:, group].mean(1, keepdims=True),
@@ -621,7 +621,7 @@ def test_intramolecular_vdw_matches_dense_scipy(solver, capsys):
         {
             "conformer_restraints_config": {
                 "relax_force_field": {"ligand": "none"},
-                "vdw": {"mode": "intramolecular", "weight": 0.04, "max_atom_step": 2.0},
+                "vdw": {"mode": "intramolecular", "weight": 0.04},
                 **{
                     key: {"weight": 0}
                     for key in ("bond", "angle", "chiral", "cistrans")
@@ -686,8 +686,6 @@ def test_dynamic_vdw_new_contacts_match_dense_scipy(solver, capsys):
                     "weight": 0.04,
                     "dmax": 0.5,
                     "neighbor_skin": 0.0,
-                    "neighbor_rebuild_interval": 1,
-                    "max_atom_step": 4.0,
                 },
             },
             "custom_restraints_config": [{"fn": pull}],

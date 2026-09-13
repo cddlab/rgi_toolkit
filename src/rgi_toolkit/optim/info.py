@@ -18,7 +18,7 @@ class CGStatus(IntEnum):
 
 
 class CGInfo(NamedTuple):
-    """Diagnostics for the entire batch and all neighbor-list blocks.
+    """Diagnostics for the entire batch and all trial-point cache rebuilds.
 
     ``nit`` counts accepted CG iterations. ``nfev`` and ``njev`` count actual
     objective/gradient evaluations, including rejected trials. ``grad_norm`` is

@@ -4,8 +4,9 @@ This document describes the toolkit's implemented contracts and their verificati
 The [configuration reference](config.md) defines accepted keys, defaults, selection
 syntax, and complete examples. The [predictor guides](README.md) describe where each
 host invokes RGI; the maintained [example workflows](../examples/README.md) are the
-starting point for predictor runs. Tests here exercise the shared toolkit without
-loading predictor weights or running a complete structure predictor.
+starting point for predictor runs. Pytest exercises the shared toolkit without
+predictor weights; the [GPU verification harness](../verification/cg/README.md)
+also runs complete predictors and checks their exported structures.
 
 ## Scope and architecture
 
@@ -83,8 +84,8 @@ The two calls illustrate separate Torch/NumPy and JAX instances, respectively;
 one instance still cannot switch backends. `CGInfo` is a framework-independent
 named tuple and a native JAX pytree. Its scalar fields are `status`, `nit`
 (accepted iterations), `nfev`, `njev`, `fun`, and `grad_norm` (infinity norm of the
-gradient actually used, including RGI gradient modifications). One record covers
-the **entire batch** and all neighbor blocks. JAX returns traced scalar arrays;
+gradient in the optimizer's coordinates, including the affine map below). One
+record covers the **entire batch** and invocation. JAX returns traced scalar arrays;
 decode the integer status on the host or compare it within JAX control flow.
 
 | `CGStatus` | Meaning |
@@ -92,7 +93,7 @@ decode the integer status on the host or compare it within JAX control flow.
 | `INACTIVE` (0) | No active restraint window; no evaluations, with zero counters/value/norm |
 | `CONVERGED` (1) | Initial or accepted gradient meets `gtol` |
 | `MAX_ITER` (2) | The iteration budget ended before gradient convergence |
-| `LINE_SEARCH_FAILED` (3) | No acceptable strong-Wolfe step within the search/bound budget |
+| `LINE_SEARCH_FAILED` (3) | No acceptable strong-Wolfe step within the search budget |
 | `NONFINITE` (4) | A nonfinite initial evaluation or the final failed search trial/slope |
 | `NO_PROGRESS` (5) | The final failed trial cannot change representable coordinates |
 
@@ -234,7 +235,7 @@ at setup, not within objective evaluations.
 Peptide cis/trans alternatives are selected separately for each local link and
 batch member from the coordinates at the start of a minimization. Ties and
 degenerate states choose trans. The selected link geometry and modifications
-remain fixed through all line-search trials and neighbor-list blocks; the next
+remain fixed through all line-search trials and neighbor-cache rebuilds; the next
 denoising invocation can select again.
 
 ### Reference, custom, and macro restraints
@@ -267,7 +268,7 @@ use the supplied context to remain portable across backends. Custom angular
 functions return radians; `chiral(A,B,C,D)` / `ctx.chiral(...)` returns the signed
 scalar triple product about A in Angstrom cubed. Custom `move` stops gradients through unlisted
 prediction selections; reference coordinates remain fixed. Custom centroid
-functions use ordinary mean derivatives, without the built-in group rescaling.
+functions and built-in groups use ordinary mean derivatives.
 
 Torch custom closures prepare reference-coordinate tensors before differentiation
 and compilation, avoiding NumPy conversion inside a grad transform. Evaluation casts
@@ -282,12 +283,16 @@ with their weights, movement choices, and windows; it has no separate optimizer.
 Gradients come from Torch/JAX autodiff. Several deliberate transformations affect
 how they should be checked:
 
-- Built-in centroid terms preserve energy values while scaling centroid gradients.
-  Group angle/dihedral/improper/chiral multiply by the group atom count `N`, removing the
-  mean's `1/N` dilution. Distance uses `N` when only one group moves and
-  `N1*N2/(N1+N2)` when both move. For an isolated pair this gives equal translation
-  within each group and a displacement ratio `N2:N1`, preserving the atom-count
-  weighted center. These are not ordinary derivatives of the reported scalar.
+- Array-backed and formula/callable custom centroid terms use ordinary mean derivatives, including
+  their `1/N` factor. Free-coordinate gradients agree with finite differences of
+  the scalar energy. An isolated distance pair gives equal translation within
+  each group and the displacement ratio `N2:N1`, preserving the atom-count weighted
+  center. Mixed distance/conformer CG applies the exact affine change of variables
+  described below; it does not change these energy-layer derivatives.
+- Reference-anchored geometry closures retain their existing `N`-scaled prediction
+  centroid gradients and detached alignment transforms (reference planes use raw
+  atom blocks). These surrogate gradients are distinct from the ordinary array
+  and custom-formula derivatives and can fail strict Wolfe conditions.
 - `move` pins the selected term's gradient without removing pinned atoms from its
   measured geometry. For a plane they still influence the fit. Plane terms have
   no centroid rescaling.
@@ -349,26 +354,19 @@ including fixed background and nonrestrained ligands, are typed.
 | Eligible active-active contacts | Dynamic list covering polymer contacts and other moved atoms with conformer-restrained participation; static ligand pairs are excluded to prevent double counting |
 
 Topology and plane exclusions survive disabled geometry weights. A sorted cell
-list filters topology, molecule mode, and moving participation before retaining
-`max_neighbors` candidates by VdW clearance. It avoids a dense atom-pair distance
-matrix; see [computational cost](config.md#computational-cost-current-implementation)
-for ordinary-density and worst-case bounds. Neighbor truncation can discard
-contacts, so equivalence to a dense all-pair objective requires adequate capacity.
+list filters topology, molecule mode and moving participation before selecting a
+fixed-width sparse buffer. One extra candidate detects capacity overflow; such
+query rows use complete pair sums, accumulating chunk gradients immediately to
+bound memory. Directed active-active rows each carry weight one half, including
+dense fallback rows, so each eligible physical pair contributes exactly once.
 
-CG caps per-atom trial displacement at `max_atom_step` whenever VdW is active.
-Staleness is checked every `neighbor_rebuild_interval` iterations. Let
-`M = max_atom_step * neighbor_rebuild_interval`; the fixed-background search radius
-includes at least `max_contact + M + neighbor_skin`, and the active-active radius
-includes `max_contact + 2*M + neighbor_skin`. Measured displacement since the last
-build triggers rebuilding above the skin for fixed-background lists or half the
-skin for active-active lists. Defaults are 0.1 Angstrom, 10 iterations, and
-2 Angstrom respectively. A check without a rebuild preserves the CG state. An
-actual rebuild invalidates it because truncation can change the objective.
-
-L-BFGS rebuilds dynamic pairs at every objective evaluation, including line-search
-trials, since it has no CG displacement cap. Every search and diagnostic radius
-is at least the largest contact even if `dmax` is smaller. Peptide-state choices
-remain fixed through these rebuilds.
+Every trial validates its cached neighbours before value/gradient evaluation.
+The radius is `max(dmax, max_contact + neighbor_skin)`, with default skin 2 Angstrom.
+Rebuild after maximum atom displacement exceeds the skin for fixed partners or
+half the skin for two moving partners. Returning from a rejected far trial also
+validates the list. Rebuilds cannot change the complete objective, so CG history
+and counters remain valid. Background coordinates, peptide states and gates stay
+fixed throughout one invocation. Diagnostics and L-BFGS use the same complete sums.
 
 ## Optimizers
 
@@ -385,6 +383,11 @@ remain fixed through these rebuilds.
 Torch energy compilation explicitly uses `dynamic=False`: each artifact specializes
 the spec and neighbor-list shapes. This also avoids automatic symbolic-shape
 generalization across different structures or VdW modes.
+
+Torch minimization disables the enclosing predictor's autocast locally and restores
+it on exit. Small geometry matrix products use explicit reductions in the input
+precision, so TF32 settings do not corrupt Kabsch rotations or plane fits. The
+predictor's global matrix-multiplication precision setting is left unchanged.
 
 All three forms call the shared PR+ loop in
 [`optim/_cg.py`](../src/rgi_toolkit/optim/_cg.py) and the shared scalar line-search
@@ -427,9 +430,25 @@ An accepted candidate additionally satisfies
 `gtol`. That exception bypasses only the prospective-direction check, never Wolfe.
 DCSRCH permits 100 iterations and uses `xtol=1e-14`; the Wolfe2 expansion budget is
 10, and its zoom loop follows SciPy's `i > 10` exhaustion rule (up to 11 trials).
-The current trial's value and gradient are cached across search phases. Evaluation
-counters count actual combined value/gradient calls, including rejected trials.
+The current trial's value and gradient are cached across search phases, including
+different step lengths that round to identical coordinates, as in SciPy's
+`ScalarFunction`. Evaluation counters count actual combined value/gradient calls,
+including rejected trials.
 Constants live in [`optim/_cg_config.py`](../src/rgi_toolkit/optim/_cg_config.py).
+
+JAX's minimizer uses [`sequential_vmap`](https://docs.jax.dev/en/latest/_autosummary/jax.custom_batching.sequential_vmap.html)
+so an outer predictor `vmap` retains each
+sample's conditional execution and early exits. Ordinary batched `lax.cond`
+evaluates [both branches](https://docs.jax.dev/en/latest/_autosummary/jax.lax.cond.html), which would rebuild neighbours and compute complete
+overflow sums even when their predicates are false. The mapped solves remain
+device-side loops; no host callback is used. Tests compare their coordinates,
+diagnostics and actual rebuild counts with explicit individual solves.
+JAX selects between cheap scalar interpolation/update formulas with pointwise
+operations so XLA can fuse them. Objective evaluations and neighbour work remain
+conditional. Torch retains the same scalar branch calls through a method alias.
+Both Wolfe2 bracket orientations share one zoom body, and DCSRCH and Wolfe2 each
+request values and gradients at one loop site. This avoids duplicate compiled objective bodies
+without changing trial order, interpolation or search budgets.
 
 Only `max(abs(g)) <= 1e-7` reports gradient convergence. There is no energy-change
 stop or restart latch, no accepted-step doubling, and no steepest-descent retry
@@ -446,28 +465,38 @@ working dtype's representable range (upper bound at most `finfo.max / 8`). These
 safeguards and different floating-point evaluation orders preclude a promise of
 bitwise agreement on every objective.
 
-When VdW is active, every trial stays on one straight line. A single scalar bound
-`alpha_max = max_atom_step / max_i(norm(d_i, 2))` limits all atoms together; no
-per-atom clipping bends the direction. If no point within the bound satisfies
-Wolfe, the invocation fails without an Armijo fallback. For example, minimizing
-`(x-1)**2` from zero with an absolute step bound of `0.1` cannot reduce the slope
-magnitude to `0.4` of its initial value. Increasing `max_iter` cannot resolve that
-infeasible line search. RGI's modified gradients (centroid rescaling, pinned atoms,
-and stop-gradient fits) can also make strong Wolfe harder or impossible to satisfy;
-convergence of ordinary smooth SciPy objectives does not certify those cases.
+All trials stay on the straight search direction with no per-atom displacement
+cap. The obsolete VdW keys `max_atom_step` and `neighbor_rebuild_interval` raise a
+migration error. Ordinary centroid derivatives replace gradient-only rescaling;
+the free-coordinate gradient now matches the scalar centroid energy. Pinned atoms
+and frozen reference fits retain their documented semantics, so exceptional
+modified objectives still need explicit termination diagnostics.
 
-The state carries `f`, `g`, `d`, `dot(g,g)`, the previous objective, a validity flag,
-and cumulative `CGInfo` across neighbor-list blocks. Only block-budget exhaustion
-is resumable; convergence or failure ends the whole call. An actual neighbor
-rebuild invalidates search history and recomputes value/gradient while retaining
-the aggregate counters. Unchanged lists retain the state without another initial
-evaluation. Coordinates and the objective must remain unchanged to reuse a state.
+Mixed distance/conformer objectives can be very ill-conditioned: a large group's
+centroid translation is much softer than a ligand bond deformation. CG therefore
+uses a fixed affine coordinate map for these objectives. For each active distance
+entry, let `w` contain `+1/N1` and `-1/N2` on its free groups (accumulating overlaps;
+pinned groups contribute zero), `q=w/||w||`, and `s=max(1,1/||w||)`. Define
+`S=I+sum((s-1)*q*q.T)` and minimize `F(u)=E(x0+S*(u-x0))` from `u=x0`.
+The same `S` acts independently on all three spatial axes. It is symmetric positive
+definite even for overlapping entries. Its exact gradient is `S.T*grad(E)`;
+energies, targets, weights, iteration limits and Wolfe constants are unchanged.
+An isolated free pair retains the atom-count weighted center and `N2:N1` split.
+The map stays fixed for the entire invocation, including neighbour rebuilds.
+Distance-only objectives retain ordinary Cartesian CG. In mixed objectives,
+`CGInfo.grad_norm` and SciPy comparisons use these optimizer coordinates.
+
+The CG state carries `f`, `g`, `d`, `dot(g,g)`, the previous objective, a validity
+flag, cumulative `CGInfo`, and the trial's neighbour caches. Convergence or failure
+ends the invocation. Cache rebuilds preserve search history because capacity no
+longer truncates the objective. Resuming externally still requires unchanged
+coordinates and the same objective.
 
 The mathematical references are [Polak and Ribiere (1969)](https://numdam.org/item/M2AN_1969__3_1_35_0/)
 and [Gilbert and Nocedal (1992)](https://epubs.siam.org/doi/10.1137/0802003), with the
 More--Thuente and bracketing algorithms documented in the pinned SciPy sources.
 Their smooth-objective assumptions do not establish a convergence theorem for
-RGI's capped, sometimes modified-gradient molecular objective.
+RGI's sometimes modified-gradient molecular objective.
 
 ### L-BFGS
 
@@ -509,7 +538,7 @@ iterations. For these unique solutions, the acceptance limits are:
 - Independent gradient maximum absolute value below `1e-6` for CG or `1e-3`
   for the existing L-BFGS settings.
 
-The same module checks previous-objective/state preservation across blocks,
+The same module checks previous-objective/state preservation across cache rebuilds,
 nonfinite trial gradients, and unrepresentable updates. Separately marked GPU
 tests check the compiled Torch path and JAX CG inside JIT/scan against SciPy.
 [`test_cg_linesearch.py`](../tests/test_cg_linesearch.py) compares safeguarded
@@ -518,7 +547,7 @@ trajectories with the pinned SciPy implementation, using the same tolerance and
 iteration budget. It independently checks Wolfe and prospective descent.
 [`test_optimizer_info.py`](../tests/test_optimizer_info.py) verifies the public
 diagnostics, inactive windows, batch aggregation, reset, JAX scan output, strict
-bounded failure, and termination/counter preservation across neighbor blocks.
+unrestricted steps, and termination/counter preservation across neighbour rebuilds.
 
 [`test_e2e.py`](../tests/test_e2e.py) follows config parsing, adapter selections,
 spec construction, minimization, and verbose finalization. It drives Torch's

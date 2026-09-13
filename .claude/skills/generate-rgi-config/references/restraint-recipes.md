@@ -24,7 +24,7 @@ Recurring decisions, in plain terms:
 ## 1. Distance — "keep these two parts ~X Å apart"
 
 The most common restraint. Pulls the **centroid distance** between two atom groups to a
-target. It is CG-minimised (with a reduced-mass `_move_centroid` rescale so each group
+target. It is CG-minimised (with ordinary mean derivatives so each isolated group
 translates rigidly), reaching the target at convergence.
 
 > "Hold the N-terminal domain and the C-terminal domain about 25 Å apart."
@@ -290,7 +290,7 @@ other built-in geometry. No conformer entity opt-in is needed.
 Custom formulas use `harmonic(chiral(A,B,C,D), 2.0)`; Python functions use
 `ctx.harmonic(ctx.chiral("A", "B", "C", "D"), 2.0)`. Both accept references and custom
 `move` by selection name. Custom centroid gradients are ordinary mean derivatives;
-built-in group gradients include the group-size rescaling. See `docs/config.md` for
+built-in groups use the same ordinary mean derivatives. See `docs/config.md` for
 complete group/reference examples and sign conventions.
 
 ---

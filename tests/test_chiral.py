@@ -288,7 +288,7 @@ def test_backend_gradients_and_custom_mean_derivatives(move):
     for i, indices in enumerate(local_groups):
         np.testing.assert_allclose(
             grad_torch[:, indices],
-            grad_custom[:, indices] * sizes[i],
+            grad_custom[:, indices],
             rtol=1e-9,
             atol=1e-9,
         )

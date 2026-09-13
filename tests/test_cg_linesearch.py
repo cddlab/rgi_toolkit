@@ -68,6 +68,54 @@ def test_dcstep_cases_match_scipy(backend, fp, dp, bracket):
     assert bool(out[-1]) == expected[-1]
 
 
+@pytest.mark.gpu
+def test_jax_gpu_scalar_interpolation_matches_scipy():
+    jax.config.update("jax_enable_x64", True)
+    device = jax.devices("gpu")[0]
+    interpolate = jax.jit(lambda *a: dcstep(JaxScalars(a[0]), *a))
+    for fp, dp in ((2.0, 0.5), (0.5, 0.5), (0.5, -0.5), (0.5, -1.5)):
+        for bracket in (False, True):
+            args = (0.0, 1.0, -1.0, 2.0, 0.7, 1.0, 0.5, fp, dp, bracket, 0.0, 4.0)
+            expected = scipy_dcstep(*args)
+            out = interpolate(*jax.device_put(args, device))
+            np.testing.assert_allclose(
+                np.array(out[:7]), expected[:7], rtol=1e-12, atol=1e-12
+            )
+            assert bool(out[-1]) == expected[-1]
+
+
+@pytest.mark.parametrize("engine", ["torch", "jax"])
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_quantized_trials_reuse_coordinate_values_and_gradients(engine, device):
+    calls = []
+
+    def energy(x):
+        if engine == "torch":
+            calls.append(1)
+        else:
+            jax.debug.callback(lambda: calls.append(1))
+        return ((x - 100_000_080.0) ** 2).sum() * 1e-9
+
+    initial = np.array([100_000_000.0], dtype=np.float32)
+    if engine == "torch":
+        out, state = torch_cg(
+            torch.func.grad_and_value(energy),
+            torch.tensor(initial, device=device),
+            100,
+        )
+    else:
+        target = jax.devices("gpu" if device == "cuda" else "cpu")[0]
+        out, state = jax.jit(lambda x: jax_cg(energy, x, 100))(
+            jax.device_put(initial, target)
+        )
+        jax.block_until_ready((out, state))
+        jax.effects_barrier()
+    np.testing.assert_array_equal(array(out), initial)
+    assert int(state.info.status) == CGStatus.NO_PROGRESS
+    assert float(state.info.grad_norm) > 1e-7
+    assert int(state.info.nfev) == int(state.info.njev) == len(calls) == 1
+
+
 @pytest.mark.parametrize("reject_primary", [False, True])
 def test_more_thuente_then_zoom_matches_scipy(backend, reject_primary):
     # More--Thuente finds alpha=3. Rejecting it makes Wolfe2 accept alpha=2.
@@ -195,16 +243,13 @@ def test_accepted_trajectory_and_conditions_match_scipy(backend, diagonal):
     np.testing.assert_allclose(actual, expected_trace, rtol=1e-9, atol=1e-10)
 
 
-def test_cap_without_wolfe_point_stops_and_caches_trial(backend):
+def test_unrestricted_step_reaches_quadratic_minimum(backend):
     initial = np.zeros(3)
-    out, state = solve(
-        backend, lambda x: 0.5 * ((x - 1) ** 2).sum(), initial, max_atom_step=0.1
-    )
-    np.testing.assert_array_equal(array(out), initial)
-    assert int(state.info.status) == CGStatus.LINE_SEARCH_FAILED
-    assert int(state.info.nit) == 0
-    # The primary and fallback see the same capped trial; it is evaluated once.
-    assert int(state.info.nfev) == int(state.info.njev) == 2
+    out, state = solve(backend, lambda x: 0.5 * ((x - 1) ** 2).sum(), initial)
+    np.testing.assert_allclose(array(out), 1, atol=1e-7)
+    assert int(state.info.status) == CGStatus.CONVERGED
+    assert int(state.info.nit) > 0
+    assert int(state.info.nfev) == int(state.info.njev)
 
 
 def test_wolfe2_unverified_exhausted_trial_is_not_accepted(backend):

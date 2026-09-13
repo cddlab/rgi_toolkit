@@ -33,8 +33,8 @@ satisfy user restraints. Six types:
 
 These are flat-bottomed squared penalties minimized on GPU (or CPU). The energy
 maths is identical across the torch and jax backends (with a numpy energy
-reference); distance is CG-minimised like the other restraints (a reduced-mass
-`_move_centroid` rescale keeps large groups translating rigidly).
+reference); distance is CG-minimised with ordinary centroid derivatives and
+unrestricted strong-Wolfe steps. Exact VdW caches are validated at every trial.
 
 Beyond these built-ins, a user can define an **original** restraint with no
 hand-wiring — a config-only `custom_restraints_config` math **formula** (the expression

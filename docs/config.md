@@ -186,8 +186,8 @@ partners). `P_intra` and `P_ll` are the explicit static pair counts defined belo
 |---|---:|---:|---:|---|
 | Intramolecular ligand | setup pair scan `O(sum_l n_l^2)` | `O(P_intra)` | `O(P_intra)` | `P_intra = O(sum_l n_l^2)`; sparse topology comes from a bounded three-bond traversal. |
 | Restrained ligand-ligand | setup `O(P_ll)`, where `P_ll = sum_(i<j) n_i n_j` | `O(P_ll)` | `O(P_ll)` | `O((sum_l n_l)^2)`; this remains an explicit all-cross-pairs list. |
-| Moving atoms vs fixed background | ordinary density: `O(B log B + L log B)` per CG block | `O(LK)` | `O(B + LK)` | A collapsed/hash-colliding cell population degrades to `O(LB)` build time, without allocating an `L x B` distance matrix. |
-| Active-active pairs involving conformer-restrained atoms | ordinary density: `O(N log N)` per CG block | `O(NK)` | `O(NK)` for fixed `K` | A collapsed cell degrades to `O(N^2)` build time, without allocating an `N x N` distance matrix. |
+| Moving atoms vs fixed background | ordinary density: `O(B log B + L log B)` per required rebuild | `O(LK)`; overflowing rows add complete pair sums | `O(B + LK)` plus bounded chunks | A collapsed/hash-colliding cell population degrades to `O(LB)` build time, without allocating an `L x B` distance matrix. |
+| Active-active pairs involving conformer-restrained atoms | ordinary density: `O(N log N)` per required rebuild | `O(NK)`; overflowing rows add complete pair sums | `O(NK)` plus bounded chunks | A collapsed cell degrades to `O(N^2)` build time, without allocating an `N x N` distance matrix. |
 
 The dynamic rows show coordinate-search/scoring costs. Typed contacts additionally binary-search
 sorted sparse topology codes: an `O(log Q)` factor per candidate or scored pair when `Q` exclusion
@@ -290,25 +290,19 @@ is OPTIONAL — its measured quantity is an RMS deviation with an implicit targe
 block means `harmonic` with `target_plane: 0`. The **conformer** terms use the flat-bottomed shape with a symmetric `slack`:
 $\delta = 0$ within $\pm$`slack` of the RDKit-ideal value, quadratic outside (`slack = 0` $\Rightarrow$ pure harmonic).
 
-`distance` is CG-minimized like every other restraint (it used to be a closed-form shift; it is now
-part of the optimizer objective). To keep large groups moving as a rigid body under CG — a plain
-centroid's per-atom gradient is diluted by `1/N` — its centroid uses the same `_move_centroid`
-N×-rescale as the group angle/dihedral terms, with a reduced-mass scale `N1·N2/(N1+N2)` that
-reproduces the old **minimal-displacement** split (`s1 : s2 = N2 : N1`) for a single / disjoint
-restraint **and the small per-step moves of real diffusion**. (A single large one-shot move can
-cross the moving group past the other to the reflected, equal-energy solution — the centroid **gap
-always reaches the target**, but the split direction is not guaranteed for big moves; harmless in
-the multi-step diffusion loop.) Its `weight` is a **no-op for a single restraint or restraints with disjoint groups** —
-CG reaches the target regardless. For **over-constrained coupled** restraints sharing an atom,
-`weight` is now the usual least-squares weight (CG jointly minimizes `Σ wᵢ·δᵢ²`), which replaces the
-old closed-form weighted-average; the single/disjoint behaviour is unchanged.
+`distance` is part of the same CG objective as every other restraint. Centroids use
+ordinary mean derivatives (`1/N` per atom), so the supplied gradient agrees with the
+reported scalar energy. An unrestricted line search chooses the step length and can
+move large groups at the default weight. For a single disjoint distance restraint,
+equal per-atom mobility gives the minimum squared-displacement split (`s1:s2=N2:N1`).
+Weights balance competing restraints; they can also change convergence speed under
+a finite iteration budget. Pinned groups retain their coordinates.
 
 ## `distance_restraints_config` (list)
 
-Pulls the **centroid distance** between two atom groups toward a target. CG-minimized with a
-reduced-mass `_move_centroid` rescale so each group translates as a rigid body and reaches the
-target. `weight` is a **no-op for a single / disjoint restraint**; it only re-balances atoms shared
-by **over-constrained coupled** restraints (see `weight` below).
+Pulls the **centroid distance** between two atom groups toward a target. Each free
+atom in one group receives the same mean derivative, giving rigid translation when
+no other term acts on that group. CG optimizes all active energies together.
 
 The measured quantity is the distance between the two groups' centroids,
 
@@ -584,8 +578,8 @@ chiral_restraints_config:
 
 `chiral(A,B,C,D)` returns the same signed volume, centered on `A`, in Angstrom cubed.
 It supports prediction/reference selections and custom `move` by selection name.
-Like other custom centroid functions, its gradient is the ordinary mean derivative,
-without the built-in `N` rescaling; the reported energy agrees between the two forms.
+Custom and built-in centroid functions use ordinary mean derivatives;
+both energies and gradients agree.
 
 ```yaml
 custom_restraints_config:
@@ -889,7 +883,7 @@ The original plane membership remains available for VdW topology exclusions. Sta
 | `chiral` | `weight` (1.0), `slack` (0.05 Å³ reference / 0.0 Å³ library) | signed chiral volume; the library may also allow either sign |
 | `plane` | `weight` (0.0), `slack` (0.0 Å) | **best-fit-plane** flatness of whole planar atom groups ([servalcat](https://github.com/keitaroyam/servalcat)-style) — penalises each group's out-of-plane RMS deviation toward 0. Fires on (a) aromatic/conjugated rings (whole ring) and (b) non-ring sp2 groups (an acyclic double-bond centre + its heavy neighbors: carbonyl / amide / ester / carboxyl / trisubstituted alkene). Group membership is confirmed by the reference conformer being coplanar (not the RDKit aromaticity flag). Set `plane: {weight: 1}` to activate |
 | `cistrans` | `weight` (1.0), `slack` (0.0 rad) | ligand E/Z, protein side-chain χ, peptide ω and acyclic sp2 torsions, with explicit periodicity |
-| `vdw` | `weight` (1.0), `mode` (`"both"`), `scale` (1.0), `dmax` (5.0 Å), `max_neighbors` (32), `max_atom_step` (0.1 Å), `neighbor_rebuild_interval` (10), `neighbor_skin` (2.0 Å) | chemical contact distances and ESD-based clash penalties, with bounded CG steps and displacement-triggered Verlet neighbor rebuilds |
+| `vdw` | `weight` (1.0), `mode` (`"both"`), `scale` (1.0), `dmax` (5.0 Å), `max_neighbors` (32), `neighbor_skin` (2.0 Å) | chemical contact distances and ESD-based clash penalties, with unrestricted CG steps and exact Verlet caches validated at every trial |
 
 ### `monomer_library` — refinement targets for polymers (not a term)
 
@@ -1157,52 +1151,43 @@ So to make two restrained ligands avoid each other, just keep the default `mode:
 contact threshold. `dmax` is the baseline dynamic-search cutoff; CG expands it
 with a safe movement skin. Eligible intramolecular pairs and all inter-ligand
 pairs are enumerated regardless of their reference-conformer distance, because either can clash in
-the predicted coordinates. Like every conformer term, `vdw` is built only when a `vdw:` block is
-present (then `weight` defaults to 1.0); omit the block to leave it off. **The old
+the predicted coordinates. An explicit empty or partial conformer block enables VdW at weight 1.0. Set
+`vdw: {weight: 0}` to disable it; omitting or nulling the entire conformer block disables the layer. **The old
 `mode: ligand_protein` was removed** (it was only the fixed-background half) — it now raises a
 migration error pointing to `intermolecular`.
 
 ### Dynamic intermolecular neighbor lists
 
-With `method: CG`, the two fixed-width dynamic neighbor lists — moving ligand/polymer atoms
-against the fixed background, and restrained polymer active-active pairs — are listed out to a
-**Verlet skin** and rebuilt only when the atoms have actually moved far enough to invalidate them.
-The initial lists are skipped when the conformer sigma/step window is inactive, even if another
-restraint keeps the optimizer active for that diffusion step.
-`neighbor_skin` (default 2.0 Å) is both the extra listed radius and the displacement budget: a
-rebuild fires when the largest per-atom displacement since the last build exceeds `neighbor_skin`
-(fixed background, where only the ligand moves) or `neighbor_skin / 2` (active-active, where both
-endpoints move). `neighbor_skin: 0` reproduces the old rebuild-at-every-check behavior.
+Dynamic neighbor lists cover moving atoms against a fixed background and eligible
+active-active pairs. **Every energy/gradient evaluation validates its own trial
+coordinates**, including rejected line-search trials. The background is frozen for
+one `minimize` invocation. Inactive conformer windows skip list construction.
 
-`neighbor_rebuild_interval` (default 10) is how often that staleness CHECK runs, in CG iterations —
-**not** how often a rebuild happens. It also bounds the movement that can go unnoticed between two
-checks, `M = max_atom_step * neighbor_rebuild_interval`, which is folded into the search radius.
-CG restarts its search direction only on an actual rebuild; between checks its state is carried
-across the block boundary, so a block that does not rebuild costs neither a re-entry energy
-evaluation nor the conjugate direction. Energy evaluation remains `O(L * max_neighbors)` /
-`O(N * max_neighbors)`. With `method: l-bfgs`, both lists are rebuilt at every
-objective evaluation, including line-search trials, because its steps have no CG displacement bound.
-For both solvers and energy diagnostics, the search radius is at least the largest contact
-distance `scale * R_ij`, even when `dmax` is smaller.
+`neighbor_skin` (default 2 Å) is the cache's extra search radius and displacement
+budget. The search radius is `max(dmax, max_contact + neighbor_skin)`. Rebuild when
+maximum atom displacement from the cached reference exceeds the skin for fixed
+partners, or half the skin when both partners move. A zero skin rebuilds after any
+movement. Peptide states and activation gates remain fixed for the invocation.
 
-`max_atom_step` (default 0.1 Å) caps each atom's accepted displacement in one CG iteration whenever
-VdW is active. It bounds the common line-search scalar by
-`alpha <= max_atom_step / max_i(norm(direction_i))`, preserving a straight search path.
-Every accepted step must satisfy strong Wolfe (`c1=1e-4`, `c2=0.4`). If the bound excludes
-all Wolfe points, CG retains the last accepted coordinates and stops with
-`LINE_SEARCH_FAILED`; it never falls back to Armijo. A larger iteration budget does not
-resolve this failure. Request `return_info=True` through the [Python API](SPEC.md#public-lifecycle)
-to distinguish failure from convergence. Increasing `weight` or the number of contacts
-cannot bypass the displacement bound. The fixed-background
-search cutoff is at least `max_r_min + M + neighbor_skin` and the active-active cutoff at least
-`max_r_min + 2M + neighbor_skin`, which is what guarantees that a pair able to become a contact
-before the next rebuild is already listed.
+`max_neighbors` (default 32) controls the sparse buffer capacity. An extra candidate
+detects overflow; overflowing query rows use complete pair sums in bounded chunks.
+No contacts are discarded. Increasing capacity can reduce fallback work; increasing
+the skin can reduce rebuilds but increase overflow. These settings change performance,
+not the objective. There is no `neighbor_skin <= dmax` restriction.
 
-Raising `dmax` does **not** reduce how often the lists are rebuilt — raise `neighbor_skin` for
-that. A larger skin lists many more candidates, and `max_neighbors` is applied **after** ranking
-them by VdW clearance, so a skin big enough to overflow `K` drops contacting pairs *silently*
-rather than raising. `neighbor_skin` is therefore capped at `dmax`; raise `max_neighbors`
-alongside it if you go much above the default.
+CG uses unrestricted scalar line-search steps and strict strong Wolfe (`c1=1e-4`,
+`c2=0.4`). Cache rebuilds preserve the same objective, conjugate direction and counters.
+`max_atom_step` and `neighbor_rebuild_interval` have been removed: delete these keys
+from old configs; passing them raises a migration error. Request `return_info=True`
+through the [Python API](SPEC.md#public-lifecycle) to distinguish convergence from
+iteration exhaustion or an unsuccessful search. L-BFGS and energy diagnostics also
+evaluate the complete dynamic VdW objective.
+
+When distance and conformer restraints are combined, CG uses a fixed linear change
+of variables to improve conditioning of large centroid translations. It preserves
+the scalar energy and every weight; the same PR+ and Wolfe algorithm runs in the
+transformed coordinates. This does not alter configured iteration limits.
+See the [solver specification](SPEC.md#nonlinear-conjugate-gradient).
 
 The neighbor-list build uses a sorted spatial cell list whose cell width is the resulting search
 cutoff (never smaller than `dmax`). Hash collisions are checked against the full cell coordinate,
@@ -1214,8 +1199,8 @@ tables and sparse topology codes avoid a dense atom-pair parameter matrix. At or
 `O(B log B + L log B)` / `O(N log N)`, with linear fixed-width working memory; a collapsed
 structure degrades to `O(LB)` / `O(N^2)` time without allocating a dense distance matrix.
 
-`max_neighbors` (default 32) caps both dynamic lists after those filters. Raise it for unusually
-dense cores. Exact and near-exact overlaps use a deterministic pair-derived separation axis in the
+The sparse capacity applies after those filters; overflow uses the complete fallback described
+above. Exact and near-exact overlaps use a deterministic pair-derived separation axis in the
 gradient, avoiding a zero radial gradient and seed-dependent escape direction. Under JAX the pair
 codes are int32, so a single restrained polymer selection is limited to ~46340 active atoms on AF3;
 exceeding it raises rather than silently corrupting covalent exclusions.

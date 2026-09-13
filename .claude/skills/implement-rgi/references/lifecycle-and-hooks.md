@@ -130,9 +130,8 @@ restraints_config:
       #   flat-bottomed2 {target_plane2} = tolerance | flat-bottomed {target_plane1, target_plane2}
       #   | flat-bottomed1 {target_plane1}
       # move: 1                   # DEFAULT: every group free (a plane has no anchor to pin)
-      # weight / start_sigma / stop_sigma: optional. NO 1/N gradient rescale here (unlike the
-      #   centroid terms) — the plane RMS is a real least-squares fit, so a very large group is
-      #   weak relative to other restraints; raise weight then.
+      # weight / start_sigma / stop_sigma: optional. Plane RMS and centroid terms retain
+      #   ordinary mean derivatives. Weight balances this energy against other terms.
       # 'refN and <selection>' on one group -> the plane comes from the REFERENCE and is held
       #   fixed, pulling the prediction group onto it (routed through the ref_geom closure).
   conformer_restraints_config:

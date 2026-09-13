@@ -86,17 +86,17 @@ def dcstep(s, stx, fx, dx, sty, fy, dy, stp, fp, dp, brackt, stpmin, stpmax):
             p, q = (gamma - dp) + theta, ((gamma - dp) + gamma) + dy
             return stp + (p / q) * (sty - stp)
 
-        return s.cond(
+        return s.select(
             brackt, bracketed, lambda _: xp.where(stp > stx, stpmax, stpmin), None
         ), brackt
 
-    stpf, bracket = s.cond(
+    stpf, bracket = s.select(
         fp > fx,
         higher,
-        lambda _: s.cond(
+        lambda _: s.select(
             sgnd < 0,
             opposite,
-            lambda _: s.cond(abs(dp) < abs(dx), smaller, other, None),
+            lambda _: s.select(abs(dp) < abs(dx), smaller, other, None),
             None,
         ),
         None,
@@ -182,7 +182,7 @@ def _more_update(s, z, t, f0, slope0, amin, amax, c1, c2):
         )
         return nz, s.integer(xp.where(xp.isfinite(step), 0, 2))
 
-    return s.cond(
+    return s.select(
         done, lambda _: (z, s.integer(xp.where(ok & t.moved, 1, 2))), advance, None
     )
 
@@ -207,18 +207,22 @@ def _more(s, evaluate, trial, step, f0, slope0, amin, amax, c1, c2, maxiter):
     valid = (step >= amin) & (step <= amax) & (slope0 < 0) & (amax >= amin)
 
     def run(t):
-        t = evaluate(step, t)
-
         def body(state):
             z, t, i, _code = state
-            z, code = _more_update(s, z, t, f0, slope0, amin, amax, c1, c2)
-            t = s.cond(code == 0, lambda t: evaluate(z.step, t), lambda t: t, t)
+            t = evaluate(z.step, t)
+            # DCSRCH's final FG request is evaluated but not consumed on exhaustion.
+            z, code = s.cond(
+                i + 1 < maxiter,
+                lambda _: _more_update(s, z, t, f0, slope0, amin, amax, c1, c2),
+                lambda _: (z, s.integer(0)),
+                None,
+            )
             return z, t, i + 1, code
 
         _, t, _, code = s.loop(
             lambda v: (v[2] < maxiter) & (v[3] == 0),
             body,
-            (z, t, s.integer(1), s.integer(0)),
+            (z, t, s.integer(0), s.integer(0)),
         )
         return t, code == 1
 
@@ -308,23 +312,24 @@ def _wolfe2(
     s, evaluate, extra, trial, step, f0, slope0, amax, c1, c2, maxiter, zoom_maxiter
 ):
     xp = s.xp
-    trial = evaluate(step, trial)
 
-    def body(state):
+    def update(state):
         prev, fprev, dprev, step, t, i, _ok, _done = state
         high = ~t.finite | (t.f > f0 + c1 * step * slope0) | ((i > 0) & (t.f >= fprev))
+        wolfe = ~high & t.finite & t.moved & (abs(t.slope) <= -c2 * slope0)
+        ok = s.cond(wolfe, extra, lambda _: s.boolean(False), t)
 
-        def zoom_forward(t):
+        def zoom(t):
             t, ok = _zoom(
                 s,
                 evaluate,
                 extra,
                 t,
-                prev,
-                step,
-                fprev,
-                t.f,
-                dprev,
+                xp.where(high, prev, step),
+                xp.where(high, step, prev),
+                xp.where(high, fprev, t.f),
+                xp.where(high, t.f, fprev),
+                xp.where(high, dprev, t.slope),
                 f0,
                 slope0,
                 c1,
@@ -334,36 +339,10 @@ def _wolfe2(
             return prev, fprev, dprev, step, t, i + 1, ok, s.boolean(True)
 
         def low(t):
-            wolfe = t.finite & t.moved & (abs(t.slope) <= -c2 * slope0)
-            ok = s.cond(wolfe, extra, lambda _: s.boolean(False), t)
-
-            def continue_search(t):
-                def reverse_zoom(t):
-                    t, ok = _zoom(
-                        s,
-                        evaluate,
-                        extra,
-                        t,
-                        step,
-                        prev,
-                        t.f,
-                        fprev,
-                        t.slope,
-                        f0,
-                        slope0,
-                        c1,
-                        c2,
-                        zoom_maxiter,
-                    )
-                    return prev, fprev, dprev, step, t, i + 1, ok, s.boolean(True)
-
-                def grow(t):
-                    nxt = xp.minimum(2.0 * step, amax)
-                    stopped = (nxt == step) | ~t.moved
-                    nt = s.cond(stopped, lambda t: t, lambda t: evaluate(nxt, t), t)
-                    return step, t.f, t.slope, nxt, nt, i + 1, s.boolean(False), stopped
-
-                return s.cond(t.slope >= 0, reverse_zoom, grow, t)
+            def grow(t):
+                nxt = xp.minimum(2.0 * step, amax)
+                stopped = (nxt == step) | ~t.moved
+                return step, t.f, t.slope, nxt, t, i + 1, s.boolean(False), stopped
 
             return s.cond(
                 ok,
@@ -377,14 +356,26 @@ def _wolfe2(
                     s.boolean(True),
                     s.boolean(True),
                 ),
-                continue_search,
+                grow,
                 t,
             )
 
-        return s.cond(high, zoom_forward, low, t)
+        return s.cond(high | (~ok & (t.slope >= 0)), zoom, low, t)
+
+    def body(state):
+        prev, fprev, dprev, step, t, i, ok, done = state
+        t = evaluate(step, t)
+        state = prev, fprev, dprev, step, t, i, ok, done
+        # Preserve the final unverified FG request without duplicating its graph.
+        return s.cond(
+            i < maxiter,
+            update,
+            lambda v: (*v[:5], v[5] + 1, v[6], s.boolean(True)),
+            state,
+        )
 
     out = s.loop(
-        lambda v: (v[5] < maxiter) & ~v[7],
+        lambda v: (v[5] <= xp.maximum(0, maxiter)) & ~v[7],
         body,
         (
             s.scalar(0),
@@ -420,7 +411,6 @@ def strong_wolfe(
     xp = s.xp
     guess = xp.minimum(1.0, 1.01 * 2.0 * (f0 - previous_f) / slope0)
     guess = xp.where(guess < 0, 1.0, guess)
-    # Preserve the straight ray when VdW supplies a finite movement bound.
     guess = xp.minimum(guess, amax)
     t, ok = _more(
         s, evaluate, trial, guess, f0, slope0, amin, amax, c1, c2, more_maxiter

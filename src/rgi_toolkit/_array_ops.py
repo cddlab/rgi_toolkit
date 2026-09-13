@@ -202,7 +202,9 @@ class _TorchOps:
         return self.t.linalg.cross(first, second, dim=-1)
 
     def matmul(self, first, second):
-        return first @ second
+        # Geometry products have a three-wide axis. Explicit reduction keeps
+        # Kabsch rotations accurate when the predictor enables TF32 or autocast.
+        return self.t.sum(first[..., :, :, None] * second[..., None, :, :], dim=-2)
 
     def swapaxes_last2(self, value):
         return self.t.swapaxes(value, -1, -2)

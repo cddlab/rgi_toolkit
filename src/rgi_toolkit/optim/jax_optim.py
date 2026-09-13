@@ -9,13 +9,11 @@ SciPy is used; optimization remains inside XLA on the selected device. Backend
 floating-point evaluation orders can produce different search decisions near a
 condition boundary; ordinary scalar objectives are checked against SciPy.
 
-The dynamic VdW neighbour lists are rebuilt on measured displacement against a Verlet
-skin, not on a fixed cadence. ``lax.fori_loop`` needs a static trip count, so the number
-of blocks stays fixed and it is the REBUILD that is ``lax.cond``-gated; the neighbour
-arrays and the CG state ride in the loop carry, so a block that does not rebuild neither
-re-evaluates the energy nor loses the conjugate direction. Keep this in step with
-``torch_optim`` — the displacement metric, the 1x/2x skin asymmetry and the constant
-movement bound are deliberately identical in both files.
+Dynamic VdW caches are validated before every trial evaluation by the shared
+``_vdw_runtime``. Fixed partners receive the full Verlet skin displacement budget;
+two moving partners each receive half. Overflow rows use complete pair sums in
+bounded chunks. Rebuilding preserves the objective and CG history.
+
 """
 
 from __future__ import annotations
@@ -27,9 +25,6 @@ import jax.numpy as jnp
 
 from rgi_toolkit._array_ops import VDW_OVERLAP_EPS, get_ops
 from rgi_toolkit._config_util import (
-    VDW_MAX_ATOM_STEP_DEFAULT,
-    VDW_NEIGHBOR_REBUILD_INTERVAL_DEFAULT,
-    VDW_NEIGHBOR_SKIN_DEFAULT,
     VDW_SCALE_DEFAULT,
 )
 from rgi_toolkit.energy import jax_energy
@@ -60,7 +55,6 @@ def _cg_minimize(
     x0,
     max_iter,
     gtol=GTOL,
-    max_atom_step=None,
     state=None,
     return_state=False,
     return_info=False,
@@ -74,7 +68,6 @@ def _cg_minimize(
         x0,
         max_iter,
         gtol=gtol,
-        max_atom_step=max_atom_step,
         state=state,
         **search_options,
     )
@@ -344,7 +337,7 @@ def _build_fixed_vdw_pairs(
     scale=None,
     chemistry=None,
 ):
-    """Build moving-ligand to fixed-background neighbours for the current CG block."""
+    """Build moving-ligand to fixed-background neighbours at a trial point."""
 
     n_active = active.shape[-2]
     batch = jax.lax.stop_gradient(active.reshape((-1, n_active, 3)))
@@ -481,7 +474,6 @@ def make_minimizer(
             *(jnp.asarray(v, dtype=dtype) for v in info[4:]),
         )
 
-    has_builtin = spec.has_conformer() or spec.has_per_entry()
     # Custom closures use static selection indices so they trace inside lax.scan.
     has_custom = spec.has_custom()
     from rgi_toolkit.custom.closure import build_terms
@@ -516,338 +508,125 @@ def make_minimizer(
         active_vdw_chemistry = prepare_chemistry(
             get_ops("jax"), _ac.chemistry, active_vdw_radii
         )
-    has_static_vdw = spec.has_array_term("vdw")
-    has_any_vdw = has_static_vdw or has_vdw or has_active_vdw
-    vdw_step_limit = float(
-        getattr(spec, "vdw_max_atom_step", VDW_MAX_ATOM_STEP_DEFAULT)
-    )
-    # Check staleness at this interval; measured displacement triggers rebuilds.
-    vdw_rebuild_interval = int(
-        getattr(
-            spec,
-            "vdw_neighbor_rebuild_interval",
-            VDW_NEIGHBOR_REBUILD_INTERVAL_DEFAULT,
-        )
-    )
-    vdw_skin = float(getattr(spec, "vdw_neighbor_skin", VDW_NEIGHBOR_SKIN_DEFAULT))
-    if has_any_vdw:
-        conf_ss = jnp.asarray(float(spec.conf_start_sigma))
-        conf_stop = jnp.asarray(float(getattr(spec, "conf_stop_sigma", -1.0)))
-        conf_sstep = jnp.asarray(float(getattr(spec, "conf_start_step", float("-inf"))))
-        conf_estep = jnp.asarray(float(getattr(spec, "conf_stop_step", float("inf"))))
+    from rgi_toolkit.optim._cg import JaxCG, run_cg
+    from rgi_toolkit.optim._coordinates import CentroidCoordinates
+    from rgi_toolkit.optim._vdw_runtime import VdwRuntime
+
+    coordinates = CentroidCoordinates(spec)
 
     def _descend(coords, sigma, step):
         active = coords[..., active_idx, :]
-        info = inactive_info()
         prepared_step = jax_energy.bind_peptide_states(active, prepared)
-        if has_builtin or has_vdw or has_active_vdw or has_custom:
-            if has_any_vdw:
-                _s = jnp.asarray(sigma)
-                _st = jnp.asarray(step)
-                in_win = (
-                    (_s <= conf_ss)
-                    & (_s >= conf_stop)
-                    & (_st >= conf_sstep)
-                    & (_st <= conf_estep)
+        in_win = (
+            (sigma <= spec.conf_start_sigma)
+            & (sigma >= spec.conf_stop_sigma)
+            & (step >= spec.conf_start_step)
+            & (step <= spec.conf_stop_step)
+        )
+        fixed = moving = background = None
+        if has_vdw:
+            background = coords[..., vdw_bg_global, :]
+            fixed = dict(
+                lig_local=vdw_lig_local,
+                lig_r=vdw_lig_r,
+                bg_r=vdw_bg_r,
+                scale=vdw_scale,
+                weight=jnp.where(in_win, vdw_weight, 0.0),
+                dmax=vdw_dmax,
+                max_neighbors=vdw_max_neighbors,
+                contact=jnp.asarray(_vc.max_contact),
+                chemistry=vdw_chemistry,
+            )
+        if has_active_vdw:
+            moving = dict(
+                radii=active_vdw_radii,
+                polymer_mask=active_vdw_polymer,
+                excluded_codes=active_vdw_excluded,
+                scale=active_vdw_scale,
+                weight=jnp.where(in_win, active_vdw_weight, 0.0),
+                dmax=active_vdw_dmax,
+                max_neighbors=active_vdw_max_neighbors,
+                contact=jnp.asarray(_ac.max_contact),
+                chemistry=active_vdw_chemistry,
+            )
+        runtime = VdwRuntime(
+            "jax",
+            active,
+            fixed=fixed,
+            moving=moving,
+            background=background,
+            skin=spec.vdw_neighbor_skin,
+        )
+
+        def sparse_energy(a, cache):
+            e = jax_energy.total_energy(a, prepared_step, sigma, step)
+            e = e + runtime.sparse_energy(a, cache)
+            for _name, start, stop, start_step, stop_step, closure in custom_terms:
+                gate = (
+                    (sigma <= start)
+                    & (sigma >= stop)
+                    & (step >= start_step)
+                    & (step <= stop_step)
                 )
-                step_cap = jnp.where(in_win, vdw_step_limit, jnp.inf)
-            else:
-                step_cap = None
-            if has_vdw:
-                bg_pos = coords[..., vdw_bg_global, :]
-                vdw_w = jnp.where(in_win, vdw_weight, 0.0)
-            if has_active_vdw:
-                active_vdw_w = jnp.where(in_win, active_vdw_weight, 0.0)
-
-            def build_dynamic_pairs(a, fixed_cutoff, active_cutoff):
-                fixed_neighbours = fixed_mask = None
-                active_neighbours = active_factor = None
-                if has_vdw:
-                    fixed_neighbours, fixed_mask = _build_fixed_vdw_pairs(
-                        a,
-                        bg_pos,
-                        vdw_lig_local,
-                        fixed_cutoff,
-                        vdw_max_neighbors,
-                        vdw_lig_r,
-                        vdw_bg_r,
-                        vdw_scale,
-                        vdw_chemistry,
-                    )
-                if has_active_vdw:
-                    active_neighbours, active_factor = _build_active_vdw_pairs(
-                        a,
-                        active_vdw_radii,
-                        active_vdw_polymer,
-                        active_vdw_excluded,
-                        active_cutoff,
-                        active_vdw_max_neighbors,
-                        active_vdw_scale,
-                        active_vdw_chemistry,
-                    )
-                return (
-                    fixed_neighbours,
-                    fixed_mask,
-                    active_neighbours,
-                    active_factor,
+                dtype = jax.eval_shape(closure, a).dtype
+                e = e + jax.lax.cond(
+                    gate, closure, lambda _: jnp.zeros((), dtype=dtype), a
                 )
+            return e
 
-            def empty_dynamic_pairs(a):
-                """Static-shape zero neighbour lists for an inactive VdW window."""
-                n_batch = a.reshape((-1, a.shape[-2], 3)).shape[0]
-                fixed_neighbours = fixed_mask = None
-                active_neighbours = active_factor = None
-                if has_vdw:
-                    n_neighbour = min(vdw_max_neighbors, bg_pos.shape[-2])
-                    shape = (
-                        n_batch,
-                        vdw_lig_local.shape[0],
-                        n_neighbour,
-                    )
-                    fixed_neighbours = jnp.zeros(shape, dtype=jnp.int32)
-                    fixed_mask = jnp.zeros(shape, dtype=a.dtype)
-                if has_active_vdw:
-                    n_neighbour = min(active_vdw_max_neighbors, max(0, a.shape[-2] - 1))
-                    shape = (n_batch, a.shape[-2], n_neighbour)
-                    active_neighbours = jnp.zeros(shape, dtype=jnp.int32)
-                    active_factor = jnp.zeros(shape, dtype=a.dtype)
-                return (
-                    fixed_neighbours,
-                    fixed_mask,
-                    active_neighbours,
-                    active_factor,
+        sparse_vg = jax.value_and_grad(sparse_energy)
+
+        def value_grad(a, cache):
+            f, g = sparse_vg(a, cache)
+            dg, df = runtime.dense_value_grad(a, cache)
+            return g + dg, f + df
+
+        def prepare(a, cache):
+            return runtime.prepare(a, cache, in_win)
+
+        cache = runtime.empty(active)
+        if is_cg:
+            mapping = coordinates.bind("jax", active, sigma, step, enabled=in_win)
+
+            def physical(u):
+                return u if mapping is None else mapping(u, active)
+
+            def mapped_value_grad(u, cache):
+                g, f = value_grad(physical(u), cache)
+                return (g if mapping is None else mapping(g)), f
+
+            backend = JaxCG(active, lambda u: sparse_energy(physical(u), cache))
+            opt, state = run_cg(
+                backend,
+                mapped_value_grad,
+                active,
+                max_iter,
+                cache=cache,
+                prepare=lambda u, c: prepare(physical(u), c),
+            )
+            opt = physical(opt)
+            info = state.info
+        else:
+            import jaxopt
+
+            def lbfgs_value_grad(a):
+                current = prepare(a, runtime.empty(a))
+                g, f = value_grad(a, current)
+                return f, g
+
+            opt = (
+                jaxopt.LBFGS(
+                    fun=lbfgs_value_grad,
+                    value_and_grad=True,
+                    maxiter=max_iter,
+                    linesearch="backtracking",
+                    implicit_diff=False,
                 )
-
-            def initial_dynamic_pairs(a, fixed_cutoff, active_cutoff):
-                # Another restraint can keep _descend active after the conformer window
-                # closes. Avoid the O(N log N) cell-list build when both dynamic VdW
-                # weights are zero while preserving the exact static carry shapes.
-                if not (has_vdw or has_active_vdw):
-                    return None, None, None, None
-                return jax.lax.cond(
-                    in_win,
-                    lambda x: build_dynamic_pairs(x, fixed_cutoff, active_cutoff),
-                    empty_dynamic_pairs,
-                    a,
-                )
-
-            def energy_fn(
-                a,
-                fixed_neighbours,
-                fixed_mask,
-                active_neighbours,
-                active_factor,
-            ):
-                e = jax_energy.total_energy(a, prepared_step, sigma, step)
-                if has_vdw:
-                    e = e + _vdw_pair_energy(
-                        a,
-                        bg_pos,
-                        vdw_lig_local,
-                        fixed_neighbours,
-                        fixed_mask,
-                        vdw_lig_r,
-                        vdw_bg_r,
-                        vdw_scale,
-                        vdw_w,
-                        vdw_chemistry,
-                    )
-                if has_active_vdw:
-                    e = e + _active_vdw_pair_energy(
-                        a,
-                        active_neighbours,
-                        active_factor,
-                        active_vdw_radii,
-                        active_vdw_scale,
-                        active_vdw_w,
-                        active_vdw_chemistry,
-                    )
-                for _name, start, stop, start_step, stop_step, closure in custom_terms:
-                    _sc = jnp.asarray(sigma)
-                    _stc = jnp.asarray(step)
-                    gate = (
-                        (_sc <= start)
-                        & (_sc >= stop)
-                        & (_stc >= start_step)
-                        & (_stc <= stop_step)
-                    )
-                    # Multiplying a disabled expression by zero still propagates NaNs.
-                    # Match its abstract scalar dtype without evaluating its value.
-                    dtype = jax.eval_shape(closure, a).dtype
-                    e = e + jax.lax.cond(
-                        gate, closure, lambda _: jnp.zeros((), dtype=dtype), a
-                    )
-                return e
-
-            if is_cg and (has_vdw or has_active_vdw):
-                n_blocks = max(
-                    1, (max_iter + vdw_rebuild_interval - 1) // vdw_rebuild_interval
-                )
-                # Bound unchecked travel using the constant check interval, not a traced
-                # block length. Active-active pairs need twice the fixed-background allowance.
-                movement = vdw_step_limit * vdw_rebuild_interval
-                fixed_cutoff = None
-                active_cutoff = None
-                if has_vdw:
-                    _mr = jnp.asarray(_vc.max_contact)
-                    fixed_cutoff = jnp.maximum(vdw_dmax, _mr + movement + vdw_skin)
-                if has_active_vdw:
-                    _mr = jnp.asarray(_ac.max_contact)
-                    active_cutoff = jnp.maximum(
-                        active_vdw_dmax, _mr + 2.0 * movement + vdw_skin
-                    )
-
-                # Initialize concrete carry shapes before the loop. Infinite reference
-                # coordinates cannot force a rebuild: inf - inf is NaN.
-                _n0, _m0, _a0, _f0 = initial_dynamic_pairs(
-                    active, fixed_cutoff, active_cutoff
-                )
-                # The CG state's dtypes must match the loop carry EXACTLY (fori_loop demands
-                # an invariant carry), and the energy dtype is not simply the coord dtype --
-                # it depends on x64 and on the prepared arrays. Take the exact structure from
-                # an abstract trace rather than guessing: eval_shape runs no computation.
-                _probe = jax.eval_shape(
-                    lambda a: _cg_minimize(
-                        lambda x: energy_fn(x, _n0, _m0, _a0, _f0),
-                        a,
-                        0,
-                        max_atom_step=step_cap,
-                        return_state=True,
-                    ),
-                    active,
-                )
-                carry = {
-                    "x": active,
-                    "stopped": jnp.asarray(False),
-                    # Preserve the named-tuple pytree, including aggregate diagnostics.
-                    "cg": jax.tree.map(
-                        lambda s: jnp.zeros(s.shape, s.dtype), _probe[1]
-                    ),
-                }
-                if has_vdw:
-                    carry["fn"], carry["fm"] = _n0, _m0
-                    carry["fref"] = active[..., vdw_lig_local, :]
-                if has_active_vdw:
-                    carry["an"], carry["af"] = _a0, _f0
-                    carry["aref"] = active
-
-                def block_body(block_index, c):
-                    def run_block(c):
-                        a = c["x"]
-                        new = dict(c)
-                        rebuilt = jnp.asarray(False)
-                        if has_vdw:
-                            lig = a[..., vdw_lig_local, :]
-                            # Skip rebuilds outside the conformer window, where VdW has zero weight
-                            # and the infinite step cap would otherwise force every block to rebuild.
-                            need = jnp.logical_and(
-                                in_win, _max_disp(lig, c["fref"]) > vdw_skin
-                            )
-                            nb, mask = jax.lax.cond(
-                                need,
-                                lambda: _build_fixed_vdw_pairs(
-                                    a,
-                                    bg_pos,
-                                    vdw_lig_local,
-                                    fixed_cutoff,
-                                    vdw_max_neighbors,
-                                    vdw_lig_r,
-                                    vdw_bg_r,
-                                    vdw_scale,
-                                    vdw_chemistry,
-                                ),
-                                lambda: (c["fn"], c["fm"]),
-                            )
-                            new["fn"], new["fm"] = nb, mask
-                            new["fref"] = jnp.where(need, lig, c["fref"])
-                            rebuilt = jnp.logical_or(rebuilt, need)
-                        if has_active_vdw:
-                            # both endpoints move, so half the budget each
-                            need = jnp.logical_and(
-                                in_win, _max_disp(a, c["aref"]) > 0.5 * vdw_skin
-                            )
-                            nb, factor = jax.lax.cond(
-                                need,
-                                lambda: _build_active_vdw_pairs(
-                                    a,
-                                    active_vdw_radii,
-                                    active_vdw_polymer,
-                                    active_vdw_excluded,
-                                    active_cutoff,
-                                    active_vdw_max_neighbors,
-                                    active_vdw_scale,
-                                    active_vdw_chemistry,
-                                ),
-                                lambda: (c["an"], c["af"]),
-                            )
-                            new["an"], new["af"] = nb, factor
-                            new["aref"] = jnp.where(need, a, c["aref"])
-                            rebuilt = jnp.logical_or(rebuilt, need)
-
-                        pairs = (
-                            new.get("fn"),
-                            new.get("fm"),
-                            new.get("an"),
-                            new.get("af"),
-                        )
-                        block_iters = jnp.minimum(
-                            vdw_rebuild_interval,
-                            max_iter - block_index * vdw_rebuild_interval,
-                        )
-                        # A rebuilt pair list invalidates the carried objective history.
-                        cg_in = c["cg"]._replace(
-                            valid=jnp.logical_and(
-                                c["cg"].valid, jnp.logical_not(rebuilt)
-                            )
-                        )
-                        updated, cg_out = _cg_minimize(
-                            lambda x: energy_fn(x, *pairs),
-                            a,
-                            block_iters,
-                            max_atom_step=step_cap,
-                            state=cg_in,
-                            return_state=True,
-                        )
-                        new["x"] = updated
-                        new["cg"] = cg_out
-                        new["stopped"] = jnp.logical_not(cg_out.valid)
-                        return new
-
-                    return jax.lax.cond(c["stopped"], lambda c: c, run_block, c)
-
-                final = jax.lax.fori_loop(0, n_blocks, block_body, carry)
-                opt, info = final["x"], final["cg"].info
-            elif is_cg:
-                opt, info = _cg_minimize(
-                    lambda a: energy_fn(a, None, None, None, None),
-                    active,
-                    max_iter,
-                    max_atom_step=step_cap,
-                    return_info=True,
-                )
-            else:
-                import jaxopt  # only the non-default l-bfgs method needs jaxopt
-
-                def lbfgs_energy(a):
-                    # Every line-search trial needs neighbours at its own coordinates.
-                    pairs = initial_dynamic_pairs(
-                        a,
-                        vdw_dmax if has_vdw else None,
-                        active_vdw_dmax if has_active_vdw else None,
-                    )
-                    return energy_fn(a, *pairs)
-
-                opt = (
-                    jaxopt.LBFGS(
-                        fun=lbfgs_energy,
-                        maxiter=max_iter,
-                        linesearch="backtracking",
-                        implicit_diff=False,
-                    )
-                    .run(active)
-                    .params
-                )
-            active = jnp.where(jnp.all(jnp.isfinite(opt)), opt, active)
+                .run(active)
+                .params
+            )
+            info = inactive_info()
+        active = jnp.where(jnp.all(jnp.isfinite(opt)), opt, active)
         return result(coords.at[..., active_idx, :].set(active), info)
 
     def minimize(coords, sigma, step=0):
@@ -861,7 +640,11 @@ def make_minimizer(
             coords,
         )
 
-    return minimize
+    # Ordinary vmap evaluates both branches of every batched cond, including
+    # expensive neighbour rebuilds and overflow sums. Keep each solve conditional.
+    from jax.custom_batching import sequential_vmap
+
+    return sequential_vmap(minimize)
 
 
 def energy_of(spec, coords) -> float:
@@ -893,64 +676,48 @@ def dynamic_vdw_energy(spec, coords) -> float:
 
     coords = jnp.asarray(coords)
     active = coords[..., jnp.asarray(spec.active_sites, dtype=jnp.int32), :]
-    dtype = active.dtype
-    total = 0.0
+    from rgi_toolkit.optim._vdw_runtime import VdwRuntime
+
+    def array(value):
+        return jnp.asarray(value, dtype=active.dtype)
+
+    fixed = moving = background = None
     if has_vdw:
-        lig_local = jnp.asarray(vc.ligand_local, dtype=jnp.int32)
-        lig_r = jnp.asarray(vc.ligand_radii, dtype=dtype)
-        bg_r = jnp.asarray(vc.background_radii, dtype=dtype)
-        scale = jnp.asarray(float(vc.scale), dtype=dtype)
-        chemistry = prepare_chemistry(get_ops("jax"), vc.chemistry, active)
-        bg_pos = coords[..., jnp.asarray(vc.background_global, dtype=jnp.int32), :]
-        neighbours, pair_mask = _build_fixed_vdw_pairs(
-            active,
-            bg_pos,
-            lig_local,
-            jnp.asarray(vc.search_radius, dtype=dtype),
-            int(vc.max_neighbors),
-            lig_r,
-            bg_r,
-            scale,
-            chemistry,
-        )
-        total += float(
-            _vdw_pair_energy(
-                active,
-                bg_pos,
-                lig_local,
-                neighbours,
-                pair_mask,
-                lig_r,
-                bg_r,
-                scale,
-                jnp.asarray(float(vc.weight), dtype=dtype),
-                chemistry,
-            )
+        background = coords[..., jnp.asarray(vc.background_global, dtype=jnp.int32), :]
+        fixed = dict(
+            lig_local=jnp.asarray(vc.ligand_local, dtype=jnp.int32),
+            lig_r=array(vc.ligand_radii),
+            bg_r=array(vc.background_radii),
+            scale=array(vc.scale),
+            weight=array(vc.weight),
+            dmax=array(vc.search_radius),
+            max_neighbors=vc.max_neighbors,
+            contact=array(vc.max_contact),
+            chemistry=prepare_chemistry(get_ops("jax"), vc.chemistry, active),
         )
     if has_active_vdw:
         check_active_vdw_int32_safe(int(ac.radii.shape[0]))
-        radii = jnp.asarray(ac.radii, dtype=dtype)
-        scale = jnp.asarray(float(ac.scale), dtype=dtype)
-        chemistry = prepare_chemistry(get_ops("jax"), ac.chemistry, active)
-        neighbours, pair_factor = _build_active_vdw_pairs(
-            active,
-            radii,
-            jnp.asarray(ac.polymer_mask, dtype=bool),
-            jnp.asarray(ac.excluded_codes, dtype=jnp.int32),
-            jnp.asarray(ac.search_radius, dtype=dtype),
-            int(ac.max_neighbors),
-            scale,
-            chemistry,
+        moving = dict(
+            radii=array(ac.radii),
+            polymer_mask=jnp.asarray(ac.polymer_mask, dtype=bool),
+            excluded_codes=jnp.asarray(ac.excluded_codes, dtype=jnp.int32),
+            scale=array(ac.scale),
+            weight=array(ac.weight),
+            dmax=array(ac.search_radius),
+            max_neighbors=ac.max_neighbors,
+            contact=array(ac.max_contact),
+            chemistry=prepare_chemistry(get_ops("jax"), ac.chemistry, active),
         )
-        total += float(
-            _active_vdw_pair_energy(
-                active,
-                neighbours,
-                pair_factor,
-                radii,
-                scale,
-                jnp.asarray(float(ac.weight), dtype=dtype),
-                chemistry,
-            )
-        )
-    return total
+    runtime = VdwRuntime(
+        "jax",
+        active,
+        fixed=fixed,
+        moving=moving,
+        background=background,
+        skin=spec.vdw_neighbor_skin,
+    )
+    cache = runtime.prepare(active, runtime.empty(active))
+    return float(
+        runtime.sparse_energy(active, cache)
+        + runtime.dense_value_grad(active, cache, gradient=False)[1]
+    )

@@ -22,6 +22,8 @@ class HostScalars:
     def cond(self, predicate, yes, no, operand):
         return yes(operand) if predicate else no(operand)
 
+    select = cond
+
     def loop(self, condition, body, state):
         with np.errstate(all="ignore"):
             while condition(state):
@@ -51,6 +53,14 @@ class JaxScalars:
 
     def cond(self, predicate, yes, no, operand):
         return self.lax.cond(predicate, yes, no, operand)
+
+    def select(self, predicate, yes, no, operand):
+        """Fuse inexpensive scalar transitions; objective evaluation stays conditional."""
+        import jax
+
+        return jax.tree.map(
+            lambda a, b: self.xp.where(predicate, a, b), yes(operand), no(operand)
+        )
 
     def loop(self, condition, body, state):
         return self.lax.while_loop(condition, body, state)

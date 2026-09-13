@@ -106,14 +106,11 @@ def _group_centroid(ops, positions, group_idx, group_mask):
     return G.centroid(ops, positions[..., group_idx, :], group_mask)
 
 
-def _move_centroid(ops, positions, group_idx, group_mask, free, scale=None):
-    """Value-preserving rigid-centroid gradient rescale and optional pinning."""
+def _move_centroid(ops, positions, group_idx, group_mask, free):
+    """Geometric centroid with ordinary derivatives and optional pinning."""
     value = _group_centroid(ops, positions, group_idx, group_mask)
     fixed = ops.stop_gradient(value)
-    if scale is None:
-        scale = ops.sum(group_mask, axis=-1)
-    effective = fixed + scale[..., None] * (value - fixed)
-    return ops.where((free > 0.5)[..., None], effective, fixed)
+    return ops.where((free > 0.5)[..., None], value, fixed)
 
 
 def distance_energy(
@@ -130,16 +127,10 @@ def distance_energy(
     weight,
     mask,
 ):
-    count1 = ops.sum(grp1_mask, axis=-1)
-    count2 = ops.sum(grp2_mask, axis=-1)
-    reduced = count1 * count2 / (count1 + count2 + EPS)
-    both = move_mode == 0
-    scale1 = ops.where(both, reduced, count1)
-    scale2 = ops.where(both, reduced, count2)
     free1 = ops.astype_like(move_mode != 2, grp1_mask)
     free2 = ops.astype_like(move_mode != 1, grp2_mask)
-    centroid1 = _move_centroid(ops, positions, grp1_idx, grp1_mask, free1, scale1)
-    centroid2 = _move_centroid(ops, positions, grp2_idx, grp2_mask, free2, scale2)
+    centroid1 = _move_centroid(ops, positions, grp1_idx, grp1_mask, free1)
+    centroid2 = _move_centroid(ops, positions, grp2_idx, grp2_mask, free2)
     distance = G.distance_points(ops, centroid1, centroid2)
     delta = G.restraint_delta(ops, distance, target1, target2, dist_type)
     return ops.sum(weight * delta * delta * mask)
