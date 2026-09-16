@@ -73,8 +73,8 @@ Beyond these nine built-ins you can define your **own** restraint — see
 The default `method='CG'` solver (a nonlinear conjugate gradient with autodiff gradients)
 runs on GPU or CPU via the same torch/jax backend (`gpu: false` runs it on CPU); all
 restraints — distance included — are minimised by this solver.
-CG uses SciPy-style PR+ and strong Wolfe without a per-atom
-displacement cap. Mixed distance/conformer CG uses a fixed coordinate transformation
+CG uses PR+ with `line_search: armijo` (default) or SciPy-style `strong-wolfe`,
+without a per-atom displacement cap. Mixed distance/conformer CG uses a fixed coordinate transformation
 to improve conditioning while preserving every energy and weight. Dynamic VdW caches
 remain exact at every trial point. Each restraint is gated by an optional `start_sigma` (active once
 `sigma <= start_sigma`) and `stop_sigma` (released once `sigma < stop_sigma`).
@@ -185,11 +185,13 @@ spec outside the scan and grab the pure closure with `restr.get_minimizer()`
 (`(flat_coords, sigma) -> flat_coords`), then call it inside the compiled loop instead
 of `minimize`.
 
-The default CG follows SciPy 1.17.1 PR+ with strong-Wolfe searches. Set
+The default CG restores historical Armijo backtracking and the small-energy-change
+stop. Use `method: CG` with `line_search: strong-wolfe` for SciPy 1.17.1 PR+ and
+strong-Wolfe searches, or `method: l-bfgs` with no `line_search` key for L-BFGS. Set
 `return_info=True` on `minimize` or `get_minimizer` to obtain `(coords, CGInfo)`
-and distinguish gradient convergence from search failure or an iteration limit.
-A VdW displacement bound can exclude every acceptable Wolfe step; CG then keeps
-the last accepted coordinates. See the [solver specification](docs/SPEC.md#nonlinear-conjugate-gradient)
+and distinguish gradient convergence, a small energy change, search failure and an
+iteration limit. A failed CG search keeps the last accepted coordinates.
+See the [solver specification](docs/SPEC.md#nonlinear-conjugate-gradient)
 and [diagnostic fields](docs/SPEC.md#public-lifecycle).
 
 ### Atom selection syntax

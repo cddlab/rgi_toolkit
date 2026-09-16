@@ -15,6 +15,7 @@ class CGStatus(IntEnum):
     LINE_SEARCH_FAILED = 3
     NONFINITE = 4
     NO_PROGRESS = 5
+    FUNCTION_TOLERANCE = 6
 
 
 class CGInfo(NamedTuple):

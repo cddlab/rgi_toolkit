@@ -59,9 +59,11 @@ def _distance_objective(custom=None):
 @pytest.mark.parametrize(
     "backend", ["torch", "jax", pytest.param("torch_cuda", marks=pytest.mark.gpu)]
 )
-@pytest.mark.parametrize("method", ["CG", "l-bfgs"])
+@pytest.mark.parametrize(
+    "method,line_search", [("CG", "armijo"), ("CG", "strong-wolfe"), ("l-bfgs", None)]
+)
 @pytest.mark.parametrize("dynamic", [False, "fixed", "active"])
-def test_solver_objective_tracks_new_contacts(backend, method, dynamic):
+def test_solver_objective_tracks_new_contacts(backend, method, line_search, dynamic):
     """A line search must score contacts absent from its initial neighbour list."""
     from rgi_toolkit.spec import ActiveVdwConfig, VdwConfig
 
@@ -99,7 +101,9 @@ def test_solver_objective_tracks_new_contacts(backend, method, dynamic):
         device = "cuda" if backend == "torch_cuda" else "cpu"
         if device == "cuda" and not torch.cuda.is_available():
             pytest.skip("no cuda device")
-        optimizer = TorchRestraintOptimizer(spec, method=method, max_iter=200)
+        optimizer = TorchRestraintOptimizer(
+            spec, method=method, line_search=line_search, max_iter=200
+        )
         out = (
             optimizer.minimize(torch.tensor(coords, dtype=torch.float64, device=device))
             .cpu()
@@ -116,9 +120,11 @@ def test_solver_objective_tracks_new_contacts(backend, method, dynamic):
         from rgi_toolkit.optim.jax_optim import dynamic_vdw_energy, make_minimizer
 
         out = np.asarray(
-            jax.jit(make_minimizer(spec, method=method, max_iter=200))(
-                jnp.asarray(coords), 0.0
-            )
+            jax.jit(
+                make_minimizer(
+                    spec, method=method, line_search=line_search, max_iter=200
+                )
+            )(jnp.asarray(coords), 0.0)
         )
         residual = dynamic_vdw_energy(spec, out)
     assert np.isfinite(out).all()
@@ -2305,16 +2311,21 @@ def test_torch_dynamic_vdw_stops_rebuilding_after_convergence(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "skin,expect_rebuilds",
-    [(2.0, 1), (0.5, 2)],  # travel is 1.5 A: under a 2.0 skin, over a 0.5 one
+    "line_search,skin,expect_rebuilds",
+    [
+        ("strong-wolfe", 2.0, 1),
+        ("strong-wolfe", 0.5, 2),
+        ("armijo", 2.0, 2),
+        ("armijo", 0.5, 3),
+    ],
 )
 def test_torch_dynamic_vdw_rebuild_follows_measured_displacement(
-    monkeypatch, skin, expect_rebuilds
+    monkeypatch, line_search, skin, expect_rebuilds
 ):
     """A 1.5 A translation must converge without a displacement bound.
 
-    Check before every trial evaluation. A 2 A skin retains the initial list; a .5 A
-    skin requires rebuilding when a trial travels beyond it. Both runs must converge.
+    Check before every trial evaluation, including Armijo's rejected 3 A trial.
+    The accepted movement is 1.5 A. Both searches must converge.
     """
     torch = pytest.importorskip("torch")
     from rgi_toolkit.optim import _torch_cg_gpu
@@ -2366,14 +2377,16 @@ def test_torch_dynamic_vdw_rebuild_follows_measured_displacement(
         [[1.5, 0.0, 0.0], [0.0, 0.0, 0.0], [20.0, 0.0, 0.0]],
         dtype=torch.float64,
     )
-    TorchRestraintOptimizer(spec, max_iter=20, method="CG").minimize(coords)
+    TorchRestraintOptimizer(
+        spec, max_iter=20, method="CG", line_search=line_search
+    ).minimize(coords)
 
     moved = 1.5 - float(torch.linalg.norm(coords[0] - coords[1]))
     assert moved > 1.4, f"the ligand barely moved ({moved:.3f} A); test is vacuous"
-    if expect_rebuilds == 1:
-        assert calls == 1, f"list rebuilt {calls}x despite staying inside the skin"
+    if line_search == "strong-wolfe" and skin == 0.5:
+        assert calls >= expect_rebuilds
     else:
-        assert calls >= expect_rebuilds, f"only {calls} rebuild(s) for 1.5 A of travel"
+        assert calls == expect_rebuilds
 
 
 def test_vdw_skin_does_not_change_the_listed_energy():

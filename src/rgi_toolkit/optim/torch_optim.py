@@ -2,8 +2,8 @@
 
 Minimizes the restraint energy on active-site coordinates using autograd for
 gradients. ``method`` selects the solver: ``"CG"`` (default) -> a nonlinear
-conjugate-gradient solver following SciPy 1.17.1 (PR+, DCSRCH/Wolfe2, strict strong
-Wolfe), shared with the JAX backend through ``optim/_cg.py``; ``"l-bfgs"`` ->
+conjugate-gradient solver with Armijo (default) or SciPy 1.17.1 strong Wolfe
+(PR+, DCSRCH/Wolfe2), shared with JAX through ``optim/_cg.py``; ``"l-bfgs"`` ->
 ``torch.optim.LBFGS`` (strong-Wolfe). Operates in-place on the coordinate tensor
 and stays on whatever device the coordinates live on, so ``gpu: true`` runs
 entirely on GPU.
@@ -25,6 +25,7 @@ import torch
 from rgi_toolkit.energy import torch_energy
 from rgi_toolkit.energy._terms import CONF_KEYS, PER_ENTRY_KEYS, TERM_BY_KEY
 from rgi_toolkit.optim._cg_config import GTOL
+from rgi_toolkit.optim._options import resolve_line_search
 
 logger = logging.getLogger(__name__)
 
@@ -40,10 +41,13 @@ def _max_disp(current, reference) -> float:
 
 
 class TorchRestraintOptimizer:
-    def __init__(self, spec, max_iter: int = 100, method: str = "CG"):
+    def __init__(
+        self, spec, max_iter: int = 100, method: str = "CG", *, line_search=None
+    ):
         self.spec = spec
         self.max_iter = max_iter
         self.method = method
+        self.line_search = resolve_line_search(method, line_search)
         self._prepared = None
         self._prepared_g = {}  # cache {gate-state -> stable pre-gated prepared} (GPU CG)
         self._active_idx = None
@@ -450,6 +454,7 @@ class TorchRestraintOptimizer:
                     mapped_value_grad,
                     active,
                     mi,
+                    line_search=self.line_search,
                     cache=cache,
                     prepare=lambda u, c: runtime.prepare(physical(u), c),
                 )
@@ -487,12 +492,7 @@ class TorchRestraintOptimizer:
         return (coords, info) if return_info else coords
 
     def _is_cg(self) -> bool:
-        return (self.method or "cg").lower() in (
-            "cg",
-            "ncg",
-            "nonlinear-cg",
-            "nonlinearcg",
-        )
+        return self.line_search is not None
 
     def _minimize_cg(
         self,
@@ -503,7 +503,7 @@ class TorchRestraintOptimizer:
         state=None,
         **search_options,
     ):
-        """Adapt an in-place eager objective to the shared strict-Wolfe solver."""
+        """Adapt an in-place eager objective to the selected shared CG solver."""
         from rgi_toolkit.optim._cg import torch_cg
 
         def value_grad(x):
@@ -518,6 +518,7 @@ class TorchRestraintOptimizer:
                 gradient = torch.zeros_like(active)
             return gradient, energy.detach()
 
+        search_options.setdefault("line_search", self.line_search)
         out, result = torch_cg(
             value_grad,
             active.detach(),

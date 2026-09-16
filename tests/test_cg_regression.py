@@ -43,6 +43,7 @@ class Groups:
         ((1, 1), {}),
         ((1, 1), {"bond": {}}),
         ((1, 1), {"vdw": {}}),
+        ((624, 690), "absent"),
         ((7, 32), {}),
         ((624, 690), {}),
     ],
@@ -176,8 +177,9 @@ def test_jax_vmap_preserves_conditional_work_and_sample_results(monkeypatch, dev
 @pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
 @pytest.mark.parametrize("mode", [1, 2, 3])
 @pytest.mark.parametrize("capacity", [1, 128])
+@pytest.mark.parametrize("typed", [False, True])
 def test_every_trial_and_overflow_match_complete_pair_oracle(
-    backend, device, mode, capacity
+    backend, device, mode, capacity, typed
 ):
     jax.config.update("jax_enable_x64", True)
     rng = np.random.default_rng(302)
@@ -221,6 +223,36 @@ def test_every_trial_and_overflow_match_complete_pair_oracle(
         if mode & 2
         else None
     )
+    if typed:
+        for parameters, nq, nt, excluded in (
+            (fixed, 2, 79, []),
+            (moving, 5, 5, [1, 5]),
+        ):
+            if parameters is None:
+                continue
+            target_types = np.ones(nt, dtype=int)
+            if parameters is fixed:
+                target_types[0] = 0
+            parameters["chemistry"] = {
+                key: native(value)
+                for key, value in dict(
+                    query_types=np.ones(nq, dtype=int),
+                    target_types=target_types,
+                    contacts=[[0.0, 0.0], [0.0, 3.4]],
+                    inv_variances=np.full((2, 2), 25.0),
+                    one_four_contacts=[[0.0, 0.0], [0.0, 3.4]],
+                    one_four_inv_variances=np.full((2, 2), 25.0),
+                    excluded=np.asarray(excluded, dtype=int),
+                    one_four=np.zeros(0, dtype=int),
+                    query_molecules=np.zeros(nq, dtype=int),
+                    target_molecules=np.zeros(nt, dtype=int),
+                    query_moving=np.ones(nq, dtype=int),
+                    target_moving=np.zeros(nt, dtype=int),
+                    query_static=np.zeros(nq, dtype=int),
+                    target_static=np.zeros(nt, dtype=int),
+                    mode=0,
+                ).items()
+            }
     runtime = VdwRuntime(
         backend,
         native(points),
@@ -240,8 +272,10 @@ def test_every_trial_and_overflow_match_complete_pair_oracle(
         evaluate = jax.jit(evaluate)
     cache = runtime.empty(native(points))
     # A rejected far trial followed by a return must not retain the wrong cell list.
-    for shift in (0.0, 0.1, 12.0, 100.0, 0.2, -9.0, 0.0):
-        current = points + [shift, 0, 0]
+    trials = [points + [shift, 0, 0] for shift in (0.0, 0.1, 12.0, 100.0, 0.2, -9.0)]
+    # Moving rows must also agree when changing between sparse and overflow work.
+    trials.extend([points * 10, points])
+    for current in trials:
         g, f, cache = evaluate(native(current), cache)
         expected_g, expected_f = dense_oracle(current, background, mode & 1, mode & 2)
         if backend == "torch":

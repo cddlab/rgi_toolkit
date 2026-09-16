@@ -1,8 +1,8 @@
 """GPU restraint optimizer for JAX tools (alphafold3).
 
 Builds a pure JIT/scan/vmap-compatible minimizer over an autodiff energy.
-The default CG follows SciPy 1.17.1 PR+ with DCSRCH/Wolfe2 strong Wolfe through
-``optim/_cg.py`` and ``_cg_linesearch.py``, shared with Torch. Failed searches
+CG selects historical Armijo (default) or SciPy 1.17.1 PR+ with DCSRCH/Wolfe2
+strong Wolfe through ``optim/_cg.py``, shared with Torch. Failed searches
 retain the last accepted point. ``return_info=True`` exposes traced CG diagnostics.
 ``method='l-bfgs'`` uses ``jaxopt.LBFGS`` (lazily imported). No callback or runtime
 SciPy is used; optimization remains inside XLA on the selected device. Backend
@@ -35,6 +35,7 @@ from rgi_toolkit.optim._cell_list import (
     CELL_OFFSETS,
 )
 from rgi_toolkit.optim._cg_config import EPS, GTOL
+from rgi_toolkit.optim._options import resolve_line_search
 from rgi_toolkit.spec import check_active_vdw_int32_safe
 
 logger = logging.getLogger(__name__)
@@ -60,7 +61,7 @@ def _cg_minimize(
     return_info=False,
     **search_options,
 ):
-    """Pure JAX entry to the shared SciPy-style strict-Wolfe CG solver."""
+    """Pure JAX entry to the selected shared CG solver."""
     from rgi_toolkit.optim._cg import jax_cg
 
     out, result = jax_cg(
@@ -442,6 +443,7 @@ def make_minimizer(
     max_iter: int = 100,
     method: str = "cg",
     *,
+    line_search=None,
     return_info=False,
 ):
     """Return ``minimize(coords, sigma, step) -> coords``.
@@ -450,14 +452,15 @@ def make_minimizer(
     step-window gate, alongside ``sigma`` for the sigma-window gate). The returned function
     is pure and JIT/vmap-able, so it runs inside the diffusion loop's ``hk.scan``/``hk.vmap``
     (``step`` is a traced scalar there). ``method='cg'`` (the default) runs the pure-jax
-    ``_cg_minimize``; any other value uses ``jaxopt.LBFGS`` (lazily imported). Per-restraint
+    ``_cg_minimize``; ``method='l-bfgs'`` uses ``jaxopt.LBFGS`` (lazily imported). Per-restraint
     gating uses the host-spec window table and per-term masks. There is no
     ``start_sigma`` arg. ``return_info=True`` fixes the output as ``(coords, CGInfo)``
     with scalar JAX-array diagnostics; this is supported only for CG.
     """
+    line_search = resolve_line_search(method, line_search)
     active_idx = jnp.asarray(spec.active_sites, dtype=jnp.int32)
     prepared = jax_energy.prepare_spec(spec)
-    is_cg = (method or "cg").lower() in ("cg", "ncg", "nonlinear-cg", "nonlinearcg")
+    is_cg = line_search is not None
     if return_info and not is_cg:
         raise ValueError("return_info is supported only for method='cg'")
     from rgi_toolkit.optim._gates import active_windows, window_on
@@ -601,6 +604,7 @@ def make_minimizer(
                 mapped_value_grad,
                 active,
                 max_iter,
+                line_search=line_search,
                 cache=cache,
                 prepare=lambda u, c: prepare(physical(u), c),
             )
@@ -619,7 +623,8 @@ def make_minimizer(
                     fun=lbfgs_value_grad,
                     value_and_grad=True,
                     maxiter=max_iter,
-                    linesearch="backtracking",
+                    tol=GTOL,
+                    linesearch="zoom",
                     implicit_diff=False,
                 )
                 .run(active)

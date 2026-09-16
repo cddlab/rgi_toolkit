@@ -245,12 +245,14 @@ class VdwRuntime:
         neighbours = source * 0 + target.reshape(1, 1, -1)
         neighbours = neighbours + self.ops.asint(overflow[..., None]) * 0
         mask = overflow[..., None] & valid
+        if moving:
+            # Self-pairs are not chemical contacts, including in overflow rows.
+            mask = mask & (source != neighbours)
         if v["chemistry"] is None:
             radii = v["radii"] if moving else v["lig_r"]
             other_radii = v["radii"] if moving else v["bg_r"]
             mask = mask & (radii[source] > 0) & (other_radii[neighbours] > 0)
             if moving:
-                mask = mask & (source != neighbours)
                 mask = mask & (
                     v["polymer_mask"][source] | v["polymer_mask"][neighbours]
                 )

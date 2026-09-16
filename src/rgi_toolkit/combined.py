@@ -446,7 +446,10 @@ class CombinedRestraints:
             from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
             self._optimizer = TorchRestraintOptimizer(
-                self.spec, max_iter=self.config.max_iter, method=self.config.method
+                self.spec,
+                max_iter=self.config.max_iter,
+                method=self.config.method,
+                line_search=self.config.line_search,
             )
         elif b == "jax":
             from rgi_toolkit.optim.jax_optim import make_minimizer
@@ -455,6 +458,7 @@ class CombinedRestraints:
                 self.spec,
                 max_iter=self.config.max_iter,
                 method=self.config.method,
+                line_search=self.config.line_search,
             )
         else:
             raise ValueError(f"unknown backend: {b}")
@@ -491,6 +495,7 @@ class CombinedRestraints:
                     self.spec,
                     max_iter=self.config.max_iter,
                     method=self.config.method,
+                    line_search=self.config.line_search,
                     return_info=True,
                 )
             return self._minimize_info_fn

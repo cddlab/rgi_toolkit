@@ -5,8 +5,7 @@ The [configuration reference](config.md) defines accepted keys, defaults, select
 syntax, and complete examples. The [predictor guides](README.md) describe where each
 host invokes RGI; the maintained [example workflows](../examples/README.md) are the
 starting point for predictor runs. Pytest exercises the shared toolkit without
-predictor weights; the [GPU verification harness](../verification/cg/README.md)
-also runs complete predictors and checks their exported structures.
+predictor weights; full predictor checks use those examples and exported structures.
 
 ## Scope and architecture
 
@@ -93,9 +92,10 @@ decode the integer status on the host or compare it within JAX control flow.
 | `INACTIVE` (0) | No active restraint window; no evaluations, with zero counters/value/norm |
 | `CONVERGED` (1) | Initial or accepted gradient meets `gtol` |
 | `MAX_ITER` (2) | The iteration budget ended before gradient convergence |
-| `LINE_SEARCH_FAILED` (3) | No acceptable strong-Wolfe step within the search budget |
+| `LINE_SEARCH_FAILED` (3) | No acceptable step for the configured line search within its budget |
 | `NONFINITE` (4) | A nonfinite initial evaluation or the final failed search trial/slope |
 | `NO_PROGRESS` (5) | The final failed trial cannot change representable coordinates |
+| `FUNCTION_TOLERANCE` (6) | Armijo only: accepted relative energy change is below `1e-9`; the gradient has not converged |
 
 Failure diagnostics describe the last accepted point, or the initial evaluation
 when none was accepted. Rejected trial calls still count. An initially nonfinite
@@ -359,6 +359,7 @@ fixed-width sparse buffer. One extra candidate detects capacity overflow; such
 query rows use complete pair sums, accumulating chunk gradients immediately to
 bound memory. Directed active-active rows each carry weight one half, including
 dense fallback rows, so each eligible physical pair contributes exactly once.
+Self-pairs are excluded from both paths, including chemically typed overflow rows.
 
 Every trial validates its cached neighbours before value/gradient evaluation.
 The radius is `max(dmax, max_contact + neighbor_skin)`, with default skin 2 Angstrom.
@@ -372,7 +373,8 @@ fixed throughout one invocation. Diagnostics and L-BFGS use the same complete su
 
 ### Nonlinear conjugate gradient
 
-`method: CG` uses one algorithm in three execution forms:
+`method: CG` selects PR+ with `line_search: armijo` (default) or
+`line_search: strong-wolfe` in three execution forms:
 
 | Implementation | Execution |
 | --- | --- |
@@ -390,9 +392,28 @@ precision, so TF32 settings do not corrupt Kabsch rotations or plane fits. The
 predictor's global matrix-multiplication precision setting is left unchanged.
 
 All three forms call the shared PR+ loop in
-[`optim/_cg.py`](../src/rgi_toolkit/optim/_cg.py) and the shared scalar line-search
-transitions in [`optim/_cg_linesearch.py`](../src/rgi_toolkit/optim/_cg_linesearch.py).
-The reference is **SciPy 1.17.1**, specifically
+[`optim/_cg.py`](../src/rgi_toolkit/optim/_cg.py). Armijo uses the historical
+backtracking transitions in [`optim/_cg_armijo.py`](../src/rgi_toolkit/optim/_cg_armijo.py).
+It starts at one on the first iteration, then `2 * max(previous_step, 2**-20)`,
+bounded by the working dtype's scalar step range. Each search tries at most
+20 steps, halving on rejection, and accepts sufficient decrease with `c1=1e-4`.
+The historical upper limit of one is removed: ordinary mean derivatives in
+large centroid/RMSD selections can require larger steps. Energy and gradients
+are unchanged. A non-descent direction
+restarts as `-g`; PR+ uses `dot(g, g) + 1e-12` in its denominator. The accepted
+step is carried between iterations. An accepted energy change smaller than
+`1e-9 * (1 + abs(previous_energy))` reports `FUNCTION_TOLERANCE`. This retains
+the stopping rule of `11de8b4`; it is not a claim that the gradient converged.
+
+Both modes require finite values/gradients and representable coordinate movement,
+and report gradient convergence only when `max(abs(g)) <= 1e-7`. A failed search
+keeps the last accepted coordinates and terminates the invocation. There is no
+per-atom displacement clipping or failed-search retry. Neighbor lists are checked
+before every trial, including rejected trials.
+
+The remaining search details in this section describe **Strong Wolfe**,
+implemented in [`optim/_cg_linesearch.py`](../src/rgi_toolkit/optim/_cg_linesearch.py).
+Its reference is **SciPy 1.17.1**, specifically
 [`_minimize_cg`](https://github.com/scipy/scipy/blob/v1.17.1/scipy/optimize/_optimize.py),
 [Wolfe1/Wolfe2 searches](https://github.com/scipy/scipy/blob/v1.17.1/scipy/optimize/_linesearch.py),
 and [`DCSRCH`/`dcstep`](https://github.com/scipy/scipy/blob/v1.17.1/scipy/optimize/_dcsrch.py).
@@ -450,7 +471,7 @@ Both Wolfe2 bracket orientations share one zoom body, and DCSRCH and Wolfe2 each
 request values and gradients at one loop site. This avoids duplicate compiled objective bodies
 without changing trial order, interpolation or search budgets.
 
-Only `max(abs(g)) <= 1e-7` reports gradient convergence. There is no energy-change
+For Strong Wolfe, only `max(abs(g)) <= 1e-7` reports convergence. There is no energy-change
 stop or restart latch, no accepted-step doubling, and no steepest-descent retry
 after failed searches. Failure returns the last accepted coordinates and terminates
 that minimization, even if earlier iterations moved atoms. The next denoising
@@ -506,13 +527,18 @@ is described by [Liu and Nocedal (1989)](https://link.springer.com/article/10.10
 | Backend | Delegation and explicit RGI options | Other stopping/history settings |
 | --- | --- | --- |
 | Torch | [`torch.optim.LBFGS`](https://github.com/pytorch/pytorch/blob/v2.6.0/torch/optim/lbfgs.py), `max_iter`, `line_search_fn="strong_wolfe"` | Upstream defaults; the locked Torch 2.6 uses gradient tolerance `1e-7`, change tolerance `1e-9`, history size 100 |
-| JAX | [`jaxopt.LBFGS`](https://jaxopt.github.io/stable/_autosummary/jaxopt.LBFGS.html), `maxiter`, `linesearch="backtracking"`, `implicit_diff=False` | Upstream defaults; the locked JAXopt 0.8.5 uses tolerance `1e-3`, history size 10, maximum 30 line-search steps |
+| JAX | [`jaxopt.LBFGS`](https://jaxopt.github.io/stable/_autosummary/jaxopt.LBFGS.html), `maxiter`, `tol=1e-7`, `linesearch="zoom"`, `implicit_diff=False` | Standard zoom search and the shared RGI gradient tolerance; upstream history size 10 and maximum 30 line-search steps |
 
-These defaults and stopping quantities differ across libraries and can change
+Gradient tolerances use the same numerical threshold, while their norms and other
+stopping quantities differ across libraries. JAX's former backtracking override
+could fail a search without moving; its library tolerance of `1e-3` could then stop
+large centroid restraints far from their targets. Zoom and the shared `GTOL`
+avoid that premature stop without changing weights or iteration budgets.
+Other library defaults can change
 when dependencies are updated. `uv.lock` defines the repository test environment;
 predictor environments may pin other versions. Torch's source attributes its
 implementation to minFunc; JAXopt documents the standard limited-memory inverse
-Hessian method. RGI's use of either does not imply matching their defaults to CG.
+Hessian method. RGI's use of either does not imply identical stopping rules to CG.
 The independent SciPy comparison uses unbounded `L-BFGS-B`; this is a comparison
 of final solutions and residuals, not a claim of identical implementations.
 

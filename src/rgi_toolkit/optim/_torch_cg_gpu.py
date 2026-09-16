@@ -1,10 +1,10 @@
-"""Compiled Torch energy/gradient evaluation for the shared SciPy-style CG.
+"""Compiled Torch energy/gradient evaluation for the shared PR+ CG.
 
 The early-exit search in ``optim/_cg.py`` is host-controlled, with device-resident
 coordinates and gradients. ``torch.func.grad_and_value`` plus ``torch.compile``
 fuses the small energy kernels. The compilation cache specializes static shapes;
 prepared masks and dynamic neighbor arrays are inputs, so artifacts can be reused
-across denoising steps. This execution choice does not change PR+ or strong Wolfe.
+across denoising steps. This execution choice does not change PR+ or its line search.
 
 Default Inductor mode avoids repeated CUDA-graph recording for fresh trial-coordinate
 allocations.
@@ -507,7 +507,7 @@ def _cg_minimize_torch(
     return_info=False,
     **search_options,
 ):
-    """Functional entry to the shared SciPy-style strict-Wolfe CG solver."""
+    """Functional entry to the shared CG solver with the selected line search."""
     from rgi_toolkit.optim._cg import torch_cg
 
     out, result = torch_cg(

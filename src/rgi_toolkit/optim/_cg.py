@@ -1,16 +1,26 @@
-"""One SciPy-style PR+ algorithm for Torch eager/CUDA and JAX JIT/scan.
+"""Shared PR+ solvers for Torch eager/CUDA and JAX JIT/scan.
 
 Direction updates and step initialization follow scipy.optimize._minimize_cg
 1.17.1, distributed under BSD-3-Clause (LICENSES/scipy.txt). Array evaluation is
 backend-specific; the optimization and line-search transitions are shared.
+The default Armijo mode retains the historical PR+ update and stopping rules,
+with expanding initial steps for ordinary mean derivatives.
 """
 
 from __future__ import annotations
 
 from typing import NamedTuple
 
+from rgi_toolkit.optim._cg_armijo import armijo
 from rgi_toolkit.optim._cg_config import (
+    ARMIJO_BETA_EPS,
     ARMIJO_C1,
+    ARMIJO_FTOL,
+    ARMIJO_GG_FLOOR,
+    ARMIJO_INITIAL_STEP,
+    ARMIJO_MAX_ITER,
+    ARMIJO_STEP_GROW,
+    ARMIJO_STEP_MIN,
     DESCENT_C,
     GTOL,
     STEP_MAX,
@@ -22,6 +32,7 @@ from rgi_toolkit.optim._cg_config import (
 )
 from rgi_toolkit.optim._cg_linesearch import strong_wolfe
 from rgi_toolkit.optim._cg_scalar import HostScalars, JaxScalars
+from rgi_toolkit.optim._options import resolve_line_search
 from rgi_toolkit.optim.info import CGInfo, CGStatus
 
 
@@ -34,6 +45,7 @@ class CGState(NamedTuple):
     valid: object
     info: CGInfo
     cache: object = None
+    step: object = 1.0
 
 
 class Trial(NamedTuple):
@@ -153,7 +165,10 @@ def run_cg(
     x0,
     max_iter,
     *,
+    line_search="armijo",
     gtol=GTOL,
+    ftol=ARMIJO_FTOL,
+    max_ls=ARMIJO_MAX_ITER,
     state=None,
     cache=None,
     prepare=None,
@@ -162,6 +177,7 @@ def run_cg(
     zoom_maxiter=ZOOM_MAX_ITER,
 ):
     """Return coordinates and resumable state, including cumulative diagnostics."""
+    is_armijo = resolve_line_search("CG", line_search) == "armijo"
     s, xp = backend.s, backend.s.xp
     backend.prepare = prepare
     zero, izero = s.scalar(0), s.integer(0)
@@ -193,6 +209,7 @@ def run_cg(
             t.finite & ~converged,
             info,
             t.cache,
+            s.scalar(ARMIJO_INITIAL_STEP / ARMIJO_STEP_GROW),
         )
 
     current = (
@@ -207,6 +224,14 @@ def run_cg(
     def body(loop):
         x, st, iteration = loop
         slope = backend.dot(st.g, st.d)
+        if is_armijo:
+            st = s.cond(
+                slope >= 0,
+                lambda st: st._replace(d=-st.g),
+                lambda st: st,
+                st,
+            )
+            slope = backend.dot(st.g, st.d)
         amax = global_amax
         prototype = Trial(
             s.scalar(float("nan")),
@@ -237,7 +262,8 @@ def run_cg(
 
         def next_direction(t):
             numerator = backend.dot(t.g, t.g - st.g)
-            beta = xp.maximum(0.0, numerator / st.gg)
+            denominator = st.gg + ARMIJO_BETA_EPS if is_armijo else st.gg
+            beta = xp.maximum(0.0, numerator / denominator)
             d = -t.g + backend.cast(beta, t.g) * st.d
             return d, backend.dot(d, t.g)
 
@@ -252,12 +278,20 @@ def run_cg(
             xp.isfinite(slope)
             & (slope < 0)
             & xp.isfinite(st.gg)
-            & (st.gg > 0)
+            & (st.gg > (ARMIJO_GG_FLOOR if is_armijo else 0))
             & (amax >= amin)
         )
-        t, ok, _phase = s.cond(
-            usable,
-            lambda t: strong_wolfe(
+
+        def search(t):
+            if is_armijo:
+                # Mean gradients in large selections need steps above one.
+                # Expand the initial trial without rescaling the energy/gradient.
+                step = xp.minimum(
+                    amax,
+                    xp.maximum(st.step, ARMIJO_STEP_MIN) * ARMIJO_STEP_GROW,
+                )
+                return armijo(s, evaluate, t, st.f, slope, step, max_ls)
+            result, ok, _phase = strong_wolfe(
                 s,
                 evaluate,
                 extra,
@@ -270,21 +304,37 @@ def run_cg(
                 more_maxiter=more_maxiter,
                 wolfe_maxiter=wolfe_maxiter,
                 zoom_maxiter=zoom_maxiter,
-            ),
-            lambda t: (t, s.boolean(False), izero),
+            )
+            return result, ok
+
+        t, ok = s.cond(
+            usable,
+            search,
+            lambda t: (t, s.boolean(False)),
             prototype,
         )
         # Never accept Wolfe2's unverified last trial or a nonfinite/motionless point.
         ok = ok & t.finite & t.moved & (t.alpha > 0)
         ok = ok & (t.f <= st.f + ARMIJO_C1 * t.alpha * slope)
-        ok = ok & (abs(t.slope) <= -WOLFE_C2 * slope)
-        ok = s.cond(ok, extra, lambda _: s.boolean(False), t)
+        if not is_armijo:
+            ok = ok & (abs(t.slope) <= -WOLFE_C2 * slope)
+            ok = s.cond(ok, extra, lambda _: s.boolean(False), t)
 
         def accepted(_):
             d, _dg = next_direction(t)
             converged = t.grad_norm <= gtol
+            small_change = (
+                abs(t.f - st.f) < ftol * (1.0 + abs(st.f))
+                if is_armijo
+                else s.boolean(False)
+            )
+            status = xp.where(
+                converged,
+                CGStatus.CONVERGED,
+                xp.where(small_change, CGStatus.FUNCTION_TOLERANCE, CGStatus.MAX_ITER),
+            )
             info = CGInfo(
-                s.integer(xp.where(converged, CGStatus.CONVERGED, CGStatus.MAX_ITER)),
+                s.integer(status),
                 st.info.nit + 1,
                 st.info.nfev + t.nfev,
                 st.info.njev + t.nfev,
@@ -293,7 +343,17 @@ def run_cg(
             )
             return (
                 t.x,
-                CGState(t.f, t.g, d, t.gg, st.f, ~converged, info, t.cache),
+                CGState(
+                    t.f,
+                    t.g,
+                    d,
+                    t.gg,
+                    st.f,
+                    ~(converged | small_change),
+                    info,
+                    t.cache,
+                    t.alpha,
+                ),
                 iteration + 1,
             )
 

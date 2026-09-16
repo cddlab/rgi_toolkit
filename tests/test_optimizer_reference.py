@@ -93,6 +93,7 @@ def reference(request):
 
 
 def run_cg(backend, energy, initial, max_iter=MAX_ITER, state=None, **kwargs):
+    kwargs.setdefault("line_search", "strong-wolfe")
     if backend == "jax":
         jax.config.update("jax_enable_x64", True)
         return jax.jit(
@@ -177,7 +178,11 @@ def test_scipy_history_and_counts_survive_block_boundaries(backend):
     whole, whole_state = run_cg(backend, p.energy, p.initial, 60)
     out, state = run_cg(backend, p.energy, p.initial, 1)
     advance = (
-        jax.jit(lambda x, s: _cg_minimize(p.energy, x, 1, state=s, return_state=True))
+        jax.jit(
+            lambda x, s: _cg_minimize(
+                p.energy, x, 1, state=s, return_state=True, line_search="strong-wolfe"
+            )
+        )
         if backend == "jax"
         else lambda x, s: run_cg(backend, p.energy, x, 1, state=s)
     )
@@ -237,7 +242,11 @@ def test_cuda_compiled_cg_matches_scipy():
         torch.func.grad_and_value(energy), fullgraph=True, dynamic=False
     )
     out, info = _cg_minimize_torch(
-        compiled, torch.tensor(p.initial, device="cuda"), MAX_ITER, return_info=True
+        compiled,
+        torch.tensor(p.initial, device="cuda"),
+        MAX_ITER,
+        return_info=True,
+        line_search="strong-wolfe",
     )
     out = as_numpy(out)
     np.testing.assert_allclose(out, reference.x, rtol=0, atol=1e-3)
@@ -262,7 +271,9 @@ def test_jax_gpu_scan_cg_matches_scipy():
     @jax.jit
     def scan(x):
         return jax.lax.scan(
-            lambda x, _: _cg_minimize(p.energy, x, MAX_ITER, return_info=True),
+            lambda x, _: _cg_minimize(
+                p.energy, x, MAX_ITER, return_info=True, line_search="strong-wolfe"
+            ),
             x,
             None,
             length=2,

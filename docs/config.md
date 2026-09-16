@@ -39,6 +39,7 @@ restraints_config:
   verbose: ...        # bool
   gpu: ...            # bool
   method: ...         # "CG" | "l-bfgs"
+  line_search: ...    # CG only: "armijo" (default) | "strong-wolfe"
   max_iter: ...       # int
   # --- restraints (each block optional) ---
   distance_restraints_config: [ ... ]   # list
@@ -111,7 +112,31 @@ and [one section](../examples/distance/boltz-2/qbp_25.00.yaml).
 | `verbose` | bool | `false` | Log the built spec (per-restraint counts) at setup and per-term energies at finalize. Strongly recommended — it is how you confirm a restraint was actually built. |
 | `gpu` | bool | `true` | Torch **device**: `true` = accelerator (default), `false` = CPU. It does **not** change the backend. (Inert for AF3, which always runs the JAX minimizer on the model's device.) Accepts `true/false` and the strings `1/0/yes/no/on/off`. |
 | `method` | str | `"CG"` | Optimizer: `"CG"` (nonlinear conjugate gradient) or `"l-bfgs"` (opt-in). |
-| `max_iter` | int | `100` | Nonnegative maximum optimizer iterations per denoising step. The examples use 1000 (2000 for AF3). |
+| `line_search` | str | `"armijo"` | CG only: `"armijo"` or `"strong-wolfe"`. Omit this key with L-BFGS. |
+| `max_iter` | int | `100` | Nonnegative maximum optimizer iterations per denoising step, shared by all methods. |
+
+Choose one of these three configurations inside `restraints_config`:
+
+```yaml
+method: CG
+line_search: armijo
+```
+
+```yaml
+method: CG
+line_search: strong-wolfe
+```
+
+```yaml
+method: l-bfgs
+```
+
+Omitting both keys selects CG with Armijo. Armijo restores the historical
+backtracking search and stops when the relative energy change is below `1e-9`;
+this is reported as `FUNCTION_TOLERANCE`, distinct from gradient convergence.
+Strong Wolfe retains the SciPy-style PR+ solver and its gradient-based stopping rule.
+L-BFGS uses the backend library's line search; an explicit `line_search` key with
+L-BFGS raises an error. See the [solver specification](SPEC.md#optimizers).
 
 **There is no `backend` key** — the compute backend (torch / jax) is **inferred from how the
 engine is invoked**, not configured: a JAX tool (AF3) grabs the pure minimizer via
@@ -1175,8 +1200,9 @@ No contacts are discarded. Increasing capacity can reduce fallback work; increas
 the skin can reduce rebuilds but increase overflow. These settings change performance,
 not the objective. There is no `neighbor_skin <= dmax` restriction.
 
-CG uses unrestricted scalar line-search steps and strict strong Wolfe (`c1=1e-4`,
-`c2=0.4`). Cache rebuilds preserve the same objective, conjugate direction and counters.
+CG uses scalar line-search steps without per-atom displacement clipping. Armijo
+uses historical backtracking; `line_search: strong-wolfe` uses strict strong Wolfe
+(`c1=1e-4`, `c2=0.4`). Cache rebuilds preserve the objective, conjugate direction and counters.
 `max_atom_step` and `neighbor_rebuild_interval` have been removed: delete these keys
 from old configs; passing them raises a migration error. Request `return_info=True`
 through the [Python API](SPEC.md#public-lifecycle) to distinguish convergence from
@@ -1185,7 +1211,7 @@ evaluate the complete dynamic VdW objective.
 
 When distance and conformer restraints are combined, CG uses a fixed linear change
 of variables to improve conditioning of large centroid translations. It preserves
-the scalar energy and every weight; the same PR+ and Wolfe algorithm runs in the
+the scalar energy and every weight; the selected PR+ algorithm runs in the
 transformed coordinates. This does not alter configured iteration limits.
 See the [solver specification](SPEC.md#nonlinear-conjugate-gradient).
 

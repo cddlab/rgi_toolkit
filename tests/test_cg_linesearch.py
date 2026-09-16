@@ -26,6 +26,7 @@ def backend(request):
 
 
 def solve(backend, energy, initial, max_iter=100, state=None, **kwargs):
+    kwargs.setdefault("line_search", "strong-wolfe")
     if backend == "torch":
         return torch_cg(
             torch.func.grad_and_value(energy),
@@ -102,12 +103,13 @@ def test_quantized_trials_reuse_coordinate_values_and_gradients(engine, device):
             torch.func.grad_and_value(energy),
             torch.tensor(initial, device=device),
             100,
+            line_search="strong-wolfe",
         )
     else:
         target = jax.devices("gpu" if device == "cuda" else "cpu")[0]
-        out, state = jax.jit(lambda x: jax_cg(energy, x, 100))(
-            jax.device_put(initial, target)
-        )
+        out, state = jax.jit(
+            lambda x: jax_cg(energy, x, 100, line_search="strong-wolfe")
+        )(jax.device_put(initial, target))
         jax.block_until_ready((out, state))
         jax.effects_barrier()
     np.testing.assert_array_equal(array(out), initial)
@@ -216,11 +218,19 @@ def test_accepted_trajectory_and_conditions_match_scipy(backend, diagonal):
     assert np.max(np.abs(gradient(ref.x))) <= 1e-7
     x, state = solve(backend, energy, initial, 0)
     if backend == "jax":
-        advance = jax.jit(lambda x, st: jax_cg(energy, x, 1, state=st))
+        advance = jax.jit(
+            lambda x, st: jax_cg(energy, x, 1, state=st, line_search="strong-wolfe")
+        )
     else:
 
         def advance(x, st):
-            return torch_cg(torch.func.grad_and_value(energy), x, 1, state=st)
+            return torch_cg(
+                torch.func.grad_and_value(energy),
+                x,
+                1,
+                state=st,
+                line_search="strong-wolfe",
+            )
 
     actual = []
     for _ in range(100):

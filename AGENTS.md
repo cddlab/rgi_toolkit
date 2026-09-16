@@ -67,18 +67,23 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
 
 3. **Optim layer** (`optim/{torch,jax}_optim.py`,
    GPU-complete): optimize only `active_sites` coords, scatter back. Default
-   `method='CG'` follows SciPy 1.17.1 PR+ and strong Wolfe (`c1=1e-4`, `c2=0.4`):
+   `method='CG'` defaults to historical PR+ Armijo backtracking (`line_search='armijo'`),
+   including the relative energy-change stop (`ftol=1e-9`, `FUNCTION_TOLERANCE`).
+   `line_search='strong-wolfe'` follows SciPy 1.17.1 PR+ (`c1=1e-4`, `c2=0.4`):
    More--Thuente DCSRCH first, then Wolfe2 bracket/zoom, including the prospective
    sufficient-descent check. `optim/_cg.py` and `_cg_linesearch.py` share the algorithm
    across eager/compiled Torch and JAX `lax.while_loop`; constants are in `_cg_config.py`.
-   Runtime CG never imports SciPy. There is no Armijo-only fallback, energy-change stop,
+   Runtime CG never imports SciPy. Strong Wolfe has no Armijo-only fallback, energy-change stop,
    or failed-search steepest-descent retry. There is no per-atom displacement cap.
    A failed Wolfe search retains the last accepted coordinates and ends the invocation.
    `return_info=True` on `minimize`/`get_minimizer` exposes `CGInfo`/`CGStatus` (CG only).
    `_vdw_runtime.py` validates neighbour caches before every trial evaluation, including
    rejected trials. Overflow rows use complete chunked pair sums; rebuilds preserve the
    objective and CG history. `max_atom_step` and `neighbor_rebuild_interval` are retired
-   config keys and raise migration errors. `method='l-bfgs'` remains opt-in.
+   config keys and raise migration errors. `method='l-bfgs'` remains opt-in;
+   omit `line_search` with L-BFGS (an explicit key raises). JAX L-BFGS uses standard
+   zoom search and the shared `GTOL=1e-7`; its previous backtracking override and
+   library tolerance `1e-3` could leave large centroid restraints unmoved.
    Array-backed and formula/callable custom centroids use ordinary mean derivatives,
    with `_move_centroid` only controlling pinned groups. The scalar energy and
    free-coordinate gradient agree; unrestricted CG steps move large groups.
@@ -506,7 +511,8 @@ gates remain fixed for the invocation. Cache changes never restart CG.
 `max_neighbors` is an acceleration capacity, not a truncation of the objective.
 Requesting one extra candidate detects overflowing query rows; their complete pair
 sums and gradients are accumulated in bounded chunks. Directed moving rows each
-have weight one half, including overflow rows. No contact is lost at capacity.
+have weight one half, including overflow rows. Self-pairs are excluded in both sparse
+and overflow evaluations, with or without chemical typing. No contact is lost at capacity.
 Both halves use the same sort-based spatial cell-list primitive. Normal-density build time is `O(B log B + L log B)`
 for moving ligand/polymer atoms `L` against fixed background `B`, and `O(N log N)` for
 active-active atoms; energy evaluation is `O(L * max_neighbors)` / `O(N * max_neighbors)`.

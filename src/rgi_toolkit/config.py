@@ -28,6 +28,7 @@ from rgi_toolkit.group_geom_restr_data import (
     DihedralRestraintData,
     ImproperRestraintData,
 )
+from rgi_toolkit.optim._options import resolve_line_search
 from rgi_toolkit.plane_restr_data import PlaneRestraintData, count_plane_groups
 from rgi_toolkit.ref_geom_restr_data import RefGeomData, is_ref_anchored
 from rgi_toolkit.rmsd_restr_data import RmsdData
@@ -99,6 +100,7 @@ class RestraintsConfig:
     verbose: bool = False
     gpu: bool = True
     method: str = "CG"
+    line_search: str | None = None
     max_iter: int = 100
     # Shared conformer window; +inf starts at the first diffusion step.
     conf_start_sigma: float = float("inf")
@@ -142,6 +144,7 @@ class RestraintsConfig:
             "verbose",
             "gpu",
             "method",
+            "line_search",
             "max_iter",
             "conformer_restraints_config",
             "custom_restraints_config",
@@ -255,12 +258,9 @@ class RestraintsConfig:
         # Quoted booleans such as "false" must not use Python's string truthiness.
         gpu = coerce_bool(config.get("gpu", True))
         method = config.get("method", "CG")
-        _valid_methods = {"cg", "ncg", "nonlinear-cg", "nonlinearcg", "l-bfgs", "lbfgs"}
-        if str(method).lower() not in _valid_methods:
-            raise ValueError(
-                f"unknown method {method!r}: expected a CG alias "
-                "(cg/ncg/nonlinear-cg/nonlinearcg) or l-bfgs (l-bfgs/lbfgs)"
-            )
+        if "line_search" in config and config["line_search"] is None:
+            raise ValueError("line_search must be 'armijo' or 'strong-wolfe'")
+        line_search = resolve_line_search(method, config.get("line_search"))
         max_iter = config.get("max_iter", 100)
         if (
             isinstance(max_iter, bool)
@@ -272,6 +272,7 @@ class RestraintsConfig:
             verbose=coerce_bool(config.get("verbose", False)),
             gpu=gpu,
             method=method,
+            line_search=line_search,
             max_iter=int(max_iter),
             conf_start_sigma=conf_start_sigma,
             conf_stop_sigma=conf_stop_sigma,

@@ -48,7 +48,7 @@ def native(points, backend):
     return np.array(points, dtype=float)
 
 
-def configured(*, max_iter=100, gate=None, dynamic=False, skin=2.0):
+def configured(*, max_iter=100, gate=None, dynamic=False, skin=2.0, **options):
     def quadratic(ctx):
         xyz = ctx.coords("index 1")
         return (
@@ -64,6 +64,7 @@ def configured(*, max_iter=100, gate=None, dynamic=False, skin=2.0):
         "gpu": False,
         "max_iter": max_iter,
         "custom_restraints_config": [{"fn": quadratic, **(gate or {})}],
+        **options,
     }
     if dynamic:
         config["conformer_restraints_config"] = {
@@ -159,7 +160,7 @@ def test_info_is_one_record_for_the_entire_batch(backend):
 def test_rebuild_preserves_cg_history_and_counts(backend, skin):
     from scipy.optimize import minimize
 
-    cr = configured(dynamic=True, skin=skin)
+    cr = configured(dynamic=True, skin=skin, line_search="strong-wolfe")
     initial = coords([1, 5, 0])
     out, info = apply(cr, native(initial, backend), backend)
     weights = np.array([16, 1, 1])

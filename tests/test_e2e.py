@@ -67,6 +67,7 @@ def setup(adapter, config, solver, max_iter=1000):
         config={
             "gpu": False,
             "method": solver[1],
+            **({"line_search": "strong-wolfe"} if solver[1] == "CG" else {}),
             "max_iter": max_iter,
             "verbose": True,
             **config,
