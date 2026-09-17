@@ -30,7 +30,9 @@ def _pack(rows, peptides=(), config=None):
     append_library_arrays(
         spec,
         targets,
-        {k: {"weight": 1} for k in rows} if config is None else config,
+        {"use_esd": True, **{k: {"weight": 1} for k in rows}}
+        if config is None
+        else config,
         {g: i for i, g in enumerate(active)},
     )
     return spec

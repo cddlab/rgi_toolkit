@@ -282,7 +282,7 @@ class VdwChemistry:
     contact_table: np.ndarray
     inv_variance_table: np.ndarray
     one_four_table: np.ndarray
-    use_esd: bool = True
+    use_esd: bool = False
 
     @property
     def radii(self):

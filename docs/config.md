@@ -39,7 +39,7 @@ restraints_config:
   verbose: ...        # bool
   gpu: ...            # bool
   method: ...         # "CG" | "l-bfgs"
-  line_search: ...    # CG only: "armijo" (default) | "strong-wolfe"
+  line_search: ...    # CG only: "strong-wolfe" (default) | "armijo"
   max_iter: ...       # int
   # --- restraints (each block optional) ---
   distance_restraints_config: [ ... ]   # list
@@ -112,7 +112,7 @@ and [one section](../examples/distance/boltz-2/qbp_25.00.yaml).
 | `verbose` | bool | `false` | Log the built spec (per-restraint counts) at setup and per-term energies at finalize. Strongly recommended — it is how you confirm a restraint was actually built. |
 | `gpu` | bool | `true` | Torch **device**: `true` = accelerator (default), `false` = CPU. It does **not** change the backend. (Inert for AF3, which always runs the JAX minimizer on the model's device.) Accepts `true/false` and the strings `1/0/yes/no/on/off`. |
 | `method` | str | `"CG"` | Optimizer: `"CG"` (nonlinear conjugate gradient) or `"l-bfgs"` (opt-in). |
-| `line_search` | str | `"armijo"` | CG only: `"armijo"` or `"strong-wolfe"`. Omit this key with L-BFGS. |
+| `line_search` | str | `"strong-wolfe"` | CG only: `"armijo"` or `"strong-wolfe"`. Omit this key with L-BFGS. |
 | `max_iter` | int | `100` | Nonnegative maximum optimizer iterations per denoising step, shared by all methods. |
 
 Choose one of these three configurations inside `restraints_config`:
@@ -131,10 +131,15 @@ line_search: strong-wolfe
 method: l-bfgs
 ```
 
-Omitting both keys selects CG with Armijo. Armijo restores the historical
+Omitting both keys selects CG with Strong Wolfe. Armijo restores the historical
 backtracking search and stops when the relative energy change is below `1e-9`;
 this is reported as `FUNCTION_TOLERANCE`, distinct from gradient convergence.
 Strong Wolfe retains the SciPy-style PR+ solver and its gradient-based stopping rule.
+CG and L-BFGS use a gradient tolerance of `1e-5` on both backends.
+For CG this matches SciPy; Armijo additionally has the energy-change stop.
+This threshold bounds the gradient, not the distance or angle error; large groups
+can retain a measurable residual because their centroid gradients are divided by
+the number of atoms.
 L-BFGS uses the backend library's line search; an explicit `line_search` key with
 L-BFGS raises an error. See the [solver specification](SPEC.md#optimizers).
 
@@ -921,35 +926,41 @@ The original plane membership remains available for VdW topology exclusions. Sta
 | `chiral` | `weight` (1.0), `slack` (0.05 Å³ reference / 0.0 Å³ library) | signed chiral volume; the library may also allow either sign |
 | `plane` | `weight` (0.0), `slack` (0.0 Å) | **best-fit-plane** flatness of whole planar atom groups ([servalcat](https://github.com/keitaroyam/servalcat)-style) — penalises each group's out-of-plane RMS deviation toward 0. Fires on (a) aromatic/conjugated rings (whole ring) and (b) non-ring sp2 groups (an acyclic double-bond centre + its heavy neighbors: carbonyl / amide / ester / carboxyl / trisubstituted alkene). Group membership is confirmed by the reference conformer being coplanar (not the RDKit aromaticity flag). Set `plane: {weight: 1}` to activate |
 | `cistrans` | `weight` (1.0), `slack` (0.0 rad) | ligand E/Z, protein side-chain χ, peptide ω and acyclic sp2 torsions, with explicit periodicity |
-| `vdw` | `weight` (1.0), `mode` (`"both"`), `scale` (1.0), `dmax` (5.0 Å), `max_neighbors` (32), `neighbor_skin` (2.0 Å) | chemical contact distances and ESD-based clash penalties, with unrestricted CG steps and exact Verlet caches validated at every trial |
+| `vdw` | `weight` (1.0), `mode` (`"both"`), `scale` (1.0), `dmax` (5.0 Å), `max_neighbors` (32), `neighbor_skin` (2.0 Å) | chemical contact distances and optional ESD-based clash penalties, with unrestricted CG steps and exact Verlet caches validated at every trial |
 
 ### ESD normalization of conformer geometry
 
 `conformer_restraints_config.use_esd` selects ESD normalization for **all six conformer
-terms**. It accepts a boolean and defaults to `true`, including when omitted. This covers
+terms**. It accepts a boolean and defaults to `false`, including when omitted. This covers
 reference targets, built-in links, dictionary geometry, approximate torsions, and both
-static and dynamic VdW contacts. With the default, ordinary bond, angle, chiral and
-periodic torsion residuals use inverse-variance weights:
+static and dynamic VdW contacts. By default, ordinary bond, angle, chiral and periodic
+torsion residuals are squared without ESD normalization:
+
+```text
+energy = weight * max(abs(deviation) - slack, 0)**2
+```
+
+To enable normalization while keeping the same targets and user weights:
+
+```yaml
+restraints_config:
+  conformer_restraints_config:
+    use_esd: true
+```
+
+With `true`, those residuals use inverse-variance weights:
 
 ```text
 energy = weight * (max(abs(deviation) - slack, 0) / ESD)**2
 ```
 
-To disable that normalization while keeping the same targets and user weights:
-
-```yaml
-restraints_config:
-  conformer_restraints_config:
-    use_esd: false
-```
-
-With `false`, the residual is squared **without division by ESD**. Angular residuals
-remain in radians, bond/plane/VdW distances in Angstroms, and chiral volumes in Angstrom
-cubed. Plane weights retain the atom-count factor, so their energy still sums per-atom
-squared deviations. Slack, topology exclusions, periodicity, activation windows and
-disabled/invalid dictionary-row handling do not change. ESD metadata validation still
-applies. This option does not affect standalone distance/angle/dihedral/plane/chiral/RMSD
-or custom restraints. Per-entity conformer opt-in is still required.
+Angular residuals remain in radians, bond/plane/VdW distances in Angstroms, and chiral
+volumes in Angstrom cubed. Plane weights retain the atom-count factor in both modes,
+so their energy still sums per-atom squared deviations. Slack, topology exclusions,
+periodicity, activation windows and disabled/invalid dictionary-row handling do not
+change. ESD metadata validation still applies. This option does not affect standalone
+distance/angle/dihedral/plane/chiral/RMSD or custom restraints. Per-entity conformer
+opt-in is still required.
 
 Changing `use_esd` changes the relative strength of the terms: energies from the two
 settings have different scales and must not be compared as a measure of structural
@@ -983,8 +994,8 @@ An active chiral restraint whose reference geometry cannot define a finite posit
 propagated ESD raises instead of silently reverting to an unnormalized weight.
 
 Built-in peptide and phosphodiester links keep their bond targets and ESDs:
-0.011 Å and 0.010 Å for their respective bonds, and 1.5° for link angles. Those ESDs
-now enter inverse-variance weights, with only user `slack` creating a free interval.
+0.011 Å and 0.010 Å for their respective bonds, and 1.5° for link angles. With
+`use_esd: true`, those ESDs enter inverse-variance weights; only user `slack` creates a free interval.
 Covered monomer-library geometry keeps its own dictionary ESDs; it is not normalized twice.
 Link-angle completion is independent of ESD normalization and explicit slack. It
 removes a mixed-source geometric inconsistency; it does not idealize the reference
@@ -994,8 +1005,8 @@ For conformer planes with `use_esd: true`, `weight * N / ESD**2` multiplies the 
 residual, so zero slack gives the sum of squared per-atom distances from the fitted
 plane, as in Servalcat. Explicit plane slack still applies to the group's RMS.
 
-This changes the objective of older reference-conformer runs: raw energies are not
-directly comparable across the change. No optimizer limits or tolerances are changed.
+Changing ESD normalization changes the objective: raw energies are not directly
+comparable across the two settings. No optimizer limits or tolerances are changed.
 Finite soft restraints can compete, so a nonzero total is not by itself evidence of
 failed minimization; also examine convergence diagnostics and geometric deviations.
 
@@ -1055,7 +1066,8 @@ automatically updated. Setup logs the source Git SHA; use an explicitly managed 
 when runs must share a particular revision. Parsing a config does not access the network.
 Invalid paths and failed downloads raise at setup.
 
-Dictionary ESD and user `slack` are separate:
+Dictionary ESD and user `slack` are separate. The energy formulas below assume
+`use_esd: true`; the default `false` omits their inverse-variance factors:
 
 - **Inverse-variance weighting:** bond, angle, torsion and chiral use
   `weight * (max(abs(deviation) - slack, 0) / ESD)**2`. Dictionary-derived `slack` defaults
@@ -1201,7 +1213,7 @@ quantity $x$:
 
 Conformer angles with `abs(target_degrees - 180) < 0.5` use
 `2 * weight * (1 + cos(theta))` instead of squared angle deviation. Packed reference and
-dictionary weights include `1 / ESD_radians**2`. The factor two preserves RGI's quadratic coefficient
+dictionary weights include `1 / ESD_radians**2` when `use_esd: true`. The factor two preserves RGI's quadratic coefficient
 for small deviations from linearity. With nonzero slack, the squared residual is
 `max(2*sin((pi-theta)/2) - 2*sin(slack/2), 0)**2`, preserving the requested angular free interval.
 Bond lengths in the cosine denominator are floored at 0.02 Å. Ordinary-length linear bonds
@@ -1214,7 +1226,8 @@ custom angle functions are unchanged.
 E = w \sum_{(i,j)} \left[\frac{\min(0,\;d_{ij}-\text{scale}\cdot R_{ij})}{\sigma_{ij}}\right]^2,
 ```
 
-where $d_{ij}$ is the pair distance and $R_{ij}$ is the chemical contact distance. With a
+where $d_{ij}$ is the pair distance and $R_{ij}$ is the chemical contact distance.
+The ESD denominator applies with `use_esd: true`; the default `false` omits it. With a
 configured dictionary, `type_energy` and `ener_lib.cif` provide atom radii and hydrogen-bond
 classes; otherwise standard-residue/source-molecule RDKit chemistry provides an offline
 approximation. Unavailable chemistry or unknown energy types warn and fall back to elemental
@@ -1241,10 +1254,11 @@ The verbose `finalize` `vdw=` value includes these static rows and both optimize
 halves on Torch and JAX.
 
 **Migration:** `scale` now defaults to 1.0 (formerly 0.75) and multiplies the chemical contact
-distance. At the same distance and contact threshold, ESD 0.2 Å multiplies the former VdW
-energy and gradient by 25. Reference geometry terms also use ESD normalization, as described
-above. `weight` remains a linear multiplier; no new ESD setting is required. Doubling an ESD
-divides both energy and gradient by four.
+distance. ESD normalization is off by default. With `use_esd: true`, ESD 0.2 Å
+multiplies the unnormalized VdW energy and gradient by 25 at the same distance and
+contact threshold. Reference geometry terms use the same switch. `weight` remains a
+linear multiplier; with normalization enabled, doubling an ESD divides both energy
+and gradient by four.
 
 ### Van der Waals modes
 

@@ -336,6 +336,7 @@ def test_library_planes_replace_conformer_ring_perception(library_dir):
 
 def test_library_esd_sets_inverse_variance_weights_independently_of_slack(library_dir):
     config = _config(library_dir)
+    config["conformer_restraints_config"]["use_esd"] = True
     spec = _setup(_NucleotideAdapter(), config)
     assert set(np.round(spec.bond.weight, 5)) == {
         round(1 / 0.010**2, 5),

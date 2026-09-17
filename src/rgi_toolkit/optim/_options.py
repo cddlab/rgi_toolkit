@@ -18,7 +18,7 @@ def resolve_line_search(method, line_search=None):
             raise ValueError("line_search is supported only for method='CG'")
         return None
     if line_search is None:
-        return "armijo"
+        return "strong-wolfe"
     if not isinstance(line_search, str) or line_search not in LINE_SEARCHES:
         raise ValueError("line_search must be 'armijo' or 'strong-wolfe'")
     return line_search

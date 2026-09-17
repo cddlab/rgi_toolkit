@@ -173,7 +173,7 @@ the exact constants and branch rules live in `_geometry.py` and `_kernels.py`.
 | `chiral` | Signed scalar triple product about the first atom; reference or dictionary target | Angstrom cubed; no division by six; symmetric slack; dictionary `both` accepts either sign | Shared conformer |
 | `plane` | RMS distance from the group's own least-squares plane; target zero | Angstrom; `max(q - slack, 0)` | Shared conformer |
 | `cistrans` | Ordered torsion and periodicity `n`; chemical/reference/dictionary target | Radians; `wrap(n * (phi - target)) / n`, then symmetric slack | Shared conformer |
-| `vdw` | Pair distance relative to a chemical contact | Angstrom; repulsive overlap divided by pair ESD | Shared conformer |
+| `vdw` | Pair distance relative to a chemical contact | Angstrom; repulsive overlap, optionally divided by pair ESD | Shared conformer |
 | `distance` | Distance between two geometric centroids; user target/bounds | Angstrom; four shared shapes | Per entry |
 | `rmsd` | Proper-rotation Kabsch fit followed by RMS measurement; reference structure and user target/bounds | Angstrom; four shared shapes | Per entry |
 | `group_angle` | Three centroids, vertex at group 2; user target/bounds | Radians internally; config defaults to degrees; four shared shapes | Per entry |
@@ -189,8 +189,9 @@ groups; pinning is per atom and every group is free by default. The conformer
 plane and standalone plane use the same least-squares measurement but different
 target construction, weighting, and gates.
 
-Conformer geometry packs `user_weight / ESD**2` into its array weights for both
-reference and dictionary targets. Conformer planes also multiply by their atom
+With `use_esd: true`, conformer geometry packs `user_weight / ESD**2` into its
+array weights for both reference and dictionary targets. The default `false` packs
+`user_weight` without ESD normalization. Conformer planes also multiply by their atom
 count, so squared RMS gives a per-atom squared sum. Standalone and custom
 restraints retain their own weight conventions; ESD never creates slack.
 
@@ -213,14 +214,14 @@ does not mutate source aromaticity. Plane membership is confirmed on relaxed
 coordinates, so the selected force field can change the plane count.
 
 Conformer ESD normalization is controlled by `conformer_restraints_config.use_esd`
-(boolean, default `true`). Setting it to `false` removes inverse-variance factors
-from all six conformer terms, including reference, dictionary, approximate torsion,
+(boolean, default `false`). Setting it to `true` applies inverse-variance factors
+to all six conformer terms, including reference, dictionary, approximate torsion,
 and static/dynamic VdW paths. Plane atom-count factors remain. Targets, slack,
 topology, gating, and invalid-ESD handling stay unchanged; standalone/custom
 restraints are independent. The switch is applied while packing host arrays,
 so backend energy kernels and optimizers need no new runtime option.
 
-With the default, reference geometry uses approximate ESDs: bonds 0.02 Angstrom, angles 3 degrees,
+With `use_esd: true`, reference geometry uses approximate ESDs: bonds 0.02 Angstrom, angles 3 degrees,
 planes 0.02 Angstrom per atom, and ligand E/Z 5 degrees. Chiral-volume ESDs are
 propagated from the three reference bonds and three angles around each center,
 using the same independent-error formula as dictionary geometry. An active
@@ -251,7 +252,7 @@ An enabled CCP4 monomer library replaces reference-derived tuples wholly inside
 covered residues. Link add/change/delete operations are applied before deriving
 geometry, chiral volumes, and propagated ESDs. Dictionary torsion signs are
 negated to match RGI's ordered-torsion convention; nonpositive periods become one.
-Dictionary weights default to `user_weight / ESD**2`, with angles and their ESDs converted
+With `use_esd: true`, dictionary weights use `user_weight / ESD**2`, with angles and their ESDs converted
 to radians. A dictionary plane additionally multiplies by its atom count, making
 the squared-RMS kernel equal the sum of per-atom squared distances. ESD is not
 slack. Dictionary slack defaults to zero; explicit slack remains independent.
@@ -372,7 +373,8 @@ so its energy reports are not necessarily the objective of the last denoising st
 
 VdW is an opt-in conformer term. `mode` selects intramolecular, intermolecular, or
 both categories. For an eligible pair, its contribution is
-`weight * (min(d - scale * contact, 0) / ESD)**2`. Chemical contact priority is
+`weight * min(d - scale * contact, 0)**2` by default. With `use_esd: true`,
+divide the residual by the pair ESD before squaring. Chemical contact priority is
 1-4, hydrogen bond, metal, dummy, then ordinary radius sum. Pair ESD is 0.2 Angstrom
 except dummy contacts at 0.3 Angstrom; hydrogen-inclusive radii are capped at
 2 Angstrom. Dictionary energy types take priority over approximate source/template
@@ -406,8 +408,8 @@ fixed throughout one invocation. Diagnostics and L-BFGS use the same complete su
 
 ### Nonlinear conjugate gradient
 
-`method: CG` selects PR+ with `line_search: armijo` (default) or
-`line_search: strong-wolfe` in three execution forms:
+`method: CG` selects PR+ with `line_search: strong-wolfe` (default) or
+`line_search: armijo` in three execution forms:
 
 | Implementation | Execution |
 | --- | --- |
@@ -439,7 +441,7 @@ step is carried between iterations. An accepted energy change smaller than
 the stopping rule of `11de8b4`; it is not a claim that the gradient converged.
 
 Both modes require finite values/gradients and representable coordinate movement,
-and report gradient convergence only when `max(abs(g)) <= 1e-7`. A failed search
+and report gradient convergence only when `max(abs(g)) <= 1e-5`. A failed search
 keeps the last accepted coordinates and terminates the invocation. There is no
 per-atom displacement clipping or failed-search retry. Neighbor lists are checked
 before every trial, including rejected trials.
@@ -504,7 +506,7 @@ Both Wolfe2 bracket orientations share one zoom body, and DCSRCH and Wolfe2 each
 request values and gradients at one loop site. This avoids duplicate compiled objective bodies
 without changing trial order, interpolation or search budgets.
 
-For Strong Wolfe, only `max(abs(g)) <= 1e-7` reports convergence. There is no energy-change
+For Strong Wolfe, only `max(abs(g)) <= 1e-5` reports convergence. There is no energy-change
 stop or restart latch, no accepted-step doubling, and no steepest-descent retry
 after failed searches. Failure returns the last accepted coordinates and terminates
 that minimization, even if earlier iterations moved atoms. The next denoising
@@ -559,14 +561,16 @@ is described by [Liu and Nocedal (1989)](https://link.springer.com/article/10.10
 
 | Backend | Delegation and explicit RGI options | Other stopping/history settings |
 | --- | --- | --- |
-| Torch | [`torch.optim.LBFGS`](https://github.com/pytorch/pytorch/blob/v2.6.0/torch/optim/lbfgs.py), `max_iter`, `line_search_fn="strong_wolfe"` | Upstream defaults; the locked Torch 2.6 uses gradient tolerance `1e-7`, change tolerance `1e-9`, history size 100 |
-| JAX | [`jaxopt.LBFGS`](https://jaxopt.github.io/stable/_autosummary/jaxopt.LBFGS.html), `maxiter`, `tol=1e-7`, `linesearch="zoom"`, `implicit_diff=False` | Standard zoom search and the shared RGI gradient tolerance; upstream history size 10 and maximum 30 line-search steps |
+| Torch | [`torch.optim.LBFGS`](https://github.com/pytorch/pytorch/blob/v2.6.0/torch/optim/lbfgs.py), `max_iter`, `tolerance_grad=1e-5`, `line_search_fn="strong_wolfe"` | Upstream defaults; the locked Torch 2.6 uses change tolerance `1e-9`, history size 100 |
+| JAX | [`jaxopt.LBFGS`](https://jaxopt.github.io/stable/_autosummary/jaxopt.LBFGS.html), `maxiter`, `tol=1e-5`, `linesearch="zoom"`, `implicit_diff=False` | Standard zoom search; upstream history size 10 and maximum 30 line-search steps |
 
-Gradient tolerances use the same numerical threshold, while their norms and other
-stopping quantities differ across libraries. JAX's former backtracking override
-could fail a search without moving; its library tolerance of `1e-3` could then stop
-large centroid restraints far from their targets. Zoom and the shared `GTOL`
-avoid that premature stop without changing weights or iteration budgets.
+CG and both L-BFGS adapters share the `1e-5` gradient threshold. Torch uses
+an infinity norm; JAXopt uses a Euclidean norm. Their other stopping rules differ.
+JAX's former backtracking override could fail a search without moving; its library
+tolerance of `1e-3` could then stop large centroid restraints far from their targets.
+The shared gradient threshold does not guarantee a particular coordinate residual:
+centroid derivatives decrease with group size, so large groups can meet the
+threshold before their distance or angle error is negligible.
 Other library defaults can change
 when dependencies are updated. `uv.lock` defines the repository test environment;
 predictor environments may pin other versions. Torch's source attributes its

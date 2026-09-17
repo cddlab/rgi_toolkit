@@ -169,7 +169,7 @@ def test_rebuild_preserves_cg_history_and_counts(backend, skin):
         initial[1],
         jac=lambda x: weights * x,
         method="CG",
-        options={"gtol": 1e-7, "maxiter": 100},
+        options={"gtol": 1e-5, "maxiter": 100},
     )
     assert ref.success
     assert int(info.status) == CGStatus.CONVERGED

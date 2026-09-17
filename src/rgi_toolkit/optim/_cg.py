@@ -3,7 +3,7 @@
 Direction updates and step initialization follow scipy.optimize._minimize_cg
 1.17.1, distributed under BSD-3-Clause (LICENSES/scipy.txt). Array evaluation is
 backend-specific; the optimization and line-search transitions are shared.
-The default Armijo mode retains the historical PR+ update and stopping rules,
+The optional Armijo mode retains the historical PR+ update and stopping rules,
 with expanding initial steps for ordinary mean derivatives.
 """
 
@@ -165,7 +165,7 @@ def run_cg(
     x0,
     max_iter,
     *,
-    line_search="armijo",
+    line_search=None,
     gtol=GTOL,
     ftol=ARMIJO_FTOL,
     max_ls=ARMIJO_MAX_ITER,

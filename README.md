@@ -44,10 +44,11 @@ Nine **built-in** restraint types, all minimized during the denoising loop to gu
   ([servalcat](https://github.com/keitaroyam/servalcat)-style best-fit-plane flatness of aromatic rings + sp2 groups, opt-in)
   toward an ideal RDKit geometry, plus **VdW**
   non-bonded clash avoidance (intramolecular and/or intermolecular; `mode`
-  defaults to `both`; chemical contact distances and ESD weighting). Near-linear conformer
+  defaults to `both`; chemical contact distances and optional ESD weighting). Near-linear conformer
   angles use a stable cosine residual. For polymers the targets can instead come from a **CCP4 monomer
-  library** (`monomer_library: true` downloads and caches it) — targets and ESD-based
-  inverse-variance weights, with a local-path option for an existing snapshot. Prefer that
+  library** (`monomer_library: true` downloads and caches it) — dictionary targets and
+  optional ESD-based weights, with a local-path option for an existing snapshot.
+  ESD normalization is off by default; enable `conformer_restraints_config.use_esd: true`. Prefer dictionary targets
   for nucleic acids: the predictor's own reference conformer is an ETKDG embedding of the
   free CCD component, so restraining toward it *worsens* base geometry.
 - **RMSD** — Kabsch-superposed RMSD of a group toward a reference PDB.
@@ -73,7 +74,7 @@ Beyond these nine built-ins you can define your **own** restraint — see
 The default `method='CG'` solver (a nonlinear conjugate gradient with autodiff gradients)
 runs on GPU or CPU via the same torch/jax backend (`gpu: false` runs it on CPU); all
 restraints — distance included — are minimised by this solver.
-CG uses PR+ with `line_search: armijo` (default) or SciPy-style `strong-wolfe`,
+CG uses SciPy-style PR+ with `line_search: strong-wolfe` (default) or `armijo`,
 without a per-atom displacement cap. Mixed distance/conformer CG uses a fixed coordinate transformation
 to improve conditioning while preserving every energy and weight. Dynamic VdW caches
 remain exact at every trial point. Each restraint is gated by an optional `start_sigma` (active once
@@ -185,9 +186,9 @@ spec outside the scan and grab the pure closure with `restr.get_minimizer()`
 (`(flat_coords, sigma) -> flat_coords`), then call it inside the compiled loop instead
 of `minimize`.
 
-The default CG restores historical Armijo backtracking and the small-energy-change
-stop. Use `method: CG` with `line_search: strong-wolfe` for SciPy 1.17.1 PR+ and
-strong-Wolfe searches, or `method: l-bfgs` with no `line_search` key for L-BFGS. Set
+The default CG uses SciPy 1.17.1 PR+ with strong-Wolfe searches. Set
+`line_search: armijo` for historical backtracking and the small-energy-change
+stop, or `method: l-bfgs` with no `line_search` key for L-BFGS. Set
 `return_info=True` on `minimize` or `get_minimizer` to obtain `(coords, CGInfo)`
 and distinguish gradient convergence, a small energy change, search failure and an
 iteration limit. A failed CG search keeps the last accepted coordinates.

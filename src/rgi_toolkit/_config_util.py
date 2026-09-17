@@ -47,8 +47,8 @@ def conformer_weight(config: dict | None, key: str) -> float:
 
 
 def conformer_use_esd(config: dict | None) -> bool:
-    """Select uncertainty normalization without changing targets or slack."""
-    value = (config or {}).get("use_esd", True)
+    """Select opt-in uncertainty normalization without changing targets or slack."""
+    value = (config or {}).get("use_esd", False)
     if not isinstance(value, bool):
         raise ValueError("conformer_restraints_config.use_esd must be true or false")
     return value

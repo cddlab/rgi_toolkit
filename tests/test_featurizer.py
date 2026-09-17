@@ -188,7 +188,7 @@ def test_intramolecular_vdw_static_arrays():
     assert spec.vdw_config is None
     # Nonplanar 1-4 contacts are retained with reduced contact radii.
     np.testing.assert_array_equal(spec.vdw.idx, [[0, 3], [0, 4], [1, 4]])
-    np.testing.assert_allclose(spec.vdw.weight, 1 / 0.2**2)
+    np.testing.assert_allclose(spec.vdw.weight, 1.0)
     np.testing.assert_allclose(spec.vdw.r_min, [3.56, 3.88, 3.56])
     assert int(spec.vdw.idx.max()) < spec.n_active
 

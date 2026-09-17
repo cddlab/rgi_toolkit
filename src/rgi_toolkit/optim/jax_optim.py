@@ -1,8 +1,8 @@
 """GPU restraint optimizer for JAX tools (alphafold3).
 
 Builds a pure JIT/scan/vmap-compatible minimizer over an autodiff energy.
-CG selects historical Armijo (default) or SciPy 1.17.1 PR+ with DCSRCH/Wolfe2
-strong Wolfe through ``optim/_cg.py``, shared with Torch. Failed searches
+CG selects SciPy 1.17.1 PR+ with DCSRCH/Wolfe2 strong Wolfe (default) or
+historical Armijo through ``optim/_cg.py``, shared with Torch. Failed searches
 retain the last accepted point. ``return_info=True`` exposes traced CG diagnostics.
 ``method='l-bfgs'`` uses ``jaxopt.LBFGS`` (lazily imported). No callback or runtime
 SciPy is used; optimization remains inside XLA on the selected device. Backend

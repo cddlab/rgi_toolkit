@@ -516,7 +516,7 @@ def test_custom_callable_rosenbrock_through_public_api(solver, capsys):
     out = drive(cr, coords, solver)[-1]
     np.testing.assert_array_equal(out[[0, 2]], coords[[0, 2]])
     np.testing.assert_allclose(out[1], ref.x, rtol=0, atol=1e-3)
-    assert np.max(np.abs(gradient(out[1]))) < (1e-6 if solver[1] == "CG" else 1e-3)
+    assert np.max(np.abs(gradient(out[1]))) <= (1e-5 if solver[1] == "CG" else 1e-3)
     diagnostic(cr, out, solver, capsys, objective(out[1]))
 
 
@@ -546,6 +546,7 @@ def test_conformer_targets_and_minima_match_scipy(solver, kind, capsys):
         elements,
     )
     config = {
+        "use_esd": True,
         "relax_force_field": {"ligand": "none"},
         **{key: {"weight": 0} for key in ("chiral", "cistrans", "vdw")},
         "bond": {},
@@ -632,6 +633,7 @@ def test_intramolecular_vdw_matches_dense_scipy(solver, capsys):
         {
             "conformer_restraints_config": {
                 "relax_force_field": {"ligand": "none"},
+                "use_esd": True,
                 "vdw": {"mode": "intramolecular", "weight": 0.04},
                 **{
                     key: {"weight": 0}
@@ -691,6 +693,7 @@ def test_dynamic_vdw_new_contacts_match_dense_scipy(solver, capsys):
         adapter,
         {
             "conformer_restraints_config": {
+                "use_esd": True,
                 "relax_force_field": {"ligand": "none"},
                 "vdw": {
                     "mode": "intermolecular",

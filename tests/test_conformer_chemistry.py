@@ -194,6 +194,7 @@ def test_ligand_sp2_uses_relaxed_coords_and_preserves_double_bond_ez(monkeypatch
     relaxed[4, 2] += 0.4
     monkeypatch.setattr(featurizer, "ff_relax", lambda *args, **kwargs: relaxed)
     config = {key: {"weight": 0} for key in ("bond", "angle", "chiral", "vdw")}
+    config["use_esd"] = True
     spec = build_spec([ligand], conformer_config=config)
     assert 1 in spec.cistrans.period
     assert 2 in spec.cistrans.period
@@ -266,12 +267,13 @@ def test_background_residue_and_ligand_chemistry_are_typed_without_opt_in():
     assert chemistry.molecules[0] != chemistry.molecules[-1]
 
 
-def test_esd_switch_preserves_vdw_contacts_and_exclusions_in_every_packing_path():
+@pytest.mark.parametrize("option", [{}, {"use_esd": False}])
+def test_esd_switch_preserves_vdw_contacts_and_exclusions_in_every_packing_path(option):
     ligand = _ligand("CCCCC")
     elements = np.full(6, 6)
     records = [AtomRecord("D", 1, 5, "DUM", "ligand", "UNK")]
-    enabled = build_chemistry([ligand], elements, records)
-    disabled = build_chemistry([ligand], elements, records, {"use_esd": False})
+    enabled = build_chemistry([ligand], elements, records, {"use_esd": True})
+    disabled = build_chemistry([ligand], elements, records, option)
     for other, sigma in ((3, 0.2), (4, 0.2), (5, 0.3)):
         contact, inverse = enabled.pair(0, other)
         assert inverse == pytest.approx(1 / sigma**2)
@@ -322,7 +324,10 @@ def test_dictionary_vdw_types_cover_ligands_and_fixed_background(tmp_path, caplo
         for i, name in enumerate(("N1", "O1", "C1"))
     ]
     chemistry = build_chemistry(
-        [], np.array([7, 8, 6]), records, {"monomer_library": str(tmp_path)}
+        [],
+        np.array([7, 8, 6]),
+        records,
+        {"monomer_library": str(tmp_path), "use_esd": True},
     )
     assert chemistry.pair(0, 1) == pytest.approx((2.42, 25))
     assert chemistry.radii[2] == pytest.approx(1.71)
@@ -451,7 +456,7 @@ def test_typed_dynamic_ranking_energy_gradient_and_esd_scaling(backend, active):
     # The nearer donor has a shorter hydrogen-bond contact than the farther carbon.
     # K=1 must retain the carbon, which has the larger true overlap.
     elements = np.array([8, 7, 6])
-    chemical = build_chemistry([], elements)
+    chemical = build_chemistry([], elements, config={"use_esd": True})
     chemical.types = [
         AtomType(1.52, 1.28, "A", 8),
         AtomType(1.6, 1.32, "D", 7),

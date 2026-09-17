@@ -94,14 +94,16 @@ def _case(term, use_esd=True):
             actual = np.linalg.det(moved[1:] - moved[0])
             sigma = _chiral_sigma(reference) if use_esd else 1
             expected += ((actual - original) / sigma) ** 2
-    config = dict(_config(term), use_esd=use_esd)
+    config = _config(term)
+    if use_esd is not None:
+        config["use_esd"] = use_esd
     spec = build_spec([ligand], conformer_config=config)
     return spec, query[spec.active_sites], expected
 
 
 @pytest.mark.parametrize("backend", ["numpy", "torch", "jax"])
 @pytest.mark.parametrize("term", TERMS[:-1])
-@pytest.mark.parametrize("use_esd", [True, False])
+@pytest.mark.parametrize("use_esd", [None, True, False])
 def test_reference_energy_and_gradient_match_residuals(term, backend, use_esd):
     spec, coords, expected = _case(term, use_esd)
     energy, grad = _energy_grad(spec, coords, backend)
@@ -149,7 +151,7 @@ def test_link_esd_is_weight_and_user_slack_is_separate(slack, use_esd):
 
 def test_chiral_normalization_does_not_depend_on_bond_angle_activation():
     ligand = _lig_heavy("C[C@H](O)N")
-    config = _config("chiral", slack=0.05)
+    config = dict(_config("chiral", slack=0.05), use_esd=True)
     single = build_spec([ligand], conformer_config=config)
     config.update(bond={"weight": 9}, angle={"weight": 0.2})
     combined = build_spec([ligand], conformer_config=config)
@@ -162,7 +164,7 @@ def test_chiral_normalization_does_not_depend_on_bond_angle_activation():
     np.testing.assert_allclose(inverted.chiral.vol0, -combined.chiral.vol0)
 
 
-def test_default_esd_preserves_existing_arrays_and_toggle_changes_only_weights():
+def test_default_esd_is_disabled_and_toggle_changes_only_weights():
     from tests.test_conformer_chemistry import _ligand as make_ligand
 
     ligand = make_ligand("C[C@H](O)CC/C=C/c1ccccc1")
@@ -177,11 +179,11 @@ def test_default_esd_preserves_existing_arrays_and_toggle_changes_only_weights()
         assert a is not None, kind
         for field in fields(a):
             np.testing.assert_array_equal(
-                getattr(a, field.name), getattr(b, field.name)
+                getattr(a, field.name), getattr(c, field.name)
             )
             if field.name != "weight":
                 np.testing.assert_array_equal(
-                    getattr(a, field.name), getattr(c, field.name)
+                    getattr(a, field.name), getattr(b, field.name)
                 )
         expected = 3 if kind == "vdw" else 2
         if kind == "plane":

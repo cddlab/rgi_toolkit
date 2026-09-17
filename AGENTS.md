@@ -67,9 +67,10 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
 
 3. **Optim layer** (`optim/{torch,jax}_optim.py`,
    GPU-complete): optimize only `active_sites` coords, scatter back. Default
-   `method='CG'` defaults to historical PR+ Armijo backtracking (`line_search='armijo'`),
-   including the relative energy-change stop (`ftol=1e-9`, `FUNCTION_TOLERANCE`).
-   `line_search='strong-wolfe'` follows SciPy 1.17.1 PR+ (`c1=1e-4`, `c2=0.4`):
+   `method='CG'` defaults to `line_search='strong-wolfe'`. Explicit
+   `line_search='armijo'` retains historical PR+ backtracking and the relative
+   energy-change stop (`ftol=1e-9`, `FUNCTION_TOLERANCE`). Strong Wolfe follows
+   SciPy 1.17.1 PR+ (`c1=1e-4`, `c2=0.4`, CG `gtol=1e-5`):
    More--Thuente DCSRCH first, then Wolfe2 bracket/zoom, including the prospective
    sufficient-descent check. `optim/_cg.py` and `_cg_linesearch.py` share the algorithm
    across eager/compiled Torch and JAX `lax.while_loop`; constants are in `_cg_config.py`.
@@ -90,7 +91,8 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
    search, history and stopping rules. `max_atom_step` and `neighbor_rebuild_interval` are retired
    config keys and raise migration errors. `method='l-bfgs'` remains opt-in;
    omit `line_search` with L-BFGS (an explicit key raises). JAX L-BFGS uses standard
-   zoom search and the shared `GTOL=1e-7`; its previous backtracking override and
+   zoom search; CG and both L-BFGS adapters use the shared `GTOL=1e-5`.
+   JAX L-BFGS's previous backtracking override and
    library tolerance `1e-3` could leave large centroid restraints unmoved.
    Array-backed and formula/callable custom centroids use ordinary mean derivatives,
    with `_move_centroid` only controlling pinned groups. The scalar energy and
@@ -133,8 +135,8 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
 
 An empty conformer block enables bond/angle/chiral/cistrans/vdw at weight 1; absent/null
 blocks disable the layer. Plane defaults to 0 even with an empty sub-block.
-`conformer_restraints_config.use_esd` is a strict boolean (default `true`); `false`
-removes ESD inverse-variance factors from all six conformer terms at spec packing,
+`conformer_restraints_config.use_esd` is a strict boolean (default `false`); `true`
+applies ESD inverse-variance factors to all six conformer terms at spec packing,
 including reference, dictionary, approximate torsion and static/dynamic VdW paths.
 Plane atom-count factors, targets, slack, topology, gates and invalid-ESD handling
 remain unchanged. Standalone/custom restraints are independent. Positive
@@ -184,16 +186,17 @@ free CCD component, giving an unconjugated exocyclic C-N (1.42 Å vs 1.33) and a
 Library planes are named groups — a whole nucleobase (ring + exocyclic + `C1'`) in ONE group where
 SSSR perception splits a purine in two. Keep actual local peptide planes, typically
 `{CA, C, O}(previous) + {N}(current)`, separate from omega. Dictionary ESD means inverse-variance
-weight, **not slack**: `_monlib_spec.py` packs `weight / ESD**2`, and plane additionally
+weight, **not slack**: with `use_esd: true`, `_monlib_spec.py` packs `weight / ESD**2`;
+otherwise it packs `weight`. Plane additionally
 multiplies by group size so its existing RMS-squared kernel equals the per-atom squared sum.
 Explicit user slack remains separate; dictionary slack defaults to 0 for all terms (reference
 chiral keeps 0.05). Nonpositive ESD disables energy, retaining topology exclusions; nonfinite
-active targets/ESDs raise. Reference geometry is also ESD-normalized:
+active targets/ESDs raise. With `use_esd: true`, reference geometry is also ESD-normalized:
 `_conformer_esd.py` supplies Gemmi-style coordinate-fallback ESDs (bond 0.02 A,
 angle 3 degrees), propagates reference chiral ESDs through the same three-bond /
 three-angle formula, and uses approximate plane 0.02 A and ligand E/Z 5-degree ESDs.
 Reference planes also multiply by group size. Built-in peptide/phosphodiester link
-ESDs now enter inverse-variance weights, never implicit slack. All explicit slack,
+ESDs enter inverse-variance weights only with `use_esd: true`, never implicit slack. All explicit slack,
 reference targets, periods, term activation and optimizer defaults stay independent
 of normalization. Invalid active reference ESDs raise; dictionary ESD <= 0 retains
 its existing disable semantics. `weight` is still linear (RGI has no factor 0.5),
@@ -502,7 +505,8 @@ plane/cistrans/vdw). `mode` picks **two categories** (default `both` = both):
     cross pairs are listed and the clamp contributes zero beyond contact. Only built when
     ≥2 ligands opted in.
 
-All paths share `weight * (clamp(d - scale*contact, max=0)/ESD)**2`. `_vdw_chemistry.py`
+All paths share `weight * clamp(d - scale*contact, max=0)**2` by default;
+`use_esd: true` divides the residual by ESD before squaring. `_vdw_chemistry.py`
 collects chemistry for ALL atoms, including fixed background and nonrestrained ligands.
 Configured `type_energy`/`ener_lib` parameters take priority; otherwise RDKit templates/source
 graphs give approximate chemistry, with warning plus elemental fallback when unavailable.

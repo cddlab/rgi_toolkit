@@ -2,8 +2,8 @@
 
 Minimizes the restraint energy on active-site coordinates using autograd for
 gradients. ``method`` selects the solver: ``"CG"`` (default) -> a nonlinear
-conjugate-gradient solver with Armijo (default) or SciPy 1.17.1 strong Wolfe
-(PR+, DCSRCH/Wolfe2), shared with JAX through ``optim/_cg.py``; ``"l-bfgs"`` ->
+conjugate-gradient solver with SciPy 1.17.1 strong Wolfe (default, PR+,
+DCSRCH/Wolfe2) or Armijo, shared with JAX through ``optim/_cg.py``; ``"l-bfgs"`` ->
 ``torch.optim.LBFGS`` (strong-Wolfe). Operates in-place on the coordinate tensor
 and stays on whatever device the coordinates live on, so ``gpu: true`` runs
 entirely on GPU.
@@ -463,7 +463,10 @@ class TorchRestraintOptimizer:
             else:
                 active.requires_grad_(True)
                 opt = torch.optim.LBFGS(
-                    [active], max_iter=mi, line_search_fn="strong_wolfe"
+                    [active],
+                    max_iter=mi,
+                    tolerance_grad=GTOL,
+                    line_search_fn="strong_wolfe",
                 )
 
                 def closure():

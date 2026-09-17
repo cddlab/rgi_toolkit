@@ -27,14 +27,14 @@ def test_configured_mode(options):
     expected = (
         None
         if options.get("method") == "l-bfgs"
-        else options.get("line_search", "armijo")
+        else options.get("line_search", "strong-wolfe")
     )
     assert config.line_search == expected
 
 
 @pytest.mark.parametrize("method", ["CG", "cg", "ncg", "nonlinear-cg", "nonlinearcg"])
-def test_cg_aliases_default_to_armijo(method):
-    assert RestraintsConfig.from_dict({"method": method}).line_search == "armijo"
+def test_cg_aliases_default_to_strong_wolfe(method):
+    assert RestraintsConfig.from_dict({"method": method}).line_search == "strong-wolfe"
 
 
 @pytest.mark.parametrize(
@@ -102,7 +102,7 @@ def test_public_solver_reduces_custom_objective_and_respects_gate(
 @pytest.mark.parametrize("backend", ["torch", "jax"])
 @pytest.mark.parametrize("options", MODES[1:])
 @pytest.mark.parametrize("device", ["cpu", pytest.param("gpu", marks=pytest.mark.gpu)])
-def test_default_solver_converges_large_group_angle(backend, options, device):
+def test_default_solver_converges_large_group_angle_gradient(backend, options, device):
     jax.config.update("jax_enable_x64", True)
     size = 512
     centers = np.array([[30.0, 0, 0], [0, 0, 0], [0, 30.0, 0]])
@@ -134,11 +134,29 @@ def test_default_solver_converges_large_group_angle(backend, options, device):
     first, second = points[0] - points[1], points[2] - points[1]
     cosine = first @ second / (np.linalg.norm(first) * np.linalg.norm(second))
     angle = np.degrees(np.arccos(np.clip(cosine, -1, 1)))
-    assert angle == pytest.approx(60.0, abs=0.1)
+    # Convergence bounds per-atom gradients, not the angular residual.
+    assert abs(angle - 60.0) < abs(90.0 - 60.0)
+    np.testing.assert_array_equal(out[size : 2 * size], initial[size : 2 * size])
+    theta = np.radians(angle)
+    residual = theta - np.pi / 3
+    u, v = first / np.linalg.norm(first), second / np.linalg.norm(second)
+    free_gradient = np.stack(
+        (
+            (cosine * u - v) / np.linalg.norm(first),
+            (cosine * v - u) / np.linalg.norm(second),
+        )
+    ) * (2 * residual / (size * np.sin(theta)))
+    if backend == "jax" and options["method"] == "l-bfgs":
+        grad_norm = np.sqrt(size) * np.linalg.norm(free_gradient)
+    else:
+        grad_norm = np.max(np.abs(free_gradient))
+    assert grad_norm <= 1e-5
 
 
 def solve(backend, energy, initial, max_iter=100, **kwargs):
     jax.config.update("jax_enable_x64", True)
+    kwargs.setdefault("line_search", "armijo")
+    kwargs.setdefault("gtol", 1e-7)
     if backend == "torch":
         out, state = torch_cg(
             torch.func.grad_and_value(energy),
@@ -192,3 +210,34 @@ def test_armijo_mean_objective_can_grow_beyond_a_unit_step(backend):
     assert np.max(np.abs(2 * out / out.size)) <= 1e-7
     assert float(info.fun) == pytest.approx(np.mean(out**2))
     assert int(info.nit) < 100
+
+
+@pytest.mark.parametrize("backend", ["torch", "jax"])
+def test_implicit_cg_does_not_use_armijo_energy_change_stop(backend):
+    out, info = solve(
+        backend, lambda x: 1e9 + 0.05 * (x**2).sum(), [1.0], line_search=None
+    )
+    np.testing.assert_allclose(out, [0.0], atol=1e-6)
+    assert int(info.status) == CGStatus.CONVERGED
+    assert float(info.grad_norm) <= 1e-7
+
+
+@pytest.mark.parametrize("backend", ["torch", "jax"])
+def test_default_cg_accepts_the_scipy_gradient_tolerance(backend):
+    jax.config.update("jax_enable_x64", True)
+
+    def energy(x):
+        return 1e-6 * (x**2).sum()
+
+    if backend == "torch":
+        out, state = torch_cg(
+            torch.func.grad_and_value(energy), torch.ones(1, dtype=torch.float64), 100
+        )
+        out = out.numpy()
+    else:
+        out, state = jax.jit(lambda x: jax_cg(energy, x, 100))(jnp.ones(1))
+        out = np.asarray(out)
+    np.testing.assert_array_equal(out, [1.0])
+    assert int(state.info.status) == CGStatus.CONVERGED
+    assert float(state.info.grad_norm) == pytest.approx(2e-6)
+    assert int(state.info.nit) == 0

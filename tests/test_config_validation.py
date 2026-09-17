@@ -70,10 +70,10 @@ def test_empty_config_is_vanilla():
 
 
 @pytest.mark.parametrize("option", [{}, {"use_esd": True}, {"use_esd": False}])
-def test_conformer_esd_option_parses_and_defaults_to_enabled(option):
+def test_conformer_esd_option_parses_and_defaults_to_disabled(option):
     cfg = RestraintsConfig.from_dict({"conformer_restraints_config": option})
     assert cfg.conformer_config == option
-    assert conformer_use_esd(cfg.conformer_config) is option.get("use_esd", True)
+    assert conformer_use_esd(cfg.conformer_config) is option.get("use_esd", False)
 
 
 @pytest.mark.parametrize("value", [None, 0, 1, "false", "true", [], {}])

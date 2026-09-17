@@ -104,11 +104,12 @@ def test_quantized_trials_reuse_coordinate_values_and_gradients(engine, device):
             torch.tensor(initial, device=device),
             100,
             line_search="strong-wolfe",
+            gtol=1e-7,
         )
     else:
         target = jax.devices("gpu" if device == "cuda" else "cpu")[0]
         out, state = jax.jit(
-            lambda x: jax_cg(energy, x, 100, line_search="strong-wolfe")
+            lambda x: jax_cg(energy, x, 100, line_search="strong-wolfe", gtol=1e-7)
         )(jax.device_put(initial, target))
         jax.block_until_ready((out, state))
         jax.effects_barrier()
@@ -213,9 +214,9 @@ def test_accepted_trajectory_and_conditions_match_scipy(backend, diagonal):
         jac=gradient,
         method="CG",
         callback=lambda x: expected_trace.append(x.copy()),
-        options={"gtol": 1e-7, "maxiter": 100},
+        options={"gtol": 1e-5, "maxiter": 100},
     )
-    assert np.max(np.abs(gradient(ref.x))) <= 1e-7
+    assert np.max(np.abs(gradient(ref.x))) <= 1e-5
     x, state = solve(backend, energy, initial, 0)
     if backend == "jax":
         advance = jax.jit(
@@ -247,7 +248,7 @@ def test_accepted_trajectory_and_conditions_match_scipy(backend, diagonal):
         gn = gradient(array(x))
         assert value(array(x)) <= value(before) + 1e-4 * alpha * np.dot(g, d) + 1e-14
         assert abs(np.dot(gn, d)) <= -0.4 * np.dot(g, d) + 1e-14
-        if np.max(abs(gn)) > 1e-7:
+        if np.max(abs(gn)) > 1e-5:
             assert np.dot(array(state.d), gn) <= -0.01 * np.dot(gn, gn) + 1e-14
     assert int(state.info.status) == CGStatus.CONVERGED
     np.testing.assert_allclose(actual, expected_trace, rtol=1e-9, atol=1e-10)

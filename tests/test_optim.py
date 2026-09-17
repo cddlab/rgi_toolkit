@@ -1710,6 +1710,7 @@ def test_dynamic_vdw_pair_energy_matches_optimizer():
             v["bg_r"],
             v["scale"],
             v["weight"],
+            v["chemistry"],
         )
     )
     assert e_method > 0.0 and abs(e_method - e_pure) < 1e-10, (e_method, e_pure)

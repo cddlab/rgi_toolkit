@@ -4,11 +4,11 @@ Armijo restores the historical warm start and relative-function stopping rule.
 Its trial step can grow above one for ordinary centroid/RMSD mean derivatives.
 Strong Wolfe retains DCSRCH, Wolfe2 and the prospective sufficient-descent test.
 Neither mode clips atom displacements. Exact neighbour-cache rebuilds preserve
-the objective and the conjugate direction. The gradient tolerance remains the
-historical RGI value; SciPy's default is 1e-5.
+the objective and the conjugate direction. The default gradient tolerance is
+1e-5, matching SciPy CG; both L-BFGS adapters use the same threshold.
 """
 
-GTOL = 1e-7
+GTOL = 1e-5
 ARMIJO_C1 = 1e-4
 ARMIJO_MAX_ITER = 20
 ARMIJO_BACKTRACK = 0.5
