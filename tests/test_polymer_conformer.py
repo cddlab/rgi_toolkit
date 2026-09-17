@@ -195,7 +195,7 @@ def test_protein_builds_peptide_link_plane_and_vdw_exclusions():
 
 
 def test_conformer_derived_targets_keep_the_configured_slack():
-    # Reference-conformer paths keep the configured slack without ESD normalization.
+    # ESD normalization does not introduce an implicit flat-bottom tolerance.
     restr = CombinedRestraints()
     restr.setup(_PolymerAdapter("protein", _RING_NAMES, _RING_COORDS), config=_config())
     spec = restr.spec
@@ -243,8 +243,8 @@ def test_phosphodiester_link_targets_are_present():
     coords = np.array(
         [
             [0.0, 0.0, 0.0],
-            [0.6, 1.4, 0.0],
-            [0.6, -1.4, 0.0],
+            [-0.5, 1.4, 0.3],
+            [-0.5, -0.7, 1.2],
             [1.6, 0.0, 0.0],
             [2.8, 0.5, 0.0],
             [5.0, 1.0, 0.0],
@@ -272,9 +272,15 @@ def test_phosphodiester_link_targets_are_present():
         return math.degrees(float(rows[0]))
 
     assert angle_target(c3_1, o3_1, p2) == pytest.approx(121.082, abs=1e-3)
-    assert angle_target(o5_2, p2, o3_1) == pytest.approx(100.661, abs=1e-3)
-    assert angle_target(op1_2, p2, o3_1) == pytest.approx(109.493, abs=1e-3)
-    assert angle_target(op2_2, p2, o3_1) == pytest.approx(109.493, abs=1e-3)
+    # All three targets must admit ONE unit link direction in the reference
+    # phosphate frame, even when that frame differs from dictionary geometry.
+    directions = coords[[1, 2, 3]] - coords[0]
+    directions /= np.linalg.norm(directions, axis=1, keepdims=True)
+    cosines = np.cos(
+        np.deg2rad([angle_target(i, p2, o3_1) for i in (op1_2, op2_2, o5_2)])
+    )
+    partner = np.linalg.solve(directions, cosines)
+    assert np.linalg.norm(partner) == pytest.approx(1.0, abs=1e-12)
     # No link is built across the chain break between the two independent copies.
     assert not any(np.array_equal(row, [0, o5_2, p2]) for row in spec.angle.idx)
 

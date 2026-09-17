@@ -80,18 +80,23 @@ def _energy_grad(spec, coords, backend):
         ("cistrans", GeometryTarget((0, 1, 2, 3), -0.7, 0.08, period=3)),
     ],
 )
-def test_doubling_esd_quarters_energy_and_autodiff_gradient(backend, kind, target):
+@pytest.mark.parametrize("use_esd", [True, False])
+def test_esd_option_controls_energy_and_autodiff_scaling(
+    backend, kind, target, use_esd
+):
     coords = np.random.default_rng(731).normal(size=(len(target.atoms), 3))
-    spec = _pack({kind: [target]})
-    wider = _pack({kind: [replace(target, esd=2 * target.esd)]})
+    config = {kind: {"weight": 2}, "use_esd": use_esd}
+    spec = _pack({kind: [target]}, config=config)
+    wider = _pack({kind: [replace(target, esd=2 * target.esd)]}, config=config)
     e, grad = _energy_grad(spec, coords, backend)
     e2, grad2 = _energy_grad(wider, coords, backend)
     assert e > 1e-4
-    assert e2 == pytest.approx(e / 4, rel=1e-10)
+    factor = 4 if use_esd else 1
+    assert e2 == pytest.approx(e / factor, rel=1e-10)
     reference, _ = _energy_grad(spec, coords, "numpy")
     assert e == pytest.approx(reference, rel=1e-9)
     if grad is not None:
-        np.testing.assert_allclose(grad2, grad / 4, rtol=1e-9, atol=1e-9)
+        np.testing.assert_allclose(grad2, grad / factor, rtol=1e-9, atol=1e-9)
         # The plane fit minimizes this same sum, so envelope-theorem differentiation
         # permits a finite-difference check away from eigenspace degeneracy.
         numeric = np.zeros_like(coords)
@@ -106,18 +111,22 @@ def test_doubling_esd_quarters_energy_and_autodiff_gradient(backend, kind, targe
         np.testing.assert_allclose(grad, numeric, rtol=2e-5, atol=2e-5)
 
 
-def test_plane_is_sum_of_squared_atom_residuals_and_slack_is_separate():
+@pytest.mark.parametrize("use_esd", [True, False])
+def test_plane_is_sum_of_squared_atom_residuals_and_slack_is_separate(use_esd):
     coords = np.random.default_rng(981).normal(size=(5, 3))
     row = GeometryTarget(tuple(range(5)), 0, 0.04)
     centered = coords - coords.mean(axis=0)
     normal = np.linalg.svd(centered, full_matrices=False)[2][-1]
     residuals = centered @ normal
-    spec = _pack({"plane": [row]}, config={"plane": {"weight": 2}})
-    assert spec.plane.weight[0] == pytest.approx(5 * 2 / 0.04**2)
+    config = {"plane": {"weight": 2}, "use_esd": use_esd}
+    spec = _pack({"plane": [row]}, config=config)
+    sigma = 0.04 if use_esd else 1
+    assert spec.plane.weight[0] == pytest.approx(5 * 2 / sigma**2)
     e, _ = _energy_grad(spec, coords, "numpy")
-    assert e == pytest.approx(2 * np.square(residuals / 0.04).sum())
+    assert e == pytest.approx(2 * np.square(residuals / sigma).sum())
     slack = np.sqrt(np.mean(residuals**2)) / 2
-    spec = _pack({"plane": [row]}, config={"plane": {"weight": 2, "slack": slack}})
+    config["plane"]["slack"] = slack
+    spec = _pack({"plane": [row]}, config=config)
     assert _energy_grad(spec, coords, "numpy")[0] == pytest.approx(e / 4)
 
 

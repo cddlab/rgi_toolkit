@@ -6,7 +6,7 @@ from dataclasses import fields
 
 import numpy as np
 
-from rgi_toolkit._config_util import conformer_weight
+from rgi_toolkit._config_util import conformer_use_esd, conformer_weight
 from rgi_toolkit.spec import (
     AngleArrays,
     BondArrays,
@@ -25,7 +25,8 @@ def used_peptides(targets, extra_conditions=()):
 
 
 def append_library_arrays(spec, targets, config, g2l, *, reference_plane_conditions=()):
-    """Append dictionary rows with inverse-variance weights, preserving existing rows."""
+    """Append dictionary rows with optional ESD normalization, preserving old rows."""
+    use_esd = conformer_use_esd(config)
     chosen = used_peptides(targets, reference_plane_conditions)
     selector_map = {g: i for i, g in enumerate(chosen)}
     condition_rows = {"plane": list(reference_plane_conditions)}
@@ -39,7 +40,11 @@ def append_library_arrays(spec, targets, config, g2l, *, reference_plane_conditi
         n = len(rows)
         sigma = np.asarray([r.esd for r in rows])
         with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
-            weights = weight / np.square(sigma)
+            weights = (
+                weight / np.square(sigma)
+                if use_esd
+                else np.full(n, weight, dtype=float)
+            )
         if not np.isfinite(weights).all():
             raise ValueError(f"monomer library {kind}: ESD produces a nonfinite weight")
         common = dict(

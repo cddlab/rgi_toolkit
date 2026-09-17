@@ -11,7 +11,8 @@ AlphaFold 3 + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-gui
 > full config below is unnecessary.
 
 AF3 is the **JAX** tool: the restraint spec is built outside the `hk.scan` sampler and the pure
-JIT-able minimizer closure (`get_minimizer()`) runs inside the compiled loop on each x0 prediction.
+JIT-able minimizer (`get_minimizer()`) runs inside the compiled loop on each x0 prediction.
+Its numeric restraint data are passed into the model as a JAX pytree argument.
 
 ## Installation
 
@@ -69,6 +70,11 @@ AF3 reads RGI from a **`restraints_config` key inside the fold-input JSON** (bes
   the default reference-conformer targets. AF3 builds `ref_pos` by ETKDG-embedding the free CCD
   component, which is not refinement geometry (unconjugated exocyclic C-N, P-OH phosphate, and a
   seed-dependent embed), so plain `bond`/`angle` measurably *worsens* nucleotide geometry.
+- **Reference/link consistency**: free-CCD carbonyl angles can differ from ideal
+  peptide geometry. The shared polymer builder completes link angles against the
+  actual residue-local reference, avoiding impossible angle sums and incompatible
+  peptide planes. This applies to every adapter, including nucleic phosphate links
+  and reference fallbacks in a partially covered monomer library.
 
 `resid` is the **per-chain 1-based ordinal**; there is **no top-level `start_sigma`**.
 
@@ -224,17 +230,39 @@ source .venv/bin/activate
 
 MODEL_DIR="${MODEL_DIR:?set MODEL_DIR to your AF3 model-parameters directory}"
 DB_DIR="${DB_DIR:?set DB_DIR to your AF3 sequence-database directory}"
-# AF3 enables no persistent XLA cache by default (~2 min recompile/run); this reuses it.
-export JAX_COMPILATION_CACHE_DIR="${JAX_COMPILATION_CACHE_DIR:-/tmp/${USER}_jax_cache}"
+# Keep this directory on storage shared by jobs to reuse compiled programs.
+export JAX_COMPILATION_CACHE_DIR="${JAX_COMPILATION_CACHE_DIR:-./jax_cache}"
 
 # NB: AF3 early-returns if --output_dir already holds results — use a fresh dir to re-run.
-python run_alphafold.py \
+uv run python run_alphafold.py \
     --run_data_pipeline=True \
     --model_dir="$MODEL_DIR" \
     --db_dir="$DB_DIR" \
     --json_path=restr_example.json \
     --output_dir=out_restr_example
 ```
+
+### Compilation cache
+
+AF3's RGI forward pass accepts restraint arrays as runtime arguments. Changing
+targets, positive weights, slack, activation windows or reference coordinates
+reuses the compiled program when the array shapes, dtypes and static program
+choices stay the same. A fresh restraint instance does not force a new JIT trace.
+The persistent JAX cache above also allows reuse across processes with a compatible
+GPU and software environment; loading the executable still takes time.
+
+Changing the atom count, padded selection sizes, enabled terms, neighbour capacity,
+optimizer or line search can require compilation. A changed custom formula or
+Python callable is a program change; numbers written inside that code remain
+constants. Custom weights, windows, resolved reference targets and reference
+arrays are runtime data. Disabling a term can remove it from the prepared spec
+and change the compiled signature.
+
+Both the toolkit and the AF3 integration need the runtime-argument interface.
+Other JAX integrations should pass `get_minimizer()` as an argument to their
+outermost `jax.jit` function; capturing it in a closure embeds its restraint values.
+See the [JAX persistent cache documentation](https://docs.jax.dev/en/latest/501/compilation-cache.html)
+for the environment-dependent cache key and storage options.
 
 ## Verify results
 

@@ -8,7 +8,7 @@ import logging
 import numpy as np
 import pytest
 
-from rgi_toolkit._config_util import coerce_bool
+from rgi_toolkit._config_util import coerce_bool, conformer_use_esd
 from rgi_toolkit.config import RestraintsConfig
 from rgi_toolkit.rmsd_restr_data import RmsdData
 
@@ -67,6 +67,24 @@ def test_empty_config_is_vanilla():
     """None / {} is a valid no-restraint run (must NOT trip the whitelist)."""
     assert RestraintsConfig.from_dict(None).distance_data == []
     assert RestraintsConfig.from_dict({}).rmsd_data == []
+
+
+@pytest.mark.parametrize("option", [{}, {"use_esd": True}, {"use_esd": False}])
+def test_conformer_esd_option_parses_and_defaults_to_enabled(option):
+    cfg = RestraintsConfig.from_dict({"conformer_restraints_config": option})
+    assert cfg.conformer_config == option
+    assert conformer_use_esd(cfg.conformer_config) is option.get("use_esd", True)
+
+
+@pytest.mark.parametrize("value", [None, 0, 1, "false", "true", [], {}])
+def test_conformer_esd_option_requires_boolean_even_without_atoms(value):
+    from rgi_toolkit.featurizer import build_spec
+
+    config = {"use_esd": value}
+    with pytest.raises(ValueError, match="use_esd must be true or false"):
+        RestraintsConfig.from_dict({"conformer_restraints_config": config})
+    with pytest.raises(ValueError, match="use_esd must be true or false"):
+        build_spec(conformer_config=config)
 
 
 def test_unknown_distance_entry_key_warns(caplog):

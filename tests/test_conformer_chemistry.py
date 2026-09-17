@@ -233,17 +233,19 @@ def test_servalcat_contact_rules(first, second, one_four, expected):
     assert pair_contact(second, first, one_four) == pytest.approx(expected)
 
 
-def test_one_four_exclusions_depend_on_planes_independently_of_energy_blocks():
+@pytest.mark.parametrize("use_esd", [True, False])
+def test_one_four_exclusions_depend_on_planes_independently_of_energy_blocks(use_esd):
     chain = _ligand("CCCCC")
-    plain = build_spec([chain], conformer_config={"vdw": {}})
+    config = {"vdw": {}, "use_esd": use_esd}
+    plain = build_spec([chain], conformer_config=config)
     np.testing.assert_array_equal(plain.vdw.idx, [[0, 3], [0, 4], [1, 4]])
-    assert np.all(plain.vdw.weight == pytest.approx(25))
+    assert np.all(plain.vdw.weight == pytest.approx(25 if use_esd else 1))
     np.testing.assert_allclose(
         plain.vdw.r_min, [1.94 + 1.92 - 0.3, 3.88, 1.92 + 1.94 - 0.3]
     )
     aromatic = _ligand("c1ccccc1")
-    assert build_spec([aromatic], conformer_config={"vdw": {}}).vdw is None
-    explicit = build_spec([aromatic], conformer_config={"vdw": {}, "plane": {}})
+    assert build_spec([aromatic], conformer_config=config).vdw is None
+    explicit = build_spec([aromatic], conformer_config=dict(config, plane={}))
     assert explicit.vdw is None
 
 
@@ -262,6 +264,29 @@ def test_background_residue_and_ligand_chemistry_are_typed_without_opt_in():
     assert by_name[1, "O"].hb == "A"
     assert chemistry.types[chemistry.type_ids[-1]].hb == "D"
     assert chemistry.molecules[0] != chemistry.molecules[-1]
+
+
+def test_esd_switch_preserves_vdw_contacts_and_exclusions_in_every_packing_path():
+    ligand = _ligand("CCCCC")
+    elements = np.full(6, 6)
+    records = [AtomRecord("D", 1, 5, "DUM", "ligand", "UNK")]
+    enabled = build_chemistry([ligand], elements, records)
+    disabled = build_chemistry([ligand], elements, records, {"use_esd": False})
+    for other, sigma in ((3, 0.2), (4, 0.2), (5, 0.3)):
+        contact, inverse = enabled.pair(0, other)
+        assert inverse == pytest.approx(1 / sigma**2)
+        assert disabled.pair(0, other) == pytest.approx((contact, 1))
+    assert enabled.pair(0, 1) is disabled.pair(0, 1) is None
+    for active in (False, True):
+        query, target = np.arange(5), np.arange(6)
+        on = enabled.subset(query, target, set(query), set(), active=active)
+        off = disabled.subset(query, target, set(query), set(), active=active)
+        assert len(off["excluded"]) > 0 and len(off["one_four"]) > 0
+        for key in on:
+            if key in ("inv_variances", "one_four_inv_variances"):
+                np.testing.assert_array_equal(off[key], 1)
+            else:
+                np.testing.assert_array_equal(on[key], off[key])
 
 
 def test_dictionary_vdw_types_cover_ligands_and_fixed_background(tmp_path, caplog):
@@ -317,7 +342,8 @@ def test_dictionary_vdw_types_cover_ligands_and_fixed_background(tmp_path, caplo
 
 
 @pytest.mark.parametrize("backend", ["numpy", "torch", "jax"])
-def test_static_vdw_energy_and_gradient_use_contact_esd(backend):
+@pytest.mark.parametrize("use_esd", [True, False])
+def test_static_vdw_energy_and_gradient_use_contact_esd(backend, use_esd):
     ligands = [
         LigandConf(
             Chem.MolFromSmiles(smiles),
@@ -327,9 +353,10 @@ def test_static_vdw_energy_and_gradient_use_contact_esd(backend):
         )
         for i, smiles in enumerate(("[Zn+2]", "[O-]"))
     ]
-    spec = build_spec(ligands, conformer_config={"vdw": {}})
+    spec = build_spec(ligands, conformer_config={"vdw": {}, "use_esd": use_esd})
+    sigma = 0.2 if use_esd else 1
     assert spec.vdw.r_min[0] == pytest.approx(2.02)
-    assert spec.vdw.weight[0] == pytest.approx(25)
+    assert spec.vdw.weight[0] == pytest.approx(1 / sigma**2)
     ops = get_ops(backend)
     from rgi_toolkit.energy._kernels import vdw_energy
 
@@ -345,11 +372,12 @@ def test_static_vdw_energy_and_gradient_use_contact_esd(backend):
 
     coords = np.array([[0.0, 0, 0], [1.7, 0, 0]])
     value, grad = _value_grad(energy, coords, backend)
-    assert value == pytest.approx((0.32 / 0.2) ** 2, abs=1e-9)
+    assert value == pytest.approx((0.32 / sigma) ** 2, abs=1e-9)
     quarter, quarter_grad = _value_grad(lambda x: energy(x, 2), coords, backend)
     assert quarter == pytest.approx(value / 4)
     if grad is not None:
-        np.testing.assert_allclose(grad, [[16.0, 0, 0], [-16.0, 0, 0]], atol=1e-8)
+        expected = np.array([[0.64, 0, 0], [-0.64, 0, 0]]) / sigma**2
+        np.testing.assert_allclose(grad, expected, atol=1e-8)
         np.testing.assert_allclose(quarter_grad, grad / 4, atol=1e-10)
 
 
@@ -503,7 +531,7 @@ def test_typed_dynamic_ranking_energy_gradient_and_esd_scaling(backend, active):
     np.testing.assert_allclose(wider_grad, grad / 4, atol=1e-10)
 
 
-def _typed_optimizer_spec(custom=False):
+def _typed_optimizer_spec(custom=False, use_esd=True):
     from rgi_toolkit.combined import CombinedRestraints
 
     records = [
@@ -525,7 +553,7 @@ def _typed_optimizer_spec(custom=False):
     )
     config = {
         # This fixture checks typed scoring and caches, independently of cap failure.
-        "conformer_restraints_config": {"vdw": {}},
+        "conformer_restraints_config": {"vdw": {}, "use_esd": use_esd},
         "distance_restraints_config": [
             {
                 "atom_selection1": "index 0",
@@ -585,19 +613,21 @@ def test_typed_vdw_cuda_compilation_and_dtype_cache(mode, custom):
 
 
 @pytest.mark.parametrize("dtype", ["float32", "float64"])
-def test_typed_jax_jit_matches_dense_fixed_and_active_contacts(dtype):
+@pytest.mark.parametrize("use_esd", [True, False])
+def test_typed_jax_jit_matches_dense_fixed_and_active_contacts(dtype, use_esd):
     jax = pytest.importorskip("jax")
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
     from rgi_toolkit.optim.jax_optim import dynamic_vdw_energy, make_minimizer
 
-    spec = _typed_optimizer_spec()
+    spec = _typed_optimizer_spec(use_esd=use_esd)
     coords = jnp.array(
         [[0.0, 0, 0], [1.5, 0, 0], [0, 2.0, 0]], dtype=getattr(jnp, dtype)
     )
     result = jax.jit(make_minimizer(spec, max_iter=50))(coords, 0.0, 0)
     distances = np.linalg.norm(np.asarray(result[0] - result[1:]), axis=-1)
-    expected = np.square(np.minimum(distances - [2.02, 3.14], 0) / 0.2).sum()
+    sigma = 0.2 if use_esd else 1
+    expected = np.square(np.minimum(distances - [2.02, 3.14], 0) / sigma).sum()
     assert dynamic_vdw_energy(spec, result) == pytest.approx(expected, abs=2e-6)
     np.testing.assert_array_equal(result[1], coords[1])

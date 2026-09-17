@@ -34,6 +34,14 @@ class ScanMinimizer:
     def is_active(self) -> bool:
         return self._rgi.is_active() and self._minimizer is not None
 
+    def as_pytree(self):
+        """Return the numeric scan state to pass through the outermost JAX JIT.
+
+        Keep this host wrapper for logging; the callable pytree carries no
+        ``CombinedRestraints`` instance or host-side diagnostic state into JIT.
+        """
+        return self._minimizer if self.is_active() else None
+
     @property
     def n_active(self) -> int:
         """Number of optimised atoms (host-side logging); 0 if none."""

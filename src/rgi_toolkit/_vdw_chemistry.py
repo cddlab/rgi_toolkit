@@ -17,6 +17,7 @@ from functools import lru_cache
 import numpy as np
 from rdkit import Chem, RDConfig
 
+from rgi_toolkit._config_util import conformer_use_esd
 from rgi_toolkit._moltype import polymer_type
 from rgi_toolkit._polymer_torsions import atom_name, standard_residue
 
@@ -281,6 +282,7 @@ class VdwChemistry:
     contact_table: np.ndarray
     inv_variance_table: np.ndarray
     one_four_table: np.ndarray
+    use_esd: bool = True
 
     @property
     def radii(self):
@@ -300,7 +302,7 @@ class VdwChemistry:
             self.types[self.type_ids[second]],
             distance == 3,
         )
-        return r, 1 / sigma**2
+        return r, 1 / sigma**2 if self.use_esd else 1.0
 
     def subset(self, query, target, moving, static_ligands, mode="both", active=False):
         """Pack O(N + sparse topology + T^2) constants, never a dense atom-pair matrix."""
@@ -326,7 +328,9 @@ class VdwChemistry:
             "contacts": self.contact_table,
             "inv_variances": self.inv_variance_table,
             "one_four_contacts": self.one_four_table,
-            "one_four_inv_variances": np.full_like(self.one_four_table, 1 / 0.2**2),
+            "one_four_inv_variances": np.full_like(
+                self.one_four_table, 1 / 0.2**2 if self.use_esd else 1.0
+            ),
             "excluded": np.asarray(sorted(excluded), dtype=np.int64),
             "one_four": np.asarray(sorted(one_four), dtype=np.int64),
             "query_molecules": self.molecules[query],
@@ -359,6 +363,7 @@ def build_chemistry(
     """Build chemical parameters for moving atoms and the entire fixed background."""
     from rgi_toolkit import monlib_geom
 
+    use_esd = conformer_use_esd(config)
     if elements is None:
         n = max((int(g) + 1 for lc in ligands for g in lc.global_indices), default=0)
         elements = np.zeros(n, dtype=np.int64)
@@ -528,14 +533,15 @@ def build_chemistry(
     one_four = np.zeros_like(contact)
     for i, j in itertools.product(range(len(types)), repeat=2):
         contact[i, j], sigma = pair_contact(types[i], types[j])
-        inverse[i, j] = 1 / sigma**2
+        inverse[i, j] = 1 / sigma**2 if use_esd else 1.0
         one_four[i, j] = pair_contact(types[i], types[j], True)[0]
     fallback = {i for i, z in enumerate(elements) if z > 0} - approximate - dictionary
     logger.info(
-        "[rgi_toolkit] VdW typing: dictionary=%d approximate=%d elemental=%d; ESD=0.2 A (dummy=0.3 A)",
+        "[rgi_toolkit] VdW typing: dictionary=%d approximate=%d elemental=%d; use_esd=%s",
         len(dictionary),
         len(approximate - dictionary),
         len(fallback),
+        use_esd,
     )
     if fallback:
         logger.warning(
@@ -552,4 +558,5 @@ def build_chemistry(
         contact,
         inverse,
         one_four,
+        use_esd=use_esd,
     )

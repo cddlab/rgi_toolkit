@@ -4,8 +4,9 @@ Reference conformers in the supported predictors are residue-local: each
 ``ref_space_uid`` identifies one independently positioned CCD component. That makes
 them suitable targets for intra-residue bonds, angles, chirality and planar groups
 (aromatic side chains / nucleic-acid bases), but not for measuring inter-residue link
-geometry. Canonical peptide and phosphodiester links (and the peptide plane) are
-therefore supplied explicitly below.
+geometry. Canonical peptide and phosphodiester link lengths and ideal directions
+are therefore supplied below. Redundant link angles are measured against the same
+local reference frame so they remain compatible with its residue angles and planes.
 
 Those reference conformers are approximate chemistry, not refinement geometry (AF3
 ETKDG-embeds the free CCD component). Set
@@ -26,6 +27,11 @@ from rgi_toolkit._atom_names import normalise_atom_name as _normalise_name
 from rgi_toolkit._config_util import conformer_weight
 from rgi_toolkit._mol_build import build_ligand_mol
 from rgi_toolkit._moltype import polymer_type
+from rgi_toolkit._polymer_links import (
+    cohere_dictionary_fallback_links,
+    cohere_mixed_library_links,
+    cohere_reference_links,
+)
 from rgi_toolkit.atom_context import LigandConf
 
 logger = logging.getLogger(__name__)
@@ -42,7 +48,7 @@ class PolymerGeometry:
     # Canonical inter-residue planar groups (e.g. the peptide plane): each a tuple of
     # global atom indices scored by the `plane` term (best-fit-plane flatness).
     link_planes: list[tuple[int, ...]]
-    # Dictionary geometry stays separate from built-in fallback tolerances.
+    # Dictionary geometry stays separate from built-in fallback targets and ESDs.
     library: monlib_geom.LibraryTargets = field(
         default_factory=monlib_geom.LibraryTargets
     )
@@ -110,7 +116,7 @@ def _is_enabled_polymer(record) -> bool:
 
 
 def _link_geometry(previous, current, mol_type: str):
-    """Built-in fallback geometry; its historical ESD-as-slack behavior is retained."""
+    """Built-in fallback geometry with ESDs kept separate from user slack."""
     names = (previous["names"], current["names"])
     link = _PROTEIN_LINK if mol_type == "protein" else _NUCLEIC_LINK
 
@@ -281,6 +287,7 @@ def build_polymer_geometry(
                 connections.append((previous, current))
 
     targets = _load_library(conformer_config, residue_meta, connections)
+    cohere_mixed_library_links(targets, residue_meta, ref_pos)
     if conformer_weight(conformer_config, "cistrans") > 0:
         from rgi_toolkit._polymer_torsions import add_polymer_torsions
 
@@ -293,6 +300,14 @@ def build_polymer_geometry(
         link_bonds.extend(bonds)
         link_angles.extend(angles)
         link_planes.extend(planes)
+
+    if conformer_weight(conformer_config, "angle") > 0:
+        link_angles = cohere_reference_links(
+            link_angles, link_planes, residue_meta, ref_pos, targets.atoms
+        )
+        link_angles = cohere_dictionary_fallback_links(
+            link_angles, link_planes, targets
+        )
 
     return PolymerGeometry(
         residue_confs=residue_confs,

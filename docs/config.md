@@ -214,9 +214,12 @@ partners). `P_intra` and `P_ll` are the explicit static pair counts defined belo
 | Moving atoms vs fixed background | ordinary density: `O(B log B + L log B)` per required rebuild | `O(LK)`; overflowing rows add complete pair sums | `O(B + LK)` plus bounded chunks | A collapsed/hash-colliding cell population degrades to `O(LB)` build time, without allocating an `L x B` distance matrix. |
 | Active-active pairs involving conformer-restrained atoms | ordinary density: `O(N log N)` per required rebuild | `O(NK)`; overflowing rows add complete pair sums | `O(NK)` plus bounded chunks | A collapsed cell degrades to `O(N^2)` build time, without allocating an `N x N` distance matrix. |
 
-The dynamic rows show coordinate-search/scoring costs. Typed contacts additionally binary-search
-sorted sparse topology codes: an `O(log Q)` factor per candidate or scored pair when `Q` exclusion
-or 1–4 codes are present. Atom-type parameter tables use `O(T^2)` storage for `T` distinct types.
+The dynamic rows show coordinate-search/scoring costs. Preparation indexes topology exclusions
+and 1–4 contacts by query atom in sorted, padded rows. With maximum row width `D`, each lookup
+costs `O(log D)` and the row tables use `O(N_query D)` storage. Sparse evaluations reuse contact
+parameters resolved at the last rebuild. If `M` active-active query rows overflow, their fallback
+costs `O(MN)` with fixed-size block padding and `O(N * chunk_size)` working storage.
+Atom-type parameter tables use `O(T^2)` storage for `T` distinct types.
 
 The cell-list orders treat the 27 adjacent cells, traversal chunk width 32, and configured `K` as
 bounded constants, which is the intended use (`K=32` by default). If `K` itself is scaled with the
@@ -873,8 +876,18 @@ ideal reference conformer — or, for polymers, from a CCP4 monomer library when
 reference conformer is approximate chemistry, so read that section before enabling `bond`/`angle`
 on a nucleic acid). Canonical inter-residue geometry is added explicitly: peptide `C-N` bonds
 plus `CA-C-N`, `O-C-N`, and `C-N-CA` angles; and DNA/RNA `O3'-P` phosphodiester bonds plus
-`C3'-O3'-P` and `O3'-P-O5'` angles. The adjacent `P-O5'-C5'` angle comes from the current residue's
-reference conformer. Together these prevent an RMSD restraint from repairing a selected residue while
+`C3'-O3'-P`, `O3'-P-O5'`, and `O3'-P-OP1/OP2` angles. Without dictionary coverage,
+redundant link angles are completed in the same local reference geometry as the
+intra-residue angles. At a peptide carbonyl, `CA-C-O + CA-C-N + O-C-N = 360` degrees;
+the two link angles share the correction to their ideal values. At a phosphate,
+all link angles are measured to one unit partner direction fitted to the local
+reference bonds. Independently positioned residues never supply cross-residue vectors.
+This also applies to the reference side of a mixed dictionary/reference link;
+covered dictionary targets retain their link modifications and cis/trans alternatives.
+If a dictionary link is missing, its generated fallback angles use the covered
+residue's dictionary-local angles, including their local state conditions.
+The adjacent `P-O5'-C5'` angle comes from the current residue's reference conformer.
+Together these prevent an RMSD restraint from repairing a selected residue while
 breaking the covalent link to its neighbor. Polymer `plane` **is** built (opt-in via the `plane`
 sub-block): residue-local aromatic rings — His/Phe/Tyr/Trp side chains and nucleic-acid bases — plus
 the protein **peptide plane**, the canonical inter-residue four-atom group `{C, CA, O}` (previous
@@ -909,6 +922,82 @@ The original plane membership remains available for VdW topology exclusions. Sta
 | `plane` | `weight` (0.0), `slack` (0.0 Å) | **best-fit-plane** flatness of whole planar atom groups ([servalcat](https://github.com/keitaroyam/servalcat)-style) — penalises each group's out-of-plane RMS deviation toward 0. Fires on (a) aromatic/conjugated rings (whole ring) and (b) non-ring sp2 groups (an acyclic double-bond centre + its heavy neighbors: carbonyl / amide / ester / carboxyl / trisubstituted alkene). Group membership is confirmed by the reference conformer being coplanar (not the RDKit aromaticity flag). Set `plane: {weight: 1}` to activate |
 | `cistrans` | `weight` (1.0), `slack` (0.0 rad) | ligand E/Z, protein side-chain χ, peptide ω and acyclic sp2 torsions, with explicit periodicity |
 | `vdw` | `weight` (1.0), `mode` (`"both"`), `scale` (1.0), `dmax` (5.0 Å), `max_neighbors` (32), `neighbor_skin` (2.0 Å) | chemical contact distances and ESD-based clash penalties, with unrestricted CG steps and exact Verlet caches validated at every trial |
+
+### ESD normalization of conformer geometry
+
+`conformer_restraints_config.use_esd` selects ESD normalization for **all six conformer
+terms**. It accepts a boolean and defaults to `true`, including when omitted. This covers
+reference targets, built-in links, dictionary geometry, approximate torsions, and both
+static and dynamic VdW contacts. With the default, ordinary bond, angle, chiral and
+periodic torsion residuals use inverse-variance weights:
+
+```text
+energy = weight * (max(abs(deviation) - slack, 0) / ESD)**2
+```
+
+To disable that normalization while keeping the same targets and user weights:
+
+```yaml
+restraints_config:
+  conformer_restraints_config:
+    use_esd: false
+```
+
+With `false`, the residual is squared **without division by ESD**. Angular residuals
+remain in radians, bond/plane/VdW distances in Angstroms, and chiral volumes in Angstrom
+cubed. Plane weights retain the atom-count factor, so their energy still sums per-atom
+squared deviations. Slack, topology exclusions, periodicity, activation windows and
+disabled/invalid dictionary-row handling do not change. ESD metadata validation still
+applies. This option does not affect standalone distance/angle/dihedral/plane/chiral/RMSD
+or custom restraints. Per-entity conformer opt-in is still required.
+
+Changing `use_esd` changes the relative strength of the terms: energies from the two
+settings have different scales and must not be compared as a measure of structural
+improvement. Compare physical deviations as well. The option does not restore older
+targets, contact rules or torsion sets.
+
+ESD sets the scale of a deviation; it is not a flat-bottom tolerance. User `slack`
+retains its documented units and defaults. `weight` remains a linear energy multiplier.
+At unit weight and zero slack, the normalized harmonic energies are twice Servalcat's
+`0.5 * (deviation / ESD)**2` convention. This common factor does not change the minimum
+of geometry terms alone; custom and standalone restraints retain their own weights.
+
+Reference coordinates do not carry statistical ESDs. With `use_esd: true`, their uncertainties are
+explicit approximations, applied during setup without changing targets:
+
+| Reference term | ESD |
+|---|---|
+| bond | 0.02 Å |
+| angle | 3°, converted to radians alongside the angular residual |
+| chiral | First-order propagation of the three 0.02 Å bond and three 3° angle uncertainties around the center |
+| plane | 0.02 Å per modeled atom |
+| ligand double-bond E/Z | 5°, with period 1 |
+
+The bond and angle values follow Gemmi's coordinate-derived fallback
+[`make_chemcomp_with_restraints`](https://github.com/project-gemmi/gemmi/blob/v0.7.5/src/topo.cpp#L73-L111).
+Plane uses an approximate 0.02 Å scale, as in the
+[CCP4 plane-restraint example](https://www.ccp4.ac.uk/html/refmac5/files/log.html).
+E/Z uses the same 5° approximation as the other sp2 torsions below. These values are
+not chemistry-specific dictionary uncertainties or estimates of prediction confidence.
+An active chiral restraint whose reference geometry cannot define a finite positive
+propagated ESD raises instead of silently reverting to an unnormalized weight.
+
+Built-in peptide and phosphodiester links keep their bond targets and ESDs:
+0.011 Å and 0.010 Å for their respective bonds, and 1.5° for link angles. Those ESDs
+now enter inverse-variance weights, with only user `slack` creating a free interval.
+Covered monomer-library geometry keeps its own dictionary ESDs; it is not normalized twice.
+Link-angle completion is independent of ESD normalization and explicit slack. It
+removes a mixed-source geometric inconsistency; it does not idealize the reference
+conformer or guarantee that every soft restraint can simultaneously reach zero.
+
+For conformer planes with `use_esd: true`, `weight * N / ESD**2` multiplies the group's squared RMS
+residual, so zero slack gives the sum of squared per-atom distances from the fitted
+plane, as in Servalcat. Explicit plane slack still applies to the group's RMS.
+
+This changes the objective of older reference-conformer runs: raw energies are not
+directly comparable across the change. No optimizer limits or tolerances are changed.
+Finite soft restraints can compete, so a nonzero total is not by itself evidence of
+failed minimization; also examine convergence diagnostics and geometric deviations.
 
 ### `monomer_library` — refinement targets for polymers (not a term)
 
@@ -998,10 +1087,9 @@ Dictionary ESD and user `slack` are separate:
   Setup logs component coverage and candidate row counts; cis/trans rows are alternatives.
 
 ESD determines relative strength between competing restraints. It does not create a free
-interval: an isolated harmonic term can still converge to its exact target. Existing reference
-bond/angle/chiral/plane and ligand E/Z weights and built-in link tolerances remain unchanged;
-the new approximate torsions and VdW use the ESDs described below. Standalone and custom
-restraints keep their own weight conventions.
+interval: an isolated harmonic term can still converge to its exact target. Reference
+fallbacks use the approximate ESDs above. Standalone and custom restraints keep their own
+weight conventions.
 
 ### Torsions without a monomer library
 
@@ -1015,7 +1103,7 @@ Unknown residues, missing χ atoms and degenerate χ references are logged and s
 respectively. Acyclic conjugated sp2–sp2 single bonds use period 2 and ESD 5°; ligand targets
 come from the same relaxed, stereo-checked coordinates as the other ligand geometry.
 Peptide ω uses cis 0° / trans 180°, ESD 5°, with the nearest state fixed for each minimization.
-The existing double-bond E/Z restraints keep period 1, so a trans double bond never gains a
+Double-bond E/Z restraints use ESD 5° and keep period 1, so a trans double bond never gains a
 second cis minimum. These chemical approximations are not dictionary-derived uncertainties.
 
 ### `relax_force_field` — which force field idealises the ligand reference (not a term)
@@ -1112,8 +1200,8 @@ quantity $x$:
 | `cistrans` | torsion $\phi$, residual $\operatorname{wrap}(n(\phi-\phi_0))/n$ | $\phi_0$ and periodicity $n$ |
 
 Conformer angles with `abs(target_degrees - 180) < 0.5` use
-`2 * weight * (1 + cos(theta))` instead of squared angle deviation. Dictionary weights
-already include `1 / ESD_radians**2`. The factor two preserves RGI's quadratic coefficient
+`2 * weight * (1 + cos(theta))` instead of squared angle deviation. Packed reference and
+dictionary weights include `1 / ESD_radians**2`. The factor two preserves RGI's quadratic coefficient
 for small deviations from linearity. With nonzero slack, the squared residual is
 `max(2*sin((pi-theta)/2) - 2*sin(slack/2), 0)**2`, preserving the requested angular free interval.
 Bond lengths in the cosine denominator are floored at 0.02 Å. Ordinary-length linear bonds
@@ -1154,9 +1242,9 @@ halves on Torch and JAX.
 
 **Migration:** `scale` now defaults to 1.0 (formerly 0.75) and multiplies the chemical contact
 distance. At the same distance and contact threshold, ESD 0.2 Å multiplies the former VdW
-energy and gradient by 25. Existing weights may therefore need retuning against reference
-geometry terms that do not use ESDs. `weight` remains a linear multiplier; no new ESD setting
-is required. Doubling an ESD divides both energy and gradient by four.
+energy and gradient by 25. Reference geometry terms also use ESD normalization, as described
+above. `weight` remains a linear multiplier; no new ESD setting is required. Doubling an ESD
+divides both energy and gradient by four.
 
 ### Van der Waals modes
 
@@ -1194,11 +1282,16 @@ maximum atom displacement from the cached reference exceeds the skin for fixed
 partners, or half the skin when both partners move. A zero skin rebuilds after any
 movement. Peptide states and activation gates remain fixed for the invocation.
 
-`max_neighbors` (default 32) controls the sparse buffer capacity. An extra candidate
+`max_neighbors` (default 32) controls the sparse buffer capacity. Candidates outside
+their pair-specific contact distance plus the skin cannot reach contact before the
+next rebuild, so they do not count toward overflow. An extra eligible candidate
 detects overflow; overflowing query rows use complete pair sums in bounded chunks.
-No contacts are discarded. Increasing capacity can reduce fallback work; increasing
-the skin can reduce rebuilds but increase overflow. These settings change performance,
-not the objective. There is no `neighbor_skin <= dmax` restriction.
+Active-active overflow queries are packed at rebuild time, so only those rows are
+evaluated against all partners. Contact parameters are cached with the sparse
+neighbour indices and replaced together on a rebuild. No contacts are discarded.
+Increasing capacity can reduce fallback work; increasing the skin can reduce rebuilds
+but increase overflow. These settings change performance, not the objective. There
+is no `neighbor_skin <= dmax` restriction.
 
 CG uses scalar line-search steps without per-atom displacement clipping. Armijo
 uses historical backtracking; `line_search: strong-wolfe` uses strict strong Wolfe
@@ -1207,7 +1300,10 @@ uses historical backtracking; `line_search: strong-wolfe` uses strict strong Wol
 from old configs; passing them raises a migration error. Request `return_info=True`
 through the [Python API](SPEC.md#public-lifecycle) to distinguish convergence from
 iteration exhaustion or an unsuccessful search. L-BFGS and energy diagnostics also
-evaluate the complete dynamic VdW objective.
+evaluate the complete dynamic VdW objective. JAX L-BFGS carries the accepted trial's
+validated neighbour cache through JAXopt's auxiliary state. Subsequent trials still
+check their displacement before reusing it; the library's search, history and
+stopping rules are unchanged.
 
 When distance and conformer restraints are combined, CG uses a fixed linear change
 of variables to improve conditioning of large centroid translations. It preserves

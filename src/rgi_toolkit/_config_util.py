@@ -46,6 +46,14 @@ def conformer_weight(config: dict | None, key: str) -> float:
     return 0.0 if weight is None else float(weight)
 
 
+def conformer_use_esd(config: dict | None) -> bool:
+    """Select uncertainty normalization without changing targets or slack."""
+    value = (config or {}).get("use_esd", True)
+    if not isinstance(value, bool):
+        raise ValueError("conformer_restraints_config.use_esd must be true or false")
+    return value
+
+
 def validate_vdw_config(conformer_config: dict | None) -> None:
     """Validate the nested conformer ``vdw`` block without importing array libraries."""
     cfg = conformer_config or {}

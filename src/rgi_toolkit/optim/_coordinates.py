@@ -49,31 +49,50 @@ class CentroidCoordinates:
         self.terms = terms
 
     def bind(self, backend, like, sigma=None, step=None, enabled=True):
+        return bind_coordinates(backend, like, self.parameters(), sigma, step, enabled)
+
+    def parameters(self):
+        """Return the fixed map and its windows as a tree of numeric arrays."""
         if not len(self.entries):
             return None
-        ops = get_ops(backend)
-        indices = ops.asint(ops.const_like(self.indices, like))
-        weights = ops.const_like(self.weights, like)
-        scales = ops.const_like(self.scales, like)
-        active = enabled
-        for value, start, stop in (
-            (sigma, "start_sigma", "stop_sigma"),
-            (step, "stop_step", "start_step"),
-        ):
-            if value is not None:
-                upper = ops.const_like(getattr(self.terms, start)[self.entries], like)
-                lower = ops.const_like(getattr(self.terms, stop)[self.entries], like)
-                active = active & (value <= upper) & (value >= lower)
-        scales = scales * active
+        return dict(
+            indices=self.indices,
+            weights=self.weights,
+            scales=self.scales,
+            windows=np.stack(
+                [
+                    getattr(self.terms, key)[self.entries]
+                    for key in ("start_sigma", "stop_sigma", "start_step", "stop_step")
+                ],
+                axis=-1,
+            ),
+        )
 
-        def transform(value, origin=None):
-            delta = value if origin is None else value - origin
-            projected = ops.sum(delta[..., indices, :] * weights[..., None], axis=-2)
-            correction = (
-                projected[..., :, None, :] * scales[:, None, None] * weights[..., None]
-            ).reshape(*value.shape[:-2], -1, 3)
-            if backend == "torch":
-                return value.index_add(-2, indices.reshape(-1), correction)
-            return value.at[..., indices.reshape(-1), :].add(correction)
 
-        return transform
+def bind_coordinates(backend, like, parameters, sigma=None, step=None, enabled=True):
+    """Bind the same affine map using host arrays or traced JAX arguments."""
+    if parameters is None:
+        return None
+    ops = get_ops(backend)
+    indices = ops.asint(ops.const_like(parameters["indices"], like))
+    weights = ops.const_like(parameters["weights"], like)
+    scales = ops.const_like(parameters["scales"], like)
+    windows = ops.const_like(parameters["windows"], like)
+    active = enabled
+    if sigma is not None:
+        active = active & (sigma <= windows[:, 0]) & (sigma >= windows[:, 1])
+    if step is not None:
+        active = active & (step >= windows[:, 2]) & (step <= windows[:, 3])
+    scales = scales * active
+
+    def transform(value, origin=None):
+        delta = value if origin is None else value - origin
+        projected = ops.sum(delta[..., indices, :] * weights[..., None], axis=-2)
+        correction = (
+            projected[..., :, None, :] * scales[:, None, None] * weights[..., None]
+        ).reshape(*value.shape[:-2], -1, 3)
+        if backend == "torch":
+            return value.index_add(-2, indices.reshape(-1), correction)
+        return value.at[..., indices.reshape(-1), :].add(correction)
+
+    return transform

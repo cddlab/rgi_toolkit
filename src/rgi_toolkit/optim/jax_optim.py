@@ -22,6 +22,7 @@ import logging
 
 import jax
 import jax.numpy as jnp
+from jax.custom_batching import sequential_vmap
 
 from rgi_toolkit._array_ops import VDW_OVERLAP_EPS, get_ops
 from rgi_toolkit._config_util import (
@@ -287,6 +288,8 @@ def _build_active_vdw_pairs(
     max_neighbors,
     scale=VDW_SCALE_DEFAULT,
     chemistry=None,
+    *,
+    pair_factors=True,
 ):
     """Pure-jax sorted-cell neighbour builder matching the torch implementation.
 
@@ -316,6 +319,8 @@ def _build_active_vdw_pairs(
         return neighbours, neighbours.astype(active.dtype)
     source = jnp.arange(n_atom, dtype=jnp.int32).reshape((1, n_atom, 1))
     valid = jnp.isfinite(best_dist2)
+    if not pair_factors:
+        return neighbours, valid.astype(active.dtype)
 
     batch_idx = jnp.arange(batch.shape[0], dtype=jnp.int32).reshape((-1, 1, 1))
     reverse_neighbours = neighbours[batch_idx, neighbours]
@@ -413,7 +418,15 @@ def _vdw_pair_energy(
 
 
 def _active_vdw_pair_energy(
-    active, neighbours, pair_factor, radii, scale, weight, chemistry=None
+    active,
+    neighbours,
+    pair_factor,
+    radii,
+    scale,
+    weight,
+    chemistry=None,
+    *,
+    source=None,
 ):
     """VdW energy over the per-step active-active neighbour list."""
 
@@ -421,12 +434,14 @@ def _active_vdw_pair_energy(
     batch = active.reshape((-1, n_atom, 3))
     batch_idx = jnp.arange(batch.shape[0], dtype=jnp.int32).reshape((-1, 1, 1))
     other = batch[batch_idx, neighbours]
-    diff = batch[:, :, None, :] - other
-    source = jnp.arange(n_atom, dtype=jnp.int32).reshape((1, n_atom, 1))
+    if source is None:
+        source = jnp.arange(n_atom, dtype=jnp.int32).reshape((1, n_atom, 1))
+    query = batch[batch_idx, source]
+    diff = query - other
     diff = _safe_vdw_diff_jax(diff, source, neighbours, canonical=True)
     dist = jnp.sqrt(jnp.sum(diff**2, axis=-1) + EPS)
     if chemistry is None:
-        contact = radii[None, :, None] + radii[neighbours]
+        contact = radii[source] + radii[neighbours]
         inverse = 1 / 0.2**2
     else:
         contact, inverse, valid = pair_parameters(
@@ -446,30 +461,40 @@ def make_minimizer(
     line_search=None,
     return_info=False,
 ):
-    """Return ``minimize(coords, sigma, step) -> coords``.
+    """Return a callable pytree ``minimize(coords, sigma, step) -> coords``.
 
     ``coords`` has shape (..., n_atom, 3); ``step`` is the diffusion step index (for the
     step-window gate, alongside ``sigma`` for the sigma-window gate). The returned function
     is pure and JIT/vmap-able, so it runs inside the diffusion loop's ``hk.scan``/``hk.vmap``
     (``step`` is a traced scalar there). ``method='cg'`` (the default) runs the pure-jax
     ``_cg_minimize``; ``method='l-bfgs'`` uses ``jaxopt.LBFGS`` (lazily imported). Per-restraint
-    gating uses the host-spec window table and per-term masks. There is no
+    gating uses the prepared window table and per-term masks. Pass the minimizer
+    as an argument to the outermost JIT to keep restraint values dynamic. There is no
     ``start_sigma`` arg. ``return_info=True`` fixes the output as ``(coords, CGInfo)``
     with scalar JAX-array diagnostics; this is supported only for CG.
     """
     line_search = resolve_line_search(method, line_search)
-    active_idx = jnp.asarray(spec.active_sites, dtype=jnp.int32)
-    prepared = jax_energy.prepare_spec(spec)
-    is_cg = line_search is not None
-    if return_info and not is_cg:
+    if return_info and line_search is None:
         raise ValueError("return_info is supported only for method='cg'")
-    from rgi_toolkit.optim._gates import active_windows, window_on
+    from rgi_toolkit.optim._jax_state import prepare_minimizer
+
+    return prepare_minimizer(spec, max_iter, line_search, return_info)
+
+
+@sequential_vmap
+def _minimize(minimizer, coords, sigma, step):
+    """Run one solve with runtime restraint arrays and static algorithm choices."""
+    from rgi_toolkit.optim._gates import window_on
     from rgi_toolkit.optim.info import CGInfo, inactive_info
 
-    windows = jnp.asarray(active_windows(spec))
+    parameters, options = minimizer.parameters, minimizer.options
+    active_idx = parameters["active_idx"]
+    prepared = parameters["prepared"]
+    windows = parameters["windows"]
+    is_cg = options.line_search is not None
 
     def result(coords, info):
-        if not return_info:
+        if not options.return_info:
             return coords
         dtype = jnp.result_type(coords.dtype, jnp.asarray(0.0).dtype)
         return coords, CGInfo(
@@ -477,99 +502,54 @@ def make_minimizer(
             *(jnp.asarray(v, dtype=dtype) for v in info[4:]),
         )
 
-    # Custom closures use static selection indices so they trace inside lax.scan.
-    has_custom = spec.has_custom()
-    from rgi_toolkit.custom.closure import build_terms
-
-    custom_terms = build_terms(spec.custom, "jax") if has_custom else []
+    custom_terms = [
+        (term.parameters, term.closure()) for term in minimizer.custom_terms
+    ]
     # Read fixed-background positions at minimize time; they change each diffusion
     # step. Only indices and chemistry belong to the prepared spec.
-    _vc = getattr(spec, "vdw_config", None)
-    has_vdw = _vc is not None and _vc.weight > 0
-    if has_vdw:
-        vdw_lig_local = jnp.asarray(_vc.ligand_local, dtype=jnp.int32)
-        vdw_lig_r = jnp.asarray(_vc.ligand_radii)
-        vdw_bg_global = jnp.asarray(_vc.background_global, dtype=jnp.int32)
-        vdw_bg_r = jnp.asarray(_vc.background_radii)
-        vdw_scale = jnp.asarray(float(_vc.scale))
-        vdw_weight = jnp.asarray(float(_vc.weight))
-        vdw_dmax = jnp.asarray(_vc.search_radius)
-        vdw_max_neighbors = int(_vc.max_neighbors)
-        vdw_chemistry = prepare_chemistry(get_ops("jax"), _vc.chemistry, vdw_lig_r)
-    _ac = getattr(spec, "active_vdw_config", None)
-    has_active_vdw = _ac is not None and _ac.weight > 0
-    if has_active_vdw:
-        # Pair-code encoding must fit in int32 (see spec.py).
-        check_active_vdw_int32_safe(int(_ac.radii.shape[0]))
-        active_vdw_radii = jnp.asarray(_ac.radii)
-        active_vdw_polymer = jnp.asarray(_ac.polymer_mask, dtype=bool)
-        active_vdw_excluded = jnp.asarray(_ac.excluded_codes, dtype=jnp.int32)
-        active_vdw_scale = jnp.asarray(float(_ac.scale))
-        active_vdw_weight = jnp.asarray(float(_ac.weight))
-        active_vdw_dmax = jnp.asarray(_ac.search_radius)
-        active_vdw_max_neighbors = int(_ac.max_neighbors)
-        active_vdw_chemistry = prepare_chemistry(
-            get_ops("jax"), _ac.chemistry, active_vdw_radii
-        )
     from rgi_toolkit.optim._cg import JaxCG, run_cg
-    from rgi_toolkit.optim._coordinates import CentroidCoordinates
+    from rgi_toolkit.optim._coordinates import bind_coordinates
     from rgi_toolkit.optim._vdw_runtime import VdwRuntime
-
-    coordinates = CentroidCoordinates(spec)
 
     def _descend(coords, sigma, step):
         active = coords[..., active_idx, :]
         prepared_step = jax_energy.bind_peptide_states(active, prepared)
         in_win = (
-            (sigma <= spec.conf_start_sigma)
-            & (sigma >= spec.conf_stop_sigma)
-            & (step >= spec.conf_start_step)
-            & (step <= spec.conf_stop_step)
+            (sigma <= prepared["conf_start_sigma"])
+            & (sigma >= prepared["conf_stop_sigma"])
+            & (step >= prepared["conf_start_step"])
+            & (step <= prepared["conf_stop_step"])
         )
         fixed = moving = background = None
-        if has_vdw:
-            background = coords[..., vdw_bg_global, :]
-            fixed = dict(
-                lig_local=vdw_lig_local,
-                lig_r=vdw_lig_r,
-                bg_r=vdw_bg_r,
-                scale=vdw_scale,
-                weight=jnp.where(in_win, vdw_weight, 0.0),
-                dmax=vdw_dmax,
-                max_neighbors=vdw_max_neighbors,
-                contact=jnp.asarray(_vc.max_contact),
-                chemistry=vdw_chemistry,
-            )
-        if has_active_vdw:
-            moving = dict(
-                radii=active_vdw_radii,
-                polymer_mask=active_vdw_polymer,
-                excluded_codes=active_vdw_excluded,
-                scale=active_vdw_scale,
-                weight=jnp.where(in_win, active_vdw_weight, 0.0),
-                dmax=active_vdw_dmax,
-                max_neighbors=active_vdw_max_neighbors,
-                contact=jnp.asarray(_ac.max_contact),
-                chemistry=active_vdw_chemistry,
-            )
+        if parameters["fixed"] is not None:
+            fixed = dict(parameters["fixed"])
+            background = coords[..., fixed.pop("bg_global"), :]
+            fixed["weight"] = jnp.where(in_win, fixed["weight"], 0.0)
+            fixed["max_neighbors"] = options.fixed_neighbors
+        if parameters["moving"] is not None:
+            moving = dict(parameters["moving"])
+            moving["weight"] = jnp.where(in_win, moving["weight"], 0.0)
+            moving["max_neighbors"] = options.moving_neighbors
         runtime = VdwRuntime(
             "jax",
             active,
             fixed=fixed,
             moving=moving,
             background=background,
-            skin=spec.vdw_neighbor_skin,
+            skin=parameters["skin"],
         )
 
         def sparse_energy(a, cache):
             e = jax_energy.total_energy(a, prepared_step, sigma, step)
             e = e + runtime.sparse_energy(a, cache)
-            for _name, start, stop, start_step, stop_step, closure in custom_terms:
+            for term, closure in custom_terms:
+                start, stop, start_step, stop_step = term["window"]
                 gate = (
                     (sigma <= start)
                     & (sigma >= stop)
                     & (step >= start_step)
                     & (step <= stop_step)
+                    & (term["weight"] != 0)
                 )
                 dtype = jax.eval_shape(closure, a).dtype
                 e = e + jax.lax.cond(
@@ -589,7 +569,9 @@ def make_minimizer(
 
         cache = runtime.empty(active)
         if is_cg:
-            mapping = coordinates.bind("jax", active, sigma, step, enabled=in_win)
+            mapping = bind_coordinates(
+                "jax", active, parameters["coordinates"], sigma, step, enabled=in_win
+            )
 
             def physical(u):
                 return u if mapping is None else mapping(u, active)
@@ -603,31 +585,32 @@ def make_minimizer(
                 backend,
                 mapped_value_grad,
                 active,
-                max_iter,
-                line_search=line_search,
+                options.max_iter,
+                line_search=options.line_search,
                 cache=cache,
                 prepare=lambda u, c: prepare(physical(u), c),
             )
             opt = physical(opt)
             info = state.info
         else:
-            import jaxopt
+            from rgi_toolkit.optim._jax_lbfgs import CachedLBFGS
 
-            def lbfgs_value_grad(a):
-                current = prepare(a, runtime.empty(a))
+            def lbfgs_value_grad(a, previous_cache):
+                current = prepare(a, previous_cache)
                 g, f = value_grad(a, current)
-                return f, g
+                return (f, current), g
 
             opt = (
-                jaxopt.LBFGS(
+                CachedLBFGS(
                     fun=lbfgs_value_grad,
                     value_and_grad=True,
-                    maxiter=max_iter,
+                    has_aux=True,
+                    maxiter=options.max_iter,
                     tol=GTOL,
                     linesearch="zoom",
                     implicit_diff=False,
                 )
-                .run(active)
+                .run(active, cache)
                 .params
             )
             info = inactive_info()
@@ -635,7 +618,7 @@ def make_minimizer(
         return result(coords.at[..., active_idx, :].set(active), info)
 
     def minimize(coords, sigma, step=0):
-        if not spec.is_active():
+        if not options.active:
             return result(coords, inactive_info())
         # Use the same host-spec window table as Torch, with traced scalar gates.
         return jax.lax.cond(
@@ -645,11 +628,8 @@ def make_minimizer(
             coords,
         )
 
-    # Ordinary vmap evaluates both branches of every batched cond, including
-    # expensive neighbour rebuilds and overflow sums. Keep each solve conditional.
-    from jax.custom_batching import sequential_vmap
-
-    return sequential_vmap(minimize)
+    # The outer sequential_vmap keeps neighbour rebuilds and overflow sums conditional.
+    return minimize(coords, sigma, step)
 
 
 def energy_of(spec, coords) -> float:

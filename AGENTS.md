@@ -78,8 +78,16 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
    A failed Wolfe search retains the last accepted coordinates and ends the invocation.
    `return_info=True` on `minimize`/`get_minimizer` exposes `CGInfo`/`CGStatus` (CG only).
    `_vdw_runtime.py` validates neighbour caches before every trial evaluation, including
-   rejected trials. Overflow rows use complete chunked pair sums; rebuilds preserve the
-   objective and CG history. `max_atom_step` and `neighbor_rebuild_interval` are retired
+   rejected trials. Candidates beyond their own contact distance plus the skin cannot
+   enter contact before a rebuild and do not count toward overflow. Overflow queries
+   are packed once per rebuild and use complete chunked pair sums; sparse contact
+   parameters are cached with their neighbour indices. Host preparation indexes sparse
+   topology by source atom; backend row lookups search those short lists. Already
+   prepared/traced flat-code inputs remain supported without a host transfer.
+   Rebuilds preserve the objective
+   and CG history. JAX L-BFGS reuses the accepted cache through JAXopt auxiliary state
+   (`_jax_lbfgs.py`); every trial still checks its displacement, with unchanged library
+   search, history and stopping rules. `max_atom_step` and `neighbor_rebuild_interval` are retired
    config keys and raise migration errors. `method='l-bfgs'` remains opt-in;
    omit `line_search` with L-BFGS (an explicit key raises). JAX L-BFGS uses standard
    zoom search and the shared `GTOL=1e-7`; its previous backtracking override and
@@ -124,7 +132,12 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
 #### `featurizer.py`
 
 An empty conformer block enables bond/angle/chiral/cistrans/vdw at weight 1; absent/null
-blocks disable the layer. Plane defaults to 0 even with an empty sub-block. Positive
+blocks disable the layer. Plane defaults to 0 even with an empty sub-block.
+`conformer_restraints_config.use_esd` is a strict boolean (default `true`); `false`
+removes ESD inverse-variance factors from all six conformer terms at spec packing,
+including reference, dictionary, approximate torsion and static/dynamic VdW paths.
+Plane atom-count factors, targets, slack, topology, gates and invalid-ESD handling
+remain unchanged. Standalone/custom restraints are independent. Positive
 cistrans rows suppress only conformer plane groups containing their four atoms, using
 local peptide conditions where necessary. VdW topology planes are preserved.
 
@@ -175,8 +188,18 @@ weight, **not slack**: `_monlib_spec.py` packs `weight / ESD**2`, and plane addi
 multiplies by group size so its existing RMS-squared kernel equals the per-atom squared sum.
 Explicit user slack remains separate; dictionary slack defaults to 0 for all terms (reference
 chiral keeps 0.05). Nonpositive ESD disables energy, retaining topology exclusions; nonfinite
-active targets/ESDs raise. Reference bond/angle/chiral/plane and ligand E/Z weights retain
-their behavior; the new approximate torsions and VdW have their own ESD normalization.
+active targets/ESDs raise. Reference geometry is also ESD-normalized:
+`_conformer_esd.py` supplies Gemmi-style coordinate-fallback ESDs (bond 0.02 A,
+angle 3 degrees), propagates reference chiral ESDs through the same three-bond /
+three-angle formula, and uses approximate plane 0.02 A and ligand E/Z 5-degree ESDs.
+Reference planes also multiply by group size. Built-in peptide/phosphodiester link
+ESDs now enter inverse-variance weights, never implicit slack. All explicit slack,
+reference targets, periods, term activation and optimizer defaults stay independent
+of normalization. Invalid active reference ESDs raise; dictionary ESD <= 0 retains
+its existing disable semantics. `weight` is still linear (RGI has no factor 0.5),
+so at unit weight / zero slack the harmonic geometry objective is twice Servalcat's.
+Tests in `test_reference_esd.py` cover reference-path energies, autodiff gradients,
+chiral propagation, link slack and mixed dictionary/reference coverage.
 
 `_monlib_records.py` applies link add/change/delete operations to private records before deriving
 chiral scalar-triple-product magnitude and propagated ESD from three bonds/three angles. Keep
@@ -201,6 +224,16 @@ RDKit residue templates, using only modeled atoms. Chi uses reference targets wi
 3/6/2 for sp3-sp3/sp3-sp2/sp2-sp2 and approximate ESDs 10/10/5 degrees. Omega uses the same
 per-invocation frozen cis/trans selector with 0/180-degree targets and 5-degree ESD.
 Unknown residues or missing chi atoms warn and skip; an omitted library never downloads one.
+`_polymer_links.py` completes redundant inter-residue link angles against the same
+local geometry that supplies intra-residue targets. At a reference carbonyl, the
+three angles sum to 360 degrees; phosphate angles share one fitted unit partner
+direction. Never measure a cross-residue vector from independently positioned
+reference frames. Complete the reference side of mixed library/reference links
+per local state; missing dictionary links use covered dictionary-local angles.
+Existing dictionary targets, reference residue geometry, ESDs, slack and topology
+are preserved. Tests construct zero-energy cis/trans peptide witnesses and
+unit-vector phosphate witnesses, including partial dictionary coverage.
+
 Conformer angles within a strict 0.5 degrees of 180 use `2*w*(1+cos(theta))`; nonzero slack
 uses a chord residual with the same angular free interval. This branch and its 0.02-A bond
 norm floor live only in `energy/_kernels.py`, not the group/custom geometry primitives.

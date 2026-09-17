@@ -62,26 +62,33 @@ def _ref_geom_penalty(ops, geom, type_code, value, target1, target2):
     return deviation * deviation
 
 
-def build_closure(spec, ops):
+def build_closure(spec, ops, *, parameters=None):
     """Build ``(active_coords) -> scalar`` for one custom spec."""
-    if spec.weight == 0:
+    if parameters is None and spec.weight == 0:
         # A disabled formula may be undefined at these coordinates (0 * NaN is NaN).
         return lambda coords: ops.scalar_like(0.0, coords)
-    selections = {key: ops.asint(value) for key, value in spec.selections.items()}
+
+    def parameter(name):
+        return getattr(spec, name) if parameters is None else parameters[name]
+
+    selections = {
+        key: ops.asint(value) for key, value in parameter("selections").items()
+    }
     refs = {
         key: (ops.asint(indices), ops.prepare_constant(ref_coords))
-        for key, (indices, ref_coords) in spec.refs.items()
+        for key, (indices, ref_coords) in parameter("refs").items()
     }
     selection_refs = dict(spec.selection_refs)
     ref_fits = {
         ref_name: (ops.asint(indices), ops.prepare_constant(fit_ref))
-        for ref_name, (indices, fit_ref) in spec.ref_fits.items()
+        for ref_name, (indices, fit_ref) in parameter("ref_fits").items()
     }
     ref_blocks = {
-        key: ops.prepare_constant(block) for key, block in spec.ref_blocks.items()
+        key: ops.prepare_constant(block)
+        for key, block in parameter("ref_blocks").items()
     }
     move_free = dict(spec.move_free)
-    weight = spec.weight
+    weight = parameter("weight")
 
     def make_context(coords):
         return RestraintContext(
@@ -103,15 +110,25 @@ def build_closure(spec, ops):
 
     elif spec.kind == "ref_geom":
         baked_groups = [
-            ("pred", (ops.asint(payload[0]), payload[1]))
+            (
+                "pred",
+                (
+                    ops.asint(
+                        payload[0]
+                        if parameters is None
+                        else parameters["group_indices"][i]
+                    ),
+                    payload[1],
+                ),
+            )
             if kind == "pred"
             else ("ref", payload)
-            for kind, payload in spec.groups
+            for i, (kind, payload) in enumerate(spec.groups)
         ]
         geom = spec.geom
-        type_code = spec.geom_type_code
-        target1 = spec.target1
-        target2 = spec.target2
+        type_code = parameter("geom_type_code")
+        target1 = parameter("target1")
+        target2 = parameter("target2")
 
         def energy(coords):
             context = make_context(coords)

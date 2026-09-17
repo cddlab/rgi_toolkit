@@ -102,6 +102,29 @@ class _AxisOps:
     def searchsorted(self, values, queries):
         return self.xp.searchsorted(values, queries)
 
+    def contains_rows(self, rows, queries):
+        """Test membership in a sorted row for each query group."""
+        width = rows.shape[-1]
+        if not width:
+            return queries < 0
+        rows = self.xp.broadcast_to(rows, (*queries.shape[:-1], width))
+        rows = rows.reshape(-1, width)
+        values = queries.reshape(rows.shape[0], -1)
+        if self.xp.__name__ == "jax.numpy":
+            import jax
+
+            positions = jax.vmap(self.xp.searchsorted)(rows, values)
+        else:
+            positions = self.xp.stack(
+                [
+                    self.xp.searchsorted(row, value)
+                    for row, value in zip(rows, values, strict=True)
+                ]
+            )
+        positions = self.xp.minimum(positions, width - 1)
+        found = self.xp.take_along_axis(rows, positions, axis=-1) == values
+        return found.reshape(queries.shape)
+
     def arctan2(self, first, second):
         return self.xp.arctan2(first, second)
 
@@ -157,6 +180,16 @@ class _TorchOps:
 
     def searchsorted(self, values, queries):
         return self.t.searchsorted(values, queries.contiguous())
+
+    def contains_rows(self, rows, queries):
+        """Test membership without searching unrelated atoms' topology."""
+        width = rows.shape[-1]
+        if not width:
+            return queries < 0
+        rows = self.t.broadcast_to(rows, (*queries.shape[:-1], width)).contiguous()
+        positions = self.t.searchsorted(rows, queries.contiguous())
+        positions = self.t.clamp(positions, max=width - 1)
+        return self.t.gather(rows, -1, positions) == queries
 
     def const(self, value):
         return value

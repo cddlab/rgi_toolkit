@@ -576,25 +576,35 @@ def test_conformer_targets_and_minima_match_scipy(solver, kind, capsys):
         return np.linalg.det(points[1:] - points[0])
 
     chiral_targets = [volume(reference[list(row)]) for row in chirals]
+    # The oracle remains independent of RGI's packing and energy kernels.
+    # Propagate the coordinate-fallback ESDs by numerical differentiation.
+    from tests.test_reference_esd import _chiral_sigma
+
+    chiral_esds = [_chiral_sigma(reference[list(row)]) for row in chirals]
 
     def objective(flat):
         points = flat.reshape(n, 3)
         total = sum(
-            (np.linalg.norm(points[i] - points[j]) - value) ** 2
+            ((np.linalg.norm(points[i] - points[j]) - value) / 0.02) ** 2
             for (i, j), value in zip(bonds, bond_targets, strict=True)
         )
         total += sum(
-            (angle(points[list(row)]) - value) ** 2
+            ((angle(points[list(row)]) - value) / np.deg2rad(3)) ** 2
             for row, value in zip(angles, angle_targets, strict=True)
         )
         total += sum(
-            (volume(points[list(row)]) - value) ** 2
-            for row, value in zip(chirals, chiral_targets, strict=True)
+            ((volume(points[list(row)]) - value) / esd) ** 2
+            for row, value, esd in zip(
+                chirals, chiral_targets, chiral_esds, strict=True
+            )
         )
         if kind == "cistrans":
-            total += np.angle(np.exp(1j * (torsion(points) - torsion(reference)))) ** 2
+            total += (
+                np.angle(np.exp(1j * (torsion(points) - torsion(reference))))
+                / np.deg2rad(5)
+            ) ** 2
         elif kind == "plane":
-            total += plane_rms(points) ** 2
+            total += n * (plane_rms(points) / 0.02) ** 2
         return total
 
     diagnostic(cr, coords, solver, capsys, objective(coords[ids].ravel()))

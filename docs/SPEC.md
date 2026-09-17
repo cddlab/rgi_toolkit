@@ -189,6 +189,11 @@ groups; pinning is per atom and every group is free by default. The conformer
 plane and standalone plane use the same least-squares measurement but different
 target construction, weighting, and gates.
 
+Conformer geometry packs `user_weight / ESD**2` into its array weights for both
+reference and dictionary targets. Conformer planes also multiply by their atom
+count, so squared RMS gives a per-atom squared sum. Standalone and custom
+restraints retain their own weight conventions; ESD never creates slack.
+
 For conformer angles strictly within 0.5 degrees of a 180-degree target, the
 zero-slack penalty is `2 * weight * (1 + cos(theta))`. Nonzero slack uses a chord
 residual with the same angular free interval, and each bond norm in this cosine
@@ -207,6 +212,34 @@ raises instead of enforcing the wrong isomer. Relaxation operates on a copy and
 does not mutate source aromaticity. Plane membership is confirmed on relaxed
 coordinates, so the selected force field can change the plane count.
 
+Conformer ESD normalization is controlled by `conformer_restraints_config.use_esd`
+(boolean, default `true`). Setting it to `false` removes inverse-variance factors
+from all six conformer terms, including reference, dictionary, approximate torsion,
+and static/dynamic VdW paths. Plane atom-count factors remain. Targets, slack,
+topology, gating, and invalid-ESD handling stay unchanged; standalone/custom
+restraints are independent. The switch is applied while packing host arrays,
+so backend energy kernels and optimizers need no new runtime option.
+
+With the default, reference geometry uses approximate ESDs: bonds 0.02 Angstrom, angles 3 degrees,
+planes 0.02 Angstrom per atom, and ligand E/Z 5 degrees. Chiral-volume ESDs are
+propagated from the three reference bonds and three angles around each center,
+using the same independent-error formula as dictionary geometry. An active
+reference chiral term with a nonfinite or nonpositive propagated ESD raises.
+Built-in peptide/phosphodiester link bonds retain their 0.011/0.010 Angstrom ESDs,
+and link angles retain 1.5 degrees, all as inverse-variance weights rather than
+implicit slack. See [the config guide](config.md#esd-normalization-of-conformer-geometry)
+for the approximations' provenance and the difference from Servalcat's `1/2`
+energy convention.
+
+Reference polymer link angles are completed in their own residue-local frame.
+Peptide carbonyl angles sum to 360 degrees with the measured intra-residue angle;
+phosphate link angles share one unit partner direction. Only link-angle targets
+change: local reference targets, link lengths, ESDs, slack, and topology remain.
+Dictionary-covered centers retain dictionary targets. Mixed library/reference
+links complete the reference side separately for each local peptide condition.
+A missing dictionary link is completed against covered local dictionary angles;
+only the generated fallback rows change, retaining local state conditions.
+
 Polymer conformer restraints require per-chain opt-in. With no monomer library,
 reference bond/angle/chiral/plane geometry is supplemented by template-derived
 chi, omega, and acyclic sp2 torsions. Approximate chi periods depend on axis
@@ -218,7 +251,7 @@ An enabled CCP4 monomer library replaces reference-derived tuples wholly inside
 covered residues. Link add/change/delete operations are applied before deriving
 geometry, chiral volumes, and propagated ESDs. Dictionary torsion signs are
 negated to match RGI's ordered-torsion convention; nonpositive periods become one.
-Dictionary weights are `user_weight / ESD**2`, with angles and their ESDs converted
+Dictionary weights default to `user_weight / ESD**2`, with angles and their ESDs converted
 to radians. A dictionary plane additionally multiplies by its atom count, making
 the squared-RMS kernel equal the sum of per-atom squared distances. ESD is not
 slack. Dictionary slack defaults to zero; explicit slack remains independent.

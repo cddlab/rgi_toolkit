@@ -24,8 +24,17 @@ from rdkit import Chem
 from rgi_toolkit._config_util import (
     VDW_NEIGHBOR_SKIN_DEFAULT,
     VDW_SCALE_DEFAULT,
+    conformer_use_esd,
     conformer_weight,
     validate_vdw_config,
+)
+from rgi_toolkit._conformer_esd import (
+    ANGLE_ESD,
+    BOND_ESD,
+    CISTRANS_ESD,
+    PLANE_ESD,
+    inverse_variance_weights,
+    reference_chiral_esd,
 )
 from rgi_toolkit._conformer_planes import prefer_cistrans
 from rgi_toolkit._mol_build import ff_relax, parse_relax_force_field, repair_stereo
@@ -134,9 +143,9 @@ def _extract_conformer(
     ``conformer_restraints_config.relax_force_field.ligand`` choice, applied to LIGANDS
     only.
     """
-    bonds = []  # (g0, g1, r0)
-    angles = []  # (g0, g1, g2, th0)
-    chirals = []  # (g0, g1, g2, g3, vol0)
+    bonds = []  # (g0, g1, r0, esd)
+    angles = []  # (g0, g1, g2, th0, esd)
+    chirals = []  # (g0, g1, g2, g3, vol0, esd)
     cistrans = []  # (g0, g1, g2, g3, phi0)
     planes = []  # tuple(global idx, ...) — a planar atom group (ring or sp2 group)
     ff = str(force_field).lower()
@@ -192,7 +201,7 @@ def _extract_conformer(
         for b in mol.GetBonds():
             ai, aj = b.GetBeginAtomIdx(), b.GetEndAtomIdx()
             bonds.append(
-                (int(gidx[ai]), int(gidx[aj]), _bond_length(crds, ai, aj), None)
+                (int(gidx[ai]), int(gidx[aj]), _bond_length(crds, ai, aj), BOND_ESD)
             )
 
         for ai, aj, ak in mol.GetSubstructMatches(_ANGLE_PATT):
@@ -202,7 +211,7 @@ def _extract_conformer(
                     int(gidx[aj]),
                     int(gidx[ak]),
                     _angle_rad(crds, ai, aj, ak),
-                    None,
+                    ANGLE_ESD,
                 )
             )
 
@@ -215,6 +224,13 @@ def _extract_conformer(
                 vol = _chiral_vol(crds, ci, cand[0], cand[1], cand[2])
                 if lc.invert_chirality:
                     vol = -vol
+                esd = reference_chiral_esd(
+                    [_bond_length(crds, ci, n) for n in cand],
+                    [
+                        _angle_rad(crds, cand[i], ci, cand[j])
+                        for i, j in ((0, 1), (1, 2), (2, 0))
+                    ],
+                )
                 chirals.append(
                     (
                         int(gidx[ci]),
@@ -222,6 +238,7 @@ def _extract_conformer(
                         int(gidx[cand[1]]),
                         int(gidx[cand[2]]),
                         vol,
+                        esd,
                     )
                 )
 
@@ -662,7 +679,7 @@ def _build_intramolecular_vdw(
     if chemistry is None:
         from rgi_toolkit._vdw_chemistry import build_chemistry
 
-        chemistry = build_chemistry(ligand_confs, None)
+        chemistry = build_chemistry(ligand_confs, None, config=conformer_config)
 
     scale = float(vcfg.get("scale", VDW_SCALE_DEFAULT))
     idx_pairs: list[list[int]] = []
@@ -723,7 +740,7 @@ def _build_interligand_vdw(
     if chemistry is None:
         from rgi_toolkit._vdw_chemistry import build_chemistry
 
-        chemistry = build_chemistry(ligand_confs, None)
+        chemistry = build_chemistry(ligand_confs, None, config=conformer_config)
     idx_pairs: list[list[int]] = []
     r_min_list: list[float] = []
     weights = []
@@ -804,6 +821,7 @@ def build_spec(
     """
     ligand_confs = ligand_confs or []
     cfg = conformer_config or {}
+    use_esd = conformer_use_esd(cfg)
     validate_vdw_config(cfg)
     # Both a conformer config and per-chain opt-in are required. An empty config
     # requests the five default-on terms.
@@ -943,7 +961,7 @@ def build_spec(
         active.update((g0, g1))
     for g0, g1, g2, *_ in angles:
         active.update((g0, g1, g2))
-    for g0, g1, g2, g3, _ in chirals:
+    for g0, g1, g2, g3, *_ in chirals:
         active.update((g0, g1, g2, g3))
     for g0, g1, g2, g3, _ in cistrans:
         active.update((g0, g1, g2, g3))
@@ -1047,10 +1065,13 @@ def build_spec(
         bond = BondArrays(
             idx=idx,
             r0=np.array([r for _, _, r, _ in bonds]),
-            # Built-in link tolerances are flat-bottom slack; dictionary ESDs instead
-            # enter the inverse-variance weights below.
-            slack=np.array([bsl if e is None else float(e) for *_, e in bonds]),
-            weight=np.full(len(bonds), bw),
+            slack=np.full(len(bonds), bsl),
+            weight=inverse_variance_weights(
+                [BOND_ESD if e is None else e for *_, e in bonds],
+                bw,
+                "bond",
+                use_esd=use_esd,
+            ),
             half=np.zeros(len(bonds)),
             mask=np.ones(len(bonds)),
         )
@@ -1063,21 +1084,28 @@ def build_spec(
         angle = AngleArrays(
             idx=idx,
             th0=np.array([t for _, _, _, t, _ in angles]),
-            slack=np.array([asl if e is None else float(e) for *_, e in angles]),
-            weight=np.full(len(angles), aw),
+            slack=np.full(len(angles), asl),
+            weight=inverse_variance_weights(
+                [ANGLE_ESD if e is None else e for *_, e in angles],
+                aw,
+                "angle",
+                use_esd=use_esd,
+            ),
             mask=np.ones(len(angles)),
         )
     chiral = None
     if chirals:
         idx = np.array(
-            [[g2l[g0], g2l[g1], g2l[g2], g2l[g3]] for g0, g1, g2, g3, _ in chirals],
+            [[g2l[g0], g2l[g1], g2l[g2], g2l[g3]] for g0, g1, g2, g3, *_ in chirals],
             dtype=np.int64,
         )
         chiral = ChiralArrays(
             idx=idx,
-            vol0=np.array([v for _, _, _, _, v in chirals]),
+            vol0=np.array([v for _, _, _, _, v, _ in chirals]),
             slack=np.full(len(chirals), csl),
-            weight=np.full(len(chirals), cw),
+            weight=inverse_variance_weights(
+                [e for *_, e in chirals], cw, "chiral", use_esd=use_esd
+            ),
             mask=np.ones(len(chirals)),
         )
     cistrans_arr = None
@@ -1090,7 +1118,7 @@ def build_spec(
             idx=idx,
             phi0=np.array([p for _, _, _, _, p in cistrans]),
             slack=np.full(len(cistrans), dsl),
-            weight=np.full(len(cistrans), dw),
+            weight=np.full(len(cistrans), dw / CISTRANS_ESD**2 if use_esd else dw),
             mask=np.ones(len(cistrans)),
         )
     plane = None
@@ -1112,7 +1140,7 @@ def build_spec(
             idx=idx,
             grp_mask=grp_mask,
             slack=np.full(n_plane, psl),
-            weight=np.full(n_plane, pw),
+            weight=pw * grp_mask.sum(axis=-1) / (PLANE_ESD**2 if use_esd else 1.0),
             mask=np.ones(n_plane),
         )
 
@@ -1307,7 +1335,7 @@ def build_spec(
         "built spec: n_active=%d bonds=%d angles=%d chirals=%d plane=%d cistrans=%d "
         "distances=%d rmsd=%d group_angle=%d group_dihedral=%d "
         "group_improper=%d group_plane=%d group_chiral=%d "
-        "vdw=%s custom=%d relax_ff=%s",
+        "vdw=%s custom=%d relax_ff=%s use_esd=%s",
         spec.n_active,
         len(spec.bond.idx) if spec.bond is not None else 0,
         len(spec.angle.idx) if spec.angle is not None else 0,
@@ -1324,5 +1352,6 @@ def build_spec(
         vdw_desc,
         len(custom_specs),
         relax_ff,
+        use_esd,
     )
     return spec

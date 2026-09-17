@@ -482,7 +482,10 @@ class CombinedRestraints:
         gate); a JAX tool that does not thread a step counter can pass a constant (e.g.
         0). Returns ``None`` for an inactive spec (no restraints). With
         ``return_info=True``, return a function producing ``(coords, CGInfo)``;
-        this fixed output structure is compatible with JIT and scan (CG only)."""
+        this fixed output structure is compatible with JIT and scan (CG only).
+        The callable is a JAX pytree: pass it as an argument to the outermost
+        JIT to reuse compilation across compatible numeric restraint settings.
+        Capturing it in a closure still works but embeds its values as constants."""
         self._validate_return_info(return_info)
         if not self.is_active():
             return self._minimize_fn

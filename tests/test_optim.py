@@ -63,12 +63,15 @@ def _distance_objective(custom=None):
     "method,line_search", [("CG", "armijo"), ("CG", "strong-wolfe"), ("l-bfgs", None)]
 )
 @pytest.mark.parametrize("dynamic", [False, "fixed", "active"])
-def test_solver_objective_tracks_new_contacts(backend, method, line_search, dynamic):
+@pytest.mark.parametrize("skin", [0.0, 2.0])
+def test_solver_objective_tracks_new_contacts(
+    backend, method, line_search, dynamic, skin
+):
     """A line search must score contacts absent from its initial neighbour list."""
     from rgi_toolkit.spec import ActiveVdwConfig, VdwConfig
 
     spec = _distance_objective()
-    spec.vdw_neighbor_skin = 0.0
+    spec.vdw_neighbor_skin = skin
     coords = np.array(
         [[0.0, 0.0, 0.0], [12.0, 0.0, 0.0], [10.0, 0.0, 0.0], [14.0, 0.0, 0.0]]
     )

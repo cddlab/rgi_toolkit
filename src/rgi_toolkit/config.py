@@ -15,6 +15,7 @@ from rgi_toolkit._config_paths import resolve_restraints_config
 from rgi_toolkit._config_util import (
     check_window_exclusive,
     coerce_bool,
+    conformer_use_esd,
     finite_float,
     validate_vdw_config,
 )
@@ -206,6 +207,7 @@ class RestraintsConfig:
             "vdw",
             "monomer_library",
             "relax_force_field",
+            "use_esd",
         }
         unknown_conformer = {
             key
@@ -218,6 +220,7 @@ class RestraintsConfig:
                 f"{sorted(unknown_conformer)}. Known keys: "
                 f"{sorted(known_conformer_keys)}"
             )
+        conformer_use_esd(conformer_config)
         validate_vdw_config(conformer_config)
         for term in ("bond", "angle", "chiral", "cistrans", "plane"):
             block = conformer_config.get(term)

@@ -232,6 +232,8 @@ def build_active_vdw_pairs(
     max_neighbors,
     scale=VDW_SCALE_DEFAULT,
     chemistry=None,
+    *,
+    pair_factors=True,
 ):
     """Build a fixed-width directed neighbour list with a sorted spatial cell list.
 
@@ -265,6 +267,8 @@ def build_active_vdw_pairs(
     batch_idx = torch.arange(batch.shape[0], device=active.device).view(-1, 1, 1)
     source = torch.arange(n_atom, device=active.device).view(1, n_atom, 1)
     valid = torch.isfinite(best_score)
+    if not pair_factors:
+        return neighbours, valid.to(active.dtype)
 
     reverse_neighbours = neighbours[batch_idx, neighbours]
     reverse_valid = valid[batch_idx, neighbours]
@@ -361,7 +365,15 @@ def _vdw_pair_energy(
 
 
 def active_vdw_pair_energy(
-    active, neighbours, pair_factor, radii, scale, weight, chemistry=None
+    active,
+    neighbours,
+    pair_factor,
+    radii,
+    scale,
+    weight,
+    chemistry=None,
+    *,
+    source=None,
 ):
     """VdW energy over a fixed per-step active-active neighbour list."""
 
@@ -371,12 +383,14 @@ def active_vdw_pair_energy(
         return torch.sum(batch) * 0.0
     batch_idx = torch.arange(batch.shape[0], device=active.device).view(-1, 1, 1)
     other = batch[batch_idx, neighbours]
-    diff = batch[:, :, None, :] - other
-    source = torch.arange(n_atom, device=active.device).reshape(1, n_atom, 1)
+    if source is None:
+        source = torch.arange(n_atom, device=active.device).reshape(1, n_atom, 1)
+    query = batch[batch_idx, source]
+    diff = query - other
     diff = _safe_vdw_diff_torch(diff, source, neighbours, canonical=True)
     dist = torch.sqrt(torch.sum(diff**2, dim=-1) + EPS)
     if chemistry is None:
-        contact = radii[None, :, None] + radii[neighbours]
+        contact = radii[source] + radii[neighbours]
         inverse = 1 / 0.2**2
     else:
         contact, inverse, valid = pair_parameters(
