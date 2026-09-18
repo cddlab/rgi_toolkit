@@ -17,6 +17,7 @@ contracts, optimizer algorithms, and verification against independent implementa
 | OpenFold 3        | PyTorch | `queries.<name>.restraints_config` in the input JSON          | [OpenFold 3](openfold-3_restr.md)  |
 | Chai-1            | PyTorch | Top-level sidecar YAML passed with `--restraints-config-path` | [Chai-1](chai-lab_restr.md)        |
 | OpenDDE v1        | PyTorch | `restraints_config` in each fold-input JSON object            | [OpenDDE](opendde_restr.md)        |
+| RF3 (Foundry)     | PyTorch | `restraints_config` in each input JSON job                   | [RF3](foundry_restr.md)           |
 
 ## Recommended workflow
 

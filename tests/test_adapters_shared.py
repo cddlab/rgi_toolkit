@@ -577,6 +577,17 @@ def _chemistry_adapter(tool, source, smiles):
         "smiles_by_chain": {"B": smiles},
         "ref_pos": coords[None],
     }
+    if tool == "rf3":
+        from rgi_toolkit.rf3.adapter import RF3Adapter
+
+        return RF3Adapter(
+            aa,
+            atom_to_token_map=np.arange(n_atoms),
+            ref_pos=coords,
+            ref_space_uid=np.zeros(n_atoms, dtype=int),
+            mol_types=["ligand"] * n_atoms,
+            ligand_mols={"B": source},
+        )
     if tool == "protenix":
         from rgi_toolkit.protenix.adapter import ProtenixAdapter
 
@@ -595,7 +606,16 @@ def _chemistry_adapter(tool, source, smiles):
 
 @pytest.mark.parametrize(
     "tool",
-    ["boltz", "alphafold3", "chai", "esmfold2", "protenix", "openfold3", "opendde"],
+    [
+        "boltz",
+        "alphafold3",
+        "chai",
+        "esmfold2",
+        "protenix",
+        "openfold3",
+        "opendde",
+        "rf3",
+    ],
 )
 @pytest.mark.parametrize(
     "smiles",

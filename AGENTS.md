@@ -32,8 +32,8 @@ GPU paths (real CUDA torch / jax devices) are exercised by the host tools via
 
 **rgi_toolkit** — Restraint-Guided Inference (RGI): inject distance + ligand
 conformer + RMSD restraints into a structure-prediction diffusion loop via gradient
-optimization. Shared by **seven** integrations — boltz / protenix / chai-lab / openfold-3 /
-esmfold2 / opendde (torch) and alphafold3 (jax), covering 9 model variants (boltz1+boltz2 and
+optimization. Shared by **eight** integrations — boltz / protenix / chai-lab / openfold-3 /
+esmfold2 / opendde / rf3 (torch) and alphafold3 (jax), covering 10 model variants (boltz1+boltz2 and
 protenix v1+v2 each share one adapter). The end-to-end guide for integrating a new tool is the
 `implement-rgi` skill, shared from `.claude/skills/` to `.agents/skills/` (alongside
 `generate-rgi-config` for authoring a config, `sync-upstream`, `create-github-release`).
@@ -297,7 +297,7 @@ inert — to run AF3 restraints on CPU, run the whole process on the JAX CPU pla
 
 #### Framework adapters
 
-(`{boltz,protenix,chai,openfold3,esmfold2,opendde,alphafold3}/adapter.py` —
+(`{boltz,protenix,chai,openfold3,esmfold2,opendde,rf3,alphafold3}/adapter.py` —
 framework-free EXCEPT boltz, whose feats arrive as native torch tensors so its adapter
 imports torch (read at batch 0); the others import no framework. AF3's CCD/SMILES mol
 resolution lives in a thin in-tool shim
@@ -306,10 +306,16 @@ data): implement `iter_atoms()` (→
 `AtomRecord(chain, resid, index)` for distance selection) and optionally
 `num_atoms()`, `get_elements()`, `iter_ligand_confs()` (→
 `LigandConf(mol, conf_coords, global_indices, stereo_mol=...)` for conformer + VdW;
-`stereo_mol` is the optional source SMILES graph renumbered to coordinate order). The three tools whose
-features arrive as a **biotite `AtomArray`** (protenix / openfold3 / opendde) share
+`stereo_mol` is the optional source SMILES graph renumbered to coordinate order). The four tools whose
+features arrive as a **biotite `AtomArray`** (protenix / openfold3 / opendde / rf3) share
 `_biotite_adapter.py` (`biotite_get_elements` / `biotite_ligand_confs`) rather than each
-re-deriving elements + ligand conformers — extend that module, not the three call sites.
+re-deriving elements + ligand conformers — extend that module, not the four call sites.
+
+RF3 receives the final atom-to-token map, reference positions and reference-space IDs
+from the tool-side shim, which also normalizes AtomWorks entity types and resolves
+source ligand chemistry. Its `resid` follows the actual per-chain token order, including
+atomized ligands and modified residues. Conformer flags are opt-in component metadata;
+they are independent of RF3's native ground-truth conformer conditioning.
 
 Chai maps source SMILES atoms by name and renumbers the complete source graph. Do not
 rebuild that graph from elements and bond orders: formal charges and explicit H counts

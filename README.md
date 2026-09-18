@@ -3,7 +3,7 @@
 Restraint-Guided Inference (RGI) toolkit for diffusion-based structure predictors
 (PyTorch and JAX).
 
-**Implemented and available in the following 9 models** (across 7 predictor integrations):
+**Implemented and available in the following 10 models** (across 8 predictor integrations):
 
 | Model           | Integration | Backend | Details                                              |
 | --------------- | ----------- | ------- | ---------------------------------------------------- |
@@ -16,6 +16,7 @@ Restraint-Guided Inference (RGI) toolkit for diffusion-based structure predictor
 | **OpenFold-3**  | openfold-3  | torch   | [`docs/openfold-3_restr.md`](docs/openfold-3_restr.md) |
 | **Chai-1**      | chai-lab    | torch   | [`docs/chai-lab_restr.md`](docs/chai-lab_restr.md)     |
 | **OpenDDE v1**  | opendde     | torch   | [`docs/opendde_restr.md`](docs/opendde_restr.md)       |
+| **RF3**        | foundry     | torch   | [`docs/foundry_restr.md`](docs/foundry_restr.md)       |
 
 See each tool's guide in [`docs/`](docs/) for install / run details, and
 [`docs/config.md`](docs/config.md) for the full `restraints_config` schema. For common failure modes
@@ -29,6 +30,9 @@ that finds the matching fork's env and folds. Start there rather than from the s
 below: `bash examples/distance/boltz-2/run.sh`. It needs the matching fork checked out as a
 sibling of `RGI-toolkit/` and a GPU node; see [`examples/README.md`](examples/README.md) for the
 per-tool prerequisites.
+
+RF3 examples and their validation runner are maintained in the
+[`foundry_restr` fork](https://github.com/cddlab/foundry_restr/tree/rgi-integration/examples/rgi).
 
 > **Stuck writing a config?** Run the `generate-rgi-config` skill in Claude Code
 > (`/generate-rgi-config`) or Codex (`$generate-rgi-config`). It interviews you about the
