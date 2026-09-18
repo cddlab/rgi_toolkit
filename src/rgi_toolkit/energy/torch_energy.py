@@ -20,6 +20,7 @@ bond_energy = partial(K.bond_energy, _OPS)
 angle_energy = partial(K.angle_energy, _OPS)
 chiral_energy = partial(K.chiral_energy, _OPS)
 cistrans_energy = partial(K.cistrans_energy, _OPS)
+torsion_energy = partial(K.torsion_energy, _OPS)
 vdw_energy = partial(K.vdw_energy, _OPS)
 distance_energy = partial(K.distance_energy, _OPS)
 group_angle_energy = partial(K.group_angle_energy, _OPS)
@@ -60,6 +61,7 @@ _LEAF_FNS = {
     "chiral_energy": chiral_energy,
     "plane_energy": plane_energy,
     "cistrans_energy": cistrans_energy,
+    "torsion_energy": torsion_energy,
     "vdw_energy": vdw_energy,
     "distance_energy": distance_energy,
     "rmsd_energy": rmsd_energy,

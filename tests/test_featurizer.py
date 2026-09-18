@@ -263,7 +263,11 @@ def test_plane_perception():
     aromatic/conjugated rings + non-ring sp2 groups, each CONFIRMED coplanar in the
     reference conformer (so aromaticity flags are never trusted). Variable group size is
     a padded (n_plane, max_atoms) idx + grp_mask. OFF unless explicitly opted in."""
-    cfg = {"plane": {"weight": 1.0}, "cistrans": {"weight": 1.0}}
+    cfg = {
+        "plane": {"weight": 1.0},
+        "cistrans": {"weight": 1.0},
+        "torsion": {"weight": 1.0},
+    }
     nrow = lambda a: 0 if a is None else len(a.idx)  # noqa: E731
 
     # fumarate: 2 carboxyl groups (each carboxyl C + O + O + alkene C = 4 coplanar atoms)
@@ -271,8 +275,10 @@ def test_plane_perception():
     # trivially-planar group, skipped). E/Z and conjugated single bonds use torsions.
     spec = build_spec([_lig_heavy(r"OC(=O)/C=C/C(=O)O")], [], cfg)
     assert nrow(spec.plane) == 2
-    assert nrow(spec.cistrans) == 5
-    np.testing.assert_array_equal(spec.cistrans.period, [1, 2, 2, 2, 2])
+    assert nrow(spec.cistrans) == 1
+    assert nrow(spec.torsion) == 4
+    np.testing.assert_array_equal(spec.cistrans.period, [1])
+    np.testing.assert_array_equal(spec.torsion.period, [2, 2, 2, 2])
     assert spec.plane.idx.shape == (2, 4)  # two 4-atom groups
     assert (spec.plane.grp_mask.sum(axis=1) == 4).all()  # no padding for 4-atom groups
     assert int(spec.plane.idx.max()) < spec.n_active

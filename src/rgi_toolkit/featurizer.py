@@ -1,11 +1,11 @@
 """Build a backend-agnostic ``RestraintSpec`` from ligand conformers + distances.
 
 This is the single place where conformer restraints (bond/angle/chiral/cistrans/
-plane) are derived from RDKit mols. Each ligand supplies its own
+torsion/plane) are derived from RDKit mols. Each ligand supplies its own
 ``global_indices``, so multiple ligands produce non-colliding restraints.
 
 Flow:
-  1. extract bond/angle/chiral/cistrans/plane restraints per ligand in GLOBAL atom
+  1. extract bond/angle/chiral/cistrans/torsion/plane restraints per ligand in GLOBAL atom
      indices,
   2. collect distance restraint atom groups (already resolved to global indices),
   3. active_sites = union of all referenced global atoms (sorted, unique),
@@ -36,7 +36,7 @@ from rgi_toolkit._conformer_esd import (
     inverse_variance_weights,
     reference_chiral_esd,
 )
-from rgi_toolkit._conformer_planes import prefer_cistrans
+from rgi_toolkit._conformer_planes import prefer_torsions
 from rgi_toolkit._mol_build import ff_relax, parse_relax_force_field, repair_stereo
 from rgi_toolkit._monlib_records import validate_target
 from rgi_toolkit._monlib_spec import append_library_arrays, used_peptides
@@ -136,7 +136,7 @@ def _extract_conformer(
     extra_torsions: list | None = None,
 ):
     """Return bond/angle/chiral/cistrans restraint tuples and plane groups in GLOBAL atom
-    indices.
+    indices. When supplied, extra_torsions collects general sp2 single-bond rows.
 
     ``relax`` is the STRUCTURAL switch (the polymer call site passes False: monomer-library
     residues are never force-field relaxed); ``force_field`` is the user's
@@ -874,13 +874,14 @@ def build_spec(
     csl = _conf_slack(cfg, "chiral", 0.05)
     dw = _conf_weight(conformer_config, "cistrans")
     dsl = _conf_slack(cfg, "cistrans", 0.0)
+    tw = _conf_weight(conformer_config, "torsion")
     vdw_weight = _conf_weight(conformer_config, "vdw")
     pw = _conf_weight(conformer_config, "plane")
     psl = _conf_slack(cfg, "plane", 0.0)
 
     # Force-field relaxation applies to ligands; polymer calls use relax=False.
     relax_ff = parse_relax_force_field(cfg)
-    ligand_torsions = [] if dw > 0 else None
+    ligand_torsions = [] if tw > 0 else None
     bonds, angles, chirals, cistrans, planes = _extract_conformer(
         ligand_confs, force_field=relax_ff, extra_torsions=ligand_torsions
     )
@@ -922,9 +923,9 @@ def build_spec(
         planes.extend(pp)
         planes.extend(polymer_geometry.link_planes)
         polymer_atoms = np.asarray(polymer_geometry.atom_indices, dtype=np.int64)
-    if dw > 0:
+    if tw > 0:
         library = replace(library, terms={k: list(v) for k, v in library.terms.items()})
-        library.terms["cistrans"].extend(ligand_torsions)
+        library.terms["torsion"].extend(ligand_torsions)
     # VdW covalent exclusions must survive even when bond/angle energy blocks are off.
     exclusion_bonds = list(bonds)
     exclusion_angles = list(angles)
@@ -954,7 +955,7 @@ def build_spec(
             for key, rows in library.terms.items()
         },
     )
-    planes, plane_conditions, library = prefer_cistrans(planes, cistrans, library)
+    planes, plane_conditions, library = prefer_torsions(planes, cistrans, library)
 
     active: set[int] = set()
     for g0, g1, *_ in bonds:
@@ -1332,7 +1333,7 @@ def build_spec(
         )
     vdw_desc = "+".join(vdw_parts) if vdw_parts else "off"
     logger.info(
-        "built spec: n_active=%d bonds=%d angles=%d chirals=%d plane=%d cistrans=%d "
+        "built spec: n_active=%d bonds=%d angles=%d chirals=%d plane=%d cistrans=%d torsion=%d "
         "distances=%d rmsd=%d group_angle=%d group_dihedral=%d "
         "group_improper=%d group_plane=%d group_chiral=%d "
         "vdw=%s custom=%d relax_ff=%s use_esd=%s",
@@ -1342,6 +1343,7 @@ def build_spec(
         len(spec.chiral.idx) if spec.chiral is not None else 0,
         len(spec.plane.idx) if spec.plane is not None else 0,
         len(spec.cistrans.idx) if spec.cistrans is not None else 0,
+        len(spec.torsion.idx) if spec.torsion is not None else 0,
         len(distance_restraints),
         len(rmsd_restraints),
         len(angle_restraints),

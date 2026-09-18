@@ -11,13 +11,13 @@ from dataclasses import dataclass, replace
 
 from rgi_toolkit._atom_names import normalise_atom_name
 
-KINDS = ("bond", "angle", "chiral", "plane", "cistrans")
+KINDS = ("bond", "angle", "chiral", "plane", "torsion")
 _RT_FIELDS = {
     "bond": "bonds",
     "angle": "angles",
     "chiral": "chirs",
     "plane": "planes",
-    "cistrans": "torsions",
+    "torsion": "torsions",
 }
 
 
@@ -53,7 +53,7 @@ def atom_ids(kind, restraint):
         return tuple(restraint.ids)
     if kind == "chiral":
         return (restraint.id_ctr, restraint.id1, restraint.id2, restraint.id3)
-    count = {"bond": 2, "angle": 3, "cistrans": 4}[kind]
+    count = {"bond": 2, "angle": 3, "torsion": 4}[kind]
     return tuple(getattr(restraint, f"id{i}") for i in range(1, count + 1))
 
 

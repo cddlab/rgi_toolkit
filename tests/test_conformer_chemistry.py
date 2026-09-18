@@ -133,6 +133,7 @@ def test_dictionary_free_chi_omega_and_sp2_keep_reference_periods(monkeypatch):
     monkeypatch.setattr(monlib_geom.MonomerLibrary, "load", no_download)
     adapter, coords = _peptide("SFR")
     config = {key: {"weight": 0} for key in ("bond", "angle", "chiral", "vdw")}
+    config["torsion"] = {"weight": 1}
     geometry = build_polymer_geometry(adapter, config)
     targets = geometry.library
     assert not targets.atoms
@@ -144,17 +145,17 @@ def test_dictionary_free_chi_omega_and_sp2_keep_reference_periods(monkeypatch):
         (3, ("CD", "NE", "CZ", "NH2"), 2, 5),
     ):
         quad = tuple(lookup[resid, name] for name in names)
-        (row,) = [r for r in targets.terms["cistrans"] if r.atoms == quad]
+        (row,) = [r for r in targets.terms["torsion"] if r.atoms == quad]
         assert row.period == period
         assert row.esd == pytest.approx(math.radians(esd))
-    assert all(r.period in (1, 2, 3, 6) for r in targets.terms["cistrans"])
+    assert all(r.period in (1, 2, 3, 6) for r in targets.terms["torsion"])
     spec = build_spec(conformer_config=config, polymer_geometry=geometry)
     prepared = numpy_energy.prepare_spec(spec)
     # Only omega deviates at the embedded reference; every chi uses its own reference.
     free = replace(
         spec,
-        cistrans=replace(
-            spec.cistrans, mask=spec.cistrans.mask * (spec.cistrans.period != 1)
+        torsion=replace(
+            spec.torsion, mask=spec.torsion.mask * (spec.torsion.period != 1)
         ),
     )
     assert numpy_energy.total_energy(
@@ -169,8 +170,8 @@ def test_missing_chi_atoms_warn_instead_of_inventing_coordinates(caplog):
     adapter, _ = _peptide("S")
     records = [r for r in adapter.iter_atoms() if r.name != "OG"]
     adapter.iter_atoms = lambda: iter(records)
-    geometry = build_polymer_geometry(adapter, {"cistrans": {}})
-    assert not geometry.library.terms["cistrans"]
+    geometry = build_polymer_geometry(adapter, {"torsion": {"weight": 1}})
+    assert not geometry.library.terms["torsion"]
     assert "chi1 (missing atoms)" in caplog.text
 
 
@@ -194,15 +195,16 @@ def test_ligand_sp2_uses_relaxed_coords_and_preserves_double_bond_ez(monkeypatch
     relaxed[4, 2] += 0.4
     monkeypatch.setattr(featurizer, "ff_relax", lambda *args, **kwargs: relaxed)
     config = {key: {"weight": 0} for key in ("bond", "angle", "chiral", "vdw")}
+    config["torsion"] = {"weight": 1}
     config["use_esd"] = True
     spec = build_spec([ligand], conformer_config=config)
     assert 1 in spec.cistrans.period
-    assert 2 in spec.cistrans.period
+    assert 2 in spec.torsion.period
     assert numpy_energy.total_energy(
         relaxed[spec.active_sites], numpy_energy.prepare_spec(spec)
     ) == pytest.approx(0, abs=1e-15)
     assert np.all(
-        spec.cistrans.weight[spec.cistrans.period == 2]
+        spec.torsion.weight[spec.torsion.period == 2]
         == pytest.approx(1 / math.radians(5) ** 2)
     )
 

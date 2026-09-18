@@ -20,7 +20,7 @@ def _subtract(plane, torsion):
     return remaining
 
 
-def prefer_cistrans(planes, torsions, library):
+def prefer_torsions(planes, cistrans, library):
     """Return reference planes, their conditions, and a private dictionary copy.
 
     Inputs contain only enabled energy rows. Topological planes in the library
@@ -30,8 +30,8 @@ def prefer_cistrans(planes, torsions, library):
         return [], [], library
     by_atom = defaultdict(list)
     for atoms, conditions in chain(
-        ((tuple(row[:4]), ()) for row in torsions),
-        ((row.atoms, row.conditions) for row in library.terms["cistrans"]),
+        ((tuple(row[:4]), ()) for row in cistrans),
+        ((row.atoms, row.conditions) for row in library.terms["torsion"]),
     ):
         atoms = frozenset(atoms)
         by_atom[min(atoms)].append((atoms, tuple(sorted(conditions))))

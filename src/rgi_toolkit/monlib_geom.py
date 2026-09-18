@@ -187,20 +187,20 @@ def _link_options(library, previous, current, targets, enabled):
     if current["mol_type"] != "protein":
         return options
     cis = library.get_link(link_id.replace("TRANS", "CIS"))
-    trans_omega = next((r for r in trans_rows["cistrans"] if r.label == "omega"), None)
+    trans_omega = next((r for r in trans_rows["torsion"] if r.label == "omega"), None)
     if cis is None:
-        if trans_omega is not None and "cistrans" in enabled:
+        if trans_omega is not None and "torsion" in enabled:
             missing_geometry(
                 f"{link_id} has no cis counterpart; omega omitted",
                 targets.on_missing,
                 "kept trans link geometry without omega",
             )
-            trans_rows["cistrans"] = [
-                r for r in trans_rows["cistrans"] if r.label != "omega"
+            trans_rows["torsion"] = [
+                r for r in trans_rows["torsion"] if r.label != "omega"
             ]
         return options
     cis_rows = resolve(read_restraints(cis.rt), sides)
-    cis_omega = next((r for r in cis_rows["cistrans"] if r.label == "omega"), None)
+    cis_omega = next((r for r in cis_rows["torsion"] if r.label == "omega"), None)
     if trans_omega is None or cis_omega is None:
         return (
             options  # incomplete backbone: retain trans geometry for the atoms present
@@ -228,11 +228,11 @@ def _add_geometry(targets, records, conditions, enabled, source, peptide=False):
     targets.plane_groups.update(
         r.atoms for r in records["plane"] if math.isfinite(r.esd) and r.esd > 0
     )
-    for kind in ("bond", "angle", "plane", "cistrans"):
+    for kind in ("bond", "angle", "plane", "torsion"):
         if kind not in enabled:
             continue
         for r in records[kind]:
-            if kind == "cistrans" and not (
+            if kind == "torsion" and not (
                 r.label == "omega"
                 or r.label.startswith("sp2_sp2")
                 or (peptide and r.label.startswith("chi"))
@@ -240,9 +240,9 @@ def _add_geometry(targets, records, conditions, enabled, source, peptide=False):
                 continue
             if not validate_target(r, f"{source} {kind}"):
                 continue
-            angular = kind in ("angle", "cistrans")
+            angular = kind in ("angle", "torsion")
             value = math.radians(r.value) if angular else r.value
-            if kind == "cistrans":
+            if kind == "torsion":
                 value = -value  # RGI's signed dihedral is the negative of Gemmi's
             targets.terms[kind].append(
                 GeometryTarget(

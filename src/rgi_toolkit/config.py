@@ -204,6 +204,7 @@ class RestraintsConfig:
             "chiral",
             "plane",
             "cistrans",
+            "torsion",
             "vdw",
             "monomer_library",
             "relax_force_field",
@@ -222,7 +223,7 @@ class RestraintsConfig:
             )
         conformer_use_esd(conformer_config)
         validate_vdw_config(conformer_config)
-        for term in ("bond", "angle", "chiral", "cistrans", "plane"):
+        for term in ("bond", "angle", "chiral", "cistrans", "torsion", "plane"):
             block = conformer_config.get(term)
             if block is None:
                 continue

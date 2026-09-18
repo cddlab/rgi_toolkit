@@ -108,29 +108,32 @@ class PlaneArrays:
 
 
 @dataclass
-class CisTransArrays:
-    """Flat-bottomed cis/trans (E/Z) torsion restraints (padded). Atom order i-j-k-l;
-    the rotatable bond axis is the j-k pair (columns 1-2).
+class TorsionArrays:
+    """Periodic flat-bottomed dihedral restraints (padded), ordered i-j-k-l.
 
-    Holds each acyclic double bond at its input E/Z geometry: the target
-    ``phi0`` is the reference-conformer torsion, so the bond keeps its input
-    cis/trans configuration. The energy is periodicity-safe (the deviation from
-    ``phi0`` is wrapped to [-pi, pi] before the flat-bottomed square penalty).
-    Dictionary omega/sp2 torsions additionally retain their number of equivalent
-    wells in ``period``; the wrapped deviation is divided back by that period so
-    its ESD remains an angular uncertainty.
+    The j-k pair is the axis. Deviations wrap by the number of equivalent wells
+    in period and divide back by that period, preserving angular ESD units.
     """
 
-    idx: np.ndarray  # (n_cistrans, 4) int
-    phi0: np.ndarray  # (n_cistrans,) target torsion in radians
-    slack: np.ndarray  # (n_cistrans,) radians
-    weight: np.ndarray  # (n_cistrans,)
-    mask: np.ndarray  # (n_cistrans,)
+    idx: np.ndarray  # (n_torsion, 4) int
+    phi0: np.ndarray  # (n_torsion,) target torsion in radians
+    slack: np.ndarray  # (n_torsion,) radians
+    weight: np.ndarray  # (n_torsion,)
+    mask: np.ndarray  # (n_torsion,)
     period: np.ndarray | None = None  # number of equivalent wells per full turn
 
     def __post_init__(self):
         if self.period is None:
             self.period = np.ones_like(self.mask, dtype=np.int64)
+
+
+@dataclass
+class CisTransArrays(TorsionArrays):
+    """Ligand acyclic double-bond E/Z restraints with reference targets.
+
+    Built-in E/Z rows use period 1 to retain the input stereoisomer. General
+    chi, omega and sp2 torsions are stored separately in RestraintSpec.torsion.
+    """
 
 
 @dataclass
@@ -506,7 +509,7 @@ class RestraintSpec:
     distance: DistanceArrays | None = None
     rmsd: RmsdArrays | None = None
     # centroid angle/dihedral restraints between atom GROUPS (distinct from the conformer
-    # angle/cistrans above, which act on single ligand atoms). Each carries its own
+    # angle/cistrans/torsion terms, which act on individual atoms). Each carries its own
     # per-restraint start_sigma/stop_sigma like distance/rmsd.
     group_angle: GroupAngleArrays | None = None
     group_dihedral: GroupDihedralArrays | None = None
@@ -530,6 +533,7 @@ class RestraintSpec:
     custom: list = field(default_factory=list)
     peptide_states: PeptideStateArrays | None = None
     group_chiral: GroupChiralArrays | None = None
+    torsion: TorsionArrays | None = None
 
     def has_array_term(self, key: str) -> bool:
         """Return whether one registered array-backed term is active."""

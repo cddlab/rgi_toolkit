@@ -172,7 +172,8 @@ the exact constants and branch rules live in `_geometry.py` and `_kernels.py`.
 | `angle` | Three-atom angle; conformer or dictionary angle | Radians internally; symmetric slack with the linear-target branch below | Shared conformer |
 | `chiral` | Signed scalar triple product about the first atom; reference or dictionary target | Angstrom cubed; no division by six; symmetric slack; dictionary `both` accepts either sign | Shared conformer |
 | `plane` | RMS distance from the group's own least-squares plane; target zero | Angstrom; `max(q - slack, 0)` | Shared conformer |
-| `cistrans` | Ordered torsion and periodicity `n`; chemical/reference/dictionary target | Radians; `wrap(n * (phi - target)) / n`, then symmetric slack | Shared conformer |
+| `cistrans` | Ligand acyclic double-bond E/Z; reference target, period 1 | Radians; `wrap(phi - target)`, then symmetric slack | Shared conformer |
+| `torsion` | Ordered chi/omega/sp2 torsion and periodicity `n`; reference/dictionary target | Radians; `wrap(n * (phi - target)) / n`, then symmetric slack | Shared conformer |
 | `vdw` | Pair distance relative to a chemical contact | Angstrom; repulsive overlap, optionally divided by pair ESD | Shared conformer |
 | `distance` | Distance between two geometric centroids; user target/bounds | Angstrom; four shared shapes | Per entry |
 | `rmsd` | Proper-rotation Kabsch fit followed by RMS measurement; reference structure and user target/bounds | Angstrom; four shared shapes | Per entry |
@@ -215,7 +216,7 @@ coordinates, so the selected force field can change the plane count.
 
 Conformer ESD normalization is controlled by `conformer_restraints_config.use_esd`
 (boolean, default `false`). Setting it to `true` applies inverse-variance factors
-to all six conformer terms, including reference, dictionary, approximate torsion,
+to all seven conformer terms, including reference, dictionary, approximate torsion,
 and static/dynamic VdW paths. Plane atom-count factors remain. Targets, slack,
 topology, gating, and invalid-ESD handling stay unchanged; standalone/custom
 restraints are independent. The switch is applied while packing host arrays,
@@ -242,11 +243,12 @@ A missing dictionary link is completed against covered local dictionary angles;
 only the generated fallback rows change, retaining local state conditions.
 
 Polymer conformer restraints require per-chain opt-in. With no monomer library,
-reference bond/angle/chiral/plane geometry is supplemented by template-derived
-chi, omega, and acyclic sp2 torsions. Approximate chi periods depend on axis
+reference bond/angle/chiral/plane geometry can be supplemented by template-derived
+chi, omega, and acyclic sp2 torsions via `torsion: {weight: 1}` (default weight 0). Approximate chi periods depend on axis
 hybridization (3/6/2); their ESDs are 10/10/5 degrees, and approximate omega and
-sp2 ESDs are 5 degrees. Ligand E/Z keeps period one. No complete backbone phi/psi
-or nucleic backbone torsion potential is implied by `cistrans`.
+sp2 ESDs are 5 degrees. The separate `cistrans` term keeps ligand E/Z at period one
+and defaults to weight 1. No complete backbone phi/psi or nucleic backbone torsion
+potential is implied by `torsion`.
 
 An enabled CCP4 monomer library replaces reference-derived tuples wholly inside
 covered residues. Link add/change/delete operations are applied before deriving
@@ -659,7 +661,7 @@ sampling and structural/scientific validation remain separate from toolkit E2E.
 
 `RestraintsConfig.conformer_config` is `None` for an absent/null block and a dictionary
 for an explicit block, including `{}`. The shared `conformer_weight` helper supplies
-weights 1 for bond/angle/chiral/cistrans/vdw and 0 for plane. Explicit nonpositive/null
+weights 1 for bond/angle/chiral/cistrans/vdw and 0 for plane/torsion. Explicit nonpositive/null
 weights disable a term. Molecule opt-in remains mandatory. Dictionary collection,
 reference featurization and VdW consume the same effective weights.
 

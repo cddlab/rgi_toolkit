@@ -48,15 +48,16 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
    ops facade; `energy/{numpy,torch,jax}_energy.py` are thin public API adapters. The
    single `energy/_terms.py` `TermDef` registry drives spec packing, dispatch, gating,
    and breakdown for
-   `bond/angle/chiral/plane/cistrans/vdw/distance/rmsd/group_angle/group_dihedral/group_improper/group_chiral/group_plane`
-   (cistrans = periodic torsions for E/Z, protein chi, peptide omega and acyclic sp2 axes; plane = [servalcat](https://github.com/keitaroyam/servalcat)-style best-fit
+   `bond/angle/chiral/plane/cistrans/torsion/vdw/distance/rmsd/group_angle/group_dihedral/group_improper/group_chiral/group_plane`
+   (cistrans = ligand acyclic double-bond E/Z; torsion = protein chi, peptide omega and
+   acyclic sp2 axes, opt-in/off by default; plane = [servalcat](https://github.com/keitaroyam/servalcat)-style best-fit
    plane over whole planar atom GROUPS (aromatic/conjugated rings + non-ring sp2 groups),
    penalising each group's out-of-plane RMS deviation via the smallest-eigenvalue plane
    normal (stop-gradient like `rmsd`'s Kabsch rotation), opt-in/off by
    default; rmsd = Kabsch-superposed RMSD toward a target,
    fit/calc separable; `group_angle`/`group_dihedral`/`group_improper` = the angle/dihedral/improper of 3/4 atom
    GROUPS' centroids — the angular analogue of the centroid-distance restraint, distinct from the
-   per-atom `angle`/`cistrans` conformer terms; `group_plane` = the SAME best-fit-plane quantity as
+   per-atom `angle`/`cistrans`/`torsion` conformer terms; `group_plane` = the SAME best-fit-plane quantity as
    `plane` but over selection-resolved groups (`plane_restraints_config`), with the four
    distance-style types and a PER-ENTRY gate instead of the shared conformer one — every path,
    including custom/reference restraints, uses the same stop-gradient plane/Kabsch primitives).
@@ -134,18 +135,18 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
 #### `featurizer.py`
 
 An empty conformer block enables bond/angle/chiral/cistrans/vdw at weight 1; absent/null
-blocks disable the layer. Plane defaults to 0 even with an empty sub-block.
+blocks disable the layer. Plane and torsion default to 0 even with empty sub-blocks.
 `conformer_restraints_config.use_esd` is a strict boolean (default `false`); `true`
-applies ESD inverse-variance factors to all six conformer terms at spec packing,
+applies ESD inverse-variance factors to all seven conformer terms at spec packing,
 including reference, dictionary, approximate torsion and static/dynamic VdW paths.
 Plane atom-count factors, targets, slack, topology, gates and invalid-ESD handling
 remain unchanged. Standalone/custom restraints are independent. Positive
-cistrans rows suppress only conformer plane groups containing their four atoms, using
+cistrans or torsion rows suppress only conformer plane groups containing their four atoms, using
 local peptide conditions where necessary. VdW topology planes are preserved.
 
 `build_spec(ligand_confs, distance_restraints, conformer_config,
 elements, conf_start_sigma, rmsd_restraints)` — the single place RDKit mols become bond/angle/
-chiral/cistrans restraints (global indices, multi-ligand) and the dynamic
+chiral/cistrans/torsion restraints (global indices, multi-ligand) and the dynamic
 fixed-background `VdwConfig` is assembled. Cis/trans E/Z detection keys on
 acyclic, non-aromatic `BondType.DOUBLE` bonds and keeps period 1. Conjugated single
 sp2-sp2 axes add period-2 torsions with approximate 5-degree ESD from the same relaxed
@@ -162,7 +163,7 @@ runs only when the mol has an aromatic or DOUBLE bond — the proxy for "real bo
 relaxing an all-single
 chai/esmfold2 mol would collapse aromatic rings to ~1.5 Å — and an explicit `mmff*` **raises**
 where `uff` silently skips; (2) plane-group membership is confirmed on the **relaxed** coords, so
-changing the force field can change the `plane=` COUNT, while bonds/angles/chirals/cistrans are
+changing the force field can change the `plane=` COUNT, while bonds/angles/chirals/cistrans/torsion are
 topology-derived and must not move. `relax=False` (the polymer/monomer-library call site) is a
 separate structural switch and is never affected.
 
@@ -211,7 +212,7 @@ integer character code: missing an atom deletion can leave a phantom phosphate c
 inputs follow `on_missing` and are logged; strict mode raises. Each residue's incoming and outgoing
 modifications belong to separate links, including at an X-Pro boundary.
 
-Dictionary torsions labeled `omega` or `sp2_sp2*`, plus protein `chi*`, enter `cistrans`
+Dictionary torsions labeled `omega` or `sp2_sp2*`, plus protein `chi*`, enter `torsion`
 (no backbone phi/psi or complete nucleic backbone torsion set). Preserve
 periodicity (`<=0` becomes 1); convert angular values/ESDs to radians and **negate dictionary torsion
 targets** because RGI and Gemmi use opposite signs. `TRANS/CIS`, `PTRANS/PCIS`, `NMTRANS/NMCIS`
@@ -222,8 +223,9 @@ invocation reselects. Local condition tables avoid exponential whole-chain enume
 Tests: `tests/test_monlib_{geom,dictionary,esd,cache}.py` use self-contained fixtures; no installed
 CCP4 library or external download is needed by the suite.
 
-`_polymer_torsions.py` supplies dictionary-free chi/omega/sp2 approximations from standard
-RDKit residue templates, using only modeled atoms. Chi uses reference targets with periods
+`_polymer_torsions.py` supplies dictionary-free chi/omega/sp2 approximations when
+`torsion` has positive weight, using standard
+RDKit residue templates and only modeled atoms. Chi uses reference targets with periods
 3/6/2 for sp3-sp3/sp3-sp2/sp2-sp2 and approximate ESDs 10/10/5 degrees. Omega uses the same
 per-invocation frozen cis/trans selector with 0/180-degree targets and 5-degree ESD.
 Unknown residues or missing chi atoms warn and skip; an omitted library never downloads one.
@@ -474,9 +476,9 @@ below). All tools share sigma_data=16, so the value transfers.
 
 ### Conformer: VdW (two categories — intramolecular / intermolecular)
 
-VdW is **not a sixth restraint type** — it is the non-bonded term of the **conformer**
+VdW is **not a separate restraint type** — it is the non-bonded term of the **conformer**
 restraint, configured under `conformer_restraints_config.vdw` (one of bond/angle/chiral/
-plane/cistrans/vdw). `mode` picks **two categories** (default `both` = both):
+plane/cistrans/torsion/vdw). `mode` picks **two categories** (default `both` = both):
 
 - **Intramolecular** (`mode: intramolecular`): clashes WITHIN one ligand or polymer chain. Static
   ligand pairs exclude 1-2/1-3 and same-plane 1-4 pairs; eligible 1-4 pairs remain.

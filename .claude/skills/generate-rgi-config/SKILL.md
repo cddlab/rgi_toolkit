@@ -114,7 +114,10 @@ silent failures:
 - **Polymer dictionary geometry**: `conformer_restraints_config.monomer_library: true`
   acquires and caches the public CCP4 library when setup needs it. Use a path for an existing
   snapshot; `{on_missing: error}` requests the automatic cache with strict coverage. Keep
-  the entity opt-in explicit. An empty conformer block enables bond/angle/chiral/cistrans/vdw at weight 1; plane requires an explicit positive weight. Dictionary bond/angle/chiral/plane and
+  the entity opt-in explicit. An empty conformer block enables bond/angle/chiral/cistrans/vdw
+  at weight 1; plane and torsion require an explicit positive weight. The cistrans term
+  retains ligand E/Z; general chi/omega/sp2 restraints belong to `torsion` (default 0).
+  Dictionary bond/angle/chiral/plane and
   chi/omega/sp2 torsions use ESD-based inverse-variance weights when `use_esd: true`,
   with default slack zero. ESD is relative strength, not a tolerance band. Do not copy ESD into `slack`;
   consult `docs/config.md` for units, peptide state selection and offline cache behavior.
@@ -126,7 +129,7 @@ silent failures:
   VdW uses chemical contact rules and ESD 0.2 A (dummy atoms 0.3 A), with `scale` default
   1.0. Read `docs/config.md` before comparing energies with older unnormalized runs.
 - **ESD switch**: `conformer_restraints_config.use_esd` is a boolean, default `false`.
-  Set `true` when requested to apply ESD normalization to all six conformer
+  Set `true` when requested to apply ESD normalization to all seven conformer
   terms, including dictionary/approximate torsions and every VdW path. Keep targets,
   user weights, slack, topology and the plane atom-count factor unchanged. Standalone
   and custom restraints are unaffected. The resulting raw energies have a different

@@ -277,7 +277,7 @@ class CombinedRestraints:
 
             conf_counts = " ".join(
                 f"{key}={term_counts.get(key, 0)}"
-                for key in ("bond", "angle", "chiral", "plane", "cistrans")
+                for key in ("bond", "angle", "chiral", "plane", "cistrans", "torsion")
             )
             # ref-anchored built-in distance/angle/dihedral live in spec.custom (kind ref_geom);
             # break them out so they are visibly built (they do not show in the distances= count).
@@ -615,6 +615,7 @@ class CombinedRestraints:
                 f"bond={bd['bond']:.5f} angle={bd['angle']:.5f} "
                 f"chiral={bd['chiral']:.5f} plane={bd.get('plane', 0.0):.5f} "
                 f"cistrans={bd['cistrans']:.5f} "
+                f"torsion={bd['torsion']:.5f} "
                 f"vdw={bd['vdw']:.5f} "
                 f"distance={bd['distance']:.5f} rmsd={bd.get('rmsd', 0.0):.5f} "
                 f"group_angle={bd.get('group_angle', 0.0):.5f} "

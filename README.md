@@ -40,8 +40,9 @@ per-tool prerequisites.
 Nine **built-in** restraint types, all minimized during the denoising loop to guide coordinate optimization:
 
 - **conformer** — ligand and polymer-local bond / angle / chiral-volume / VdW;
-  ligand E/Z, protein side-chain χ, peptide ω, acyclic sp2 torsions, and plane
-  ([servalcat](https://github.com/keitaroyam/servalcat)-style best-fit-plane flatness of aromatic rings + sp2 groups, opt-in)
+  ligand E/Z (`cistrans`), optional protein side-chain χ / peptide ω / acyclic sp2
+  torsions (`torsion`, off by default), and optional plane
+  ([servalcat](https://github.com/keitaroyam/servalcat)-style best-fit-plane flatness of aromatic rings + sp2 groups)
   toward an ideal RDKit geometry, plus **VdW**
   non-bonded clash avoidance (intramolecular and/or intermolecular; `mode`
   defaults to `both`; chemical contact distances and optional ESD weighting). Near-linear conformer
@@ -153,7 +154,8 @@ restraints_config = {
     "conformer_restraints_config": {
         # Applied only to sequence/chain objects with conformer_restraints: true.
         # An empty mapping enables bond/angle/chiral/cistrans/vdw at weight 1.
-        # "plane": {"weight": 1.0},          # optional; overlapping cistrans takes priority
+        # "torsion": {"weight": 1.0},        # optional chi / omega / sp2 torsions
+        # "plane": {"weight": 1.0},          # optional; overlapping cistrans/torsion takes priority
     },
     "custom_restraints_config": [            # define your OWN restraint as a formula (DSL)
         {"name": "symmetric",               # keep two inter-domain distances equal
@@ -241,7 +243,7 @@ reference-side value as `ref1 and <selection>`, and define `refs.ref1` with `ref
 
 `angle_restraints_config` (3 groups, vertex = group 2), `dihedral_restraints_config`, and
 `improper_restraints_config` (both 4 groups, axis = group 2–3) restrain centroid geometry — distinct
-from the per-atom `angle` / `cistrans` *conformer* terms (internally these are the
+from the per-atom `angle` / `cistrans` / `torsion` *conformer* terms (internally these are the
 `group_angle` / `group_dihedral` / `group_improper` energy terms). Same four
 types as distance (`harmonic` / `flat-bottomed` / `flat-bottomed1` / `flat-bottomed2`),
 but targets are in **degrees** (`target_angle` / `target_dihedral` / `target_improper`). `weight` defaults to

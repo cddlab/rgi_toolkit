@@ -39,7 +39,7 @@ Chai's FASTA cannot carry the flag, so conformer opt-in lives **in the sidecar**
 `conformer_restraints` map keyed by chain id. Set each protein, DNA, RNA, or ligand
 chain independently; absent/false chains remain unrestrained. Chai drops
 intra-ligand bond orders at every layer, so the adapter rebuilds the molecule from the source SMILES
-(Kekulized → correct valence + aromaticity + stereo) — bond/angle/chiral/plane/cistrans all apply.
+(Kekulized → correct valence + aromaticity + stereo) — bond/angle/chiral/plane/cistrans/torsion are available when enabled.
 
 The sidecar below writes **every usable variable** with a concrete value; see
 [`config.md`](config.md) for the alternatives (restraint types, config-only `custom`
@@ -215,4 +215,5 @@ individual restraint section with a JSON/YAML file. Relative includes are resolv
 the input-file boundary (the working directory for Python input). See
 [shared file-reference syntax](config.md#external-configuration-files).
 An empty `conformer_restraints_config: {}` enables bond/angle/chiral/cistrans/vdw at
-weight 1 on opted-in molecules; plane requires an explicit positive weight.
+weight 1 on opted-in molecules; plane and torsion require an explicit positive weight.
+The cistrans term retains ligand E/Z; chi/omega/sp2 belong to torsion.

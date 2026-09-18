@@ -43,8 +43,9 @@ Each `run.sh` locates the workspace root, activates/uses the matching fork's env
 ## Notes
 
 - For conformer settings beyond these examples, see [the configuration guide](../docs/config.md#conformer_restraints_config-single-dict).
-  `cistrans` covers protein chi, peptide omega and acyclic sp2 torsions as well as ligand E/Z.
-  A configured monomer library supplies dictionary targets; otherwise the new polymer torsions
+  `cistrans` covers ligand E/Z and defaults to weight 1. Protein chi, peptide omega and
+  acyclic sp2 restraints use `torsion`, off by default; enable them with `torsion: {weight: 1}`.
+  A configured monomer library supplies dictionary targets; otherwise polymer torsions
   use documented RDKit-based approximations without downloading a dictionary. VdW now uses
   chemical contact distances, ESD 0.2 A (dummy 0.3 A), and default `scale: 1.0`.
   Existing VdW weights may need retuning against reference geometry terms.

@@ -193,7 +193,7 @@ themselves are shared across the batch.
 | conformer `bond` | `B` bond tuples | `O(B)` | `O(B)` | Each tuple gathers two atoms. |
 | conformer `angle` | `A` angle tuples | `O(A)` | `O(A)` | Each tuple gathers three atoms. |
 | conformer `chiral` | `C` chiral tuples | `O(C)` | `O(C)` | Each tuple gathers four atoms and evaluates one scalar triple product. |
-| conformer `cistrans` | `T` torsion tuples | `O(T)` | `O(T)` | Each tuple gathers four atoms. |
+| conformer `cistrans` / `torsion` | `T` tuples per term | `O(T)` | `O(T)` | Each tuple gathers four atoms. |
 | conformer `plane` | `P` plane groups, padded width `G` | `O(PG)` | `O(PG)` | One constant-size 3 x 3 eigendecomposition per plane group. |
 | `rmsd_restraints_config` | `R` entries, maximum padded fit/calc widths `F` / `C` | `O(R(F + C))` | `O(R(F + C))` | One 3 x 3 Kabsch SVD per entry; it is not `O(F^3)` or `O(C^3)`. |
 | built-in `refN and ...` variant | total prediction/reference group atoms `G`, reference-fit atoms `F` | `O(G + F)` per reference access | `O(G + F)` | These entries use a closure. A configured fit recomputes a 3 x 3 Kabsch transform; without a fit the `F` term is absent. |
@@ -441,7 +441,7 @@ angle_restraints_config:
 ## `dihedral_restraints_config` (list)
 
 The **dihedral of 4 group centroids**, about the axis through groups 2–3 — the group-centroid
-analogue of the distance restraint, distinct from the per-ligand-atom conformer `cistrans` term.
+analogue of the distance restraint, distinct from the per-atom conformer `cistrans` and `torsion` terms.
 CG-solved; `weight: 1.0` drives any group size, as for the angle.
 
 The measured quantity is the dihedral angle $\phi$ of the four centroids $c_1, c_2, c_3, c_4$ about
@@ -898,8 +898,9 @@ sub-block): residue-local aromatic rings — His/Phe/Tyr/Trp side chains and nuc
 the protein **peptide plane**, the canonical inter-residue four-atom group `{C, CA, O}` (previous
 residue) `+ {N}` (current), scored by the best-fit-plane `plane` term (this replaces the old
 peptide-plane zero-volume impropers that rode the `chiral` term — so a `chiral`-only config no longer
-flattens the peptide plane; set `plane: {weight: 1}`). Polymer `cistrans` includes side-chain χ,
+flattens the peptide plane; set `plane: {weight: 1}`). Polymer `torsion` includes side-chain χ,
 peptide ω and selected sp2 torsions, with dictionary or approximate targets as described below.
+Enable it explicitly with `torsion: {weight: 1}`; its default weight is 0.
 
 Top-level (shared by all terms): `start_sigma` (`+inf`), `stop_sigma` (`-1`) — or the step-window
 alternative `start_step` (`-inf`) / `stop_step` (`+inf`) (mutually exclusive with the sigma window).
@@ -907,12 +908,19 @@ alternative `start_step` (`-inf`) / `stop_step` (`+inf`) (mutually exclusive wit
 An omitted or null conformer block disables the entire layer. An empty mapping,
 `conformer_restraints_config: {}`, enables **bond, angle, chiral, cistrans and vdw at
 weight 1** on opted-in molecules. Their sub-blocks need only be written for overrides.
-**Plane defaults to weight 0 even when `plane: {}` is present**; enable it explicitly
-with `plane: {weight: 1}`. For every term, an explicit `weight <= 0` or `weight: null`
+**Plane and torsion default to weight 0 even when their empty sub-blocks are present**;
+enable them explicitly with `plane: {weight: 1}` or `torsion: {weight: 1}`.
+For every term, an explicit `weight <= 0` or `weight: null`
 disables its energy. To request only one term, explicitly disable the other default-on
 terms. This changes the former presence-based defaults; check older partial configs.
 
-When an enabled cistrans tuple's four atoms all belong to a conformer plane group,
+General χ/ω/sp2 restraints previously shared `cistrans`. They now belong to
+`torsion`, with independent weights, slack and energy diagnostics. Set
+`torsion: {weight: 1}` to retain those general torsions in older configurations.
+`cistrans` now controls only ligand acyclic double-bond E/Z geometry and remains
+enabled at weight 1. ESD normalization applies to both terms when requested.
+
+When an enabled cistrans or torsion tuple's four atoms all belong to a conformer plane group,
 the plane group is suppressed and the torsion is retained. Nonoverlapping plane groups
 remain active. Reference-derived and dictionary-derived geometry follow this same rule;
 local peptide conditions suppress the plane only in states where the torsion is active.
@@ -925,12 +933,13 @@ The original plane membership remains available for VdW topology exclusions. Sta
 | `angle` | `weight` (1.0), `slack` (0.0 rad) | bond angles toward ideal; targets within 0.5° of 180° use a stable cosine residual |
 | `chiral` | `weight` (1.0), `slack` (0.05 Å³ reference / 0.0 Å³ library) | signed chiral volume; the library may also allow either sign |
 | `plane` | `weight` (0.0), `slack` (0.0 Å) | **best-fit-plane** flatness of whole planar atom groups ([servalcat](https://github.com/keitaroyam/servalcat)-style) — penalises each group's out-of-plane RMS deviation toward 0. Fires on (a) aromatic/conjugated rings (whole ring) and (b) non-ring sp2 groups (an acyclic double-bond centre + its heavy neighbors: carbonyl / amide / ester / carboxyl / trisubstituted alkene). Group membership is confirmed by the reference conformer being coplanar (not the RDKit aromaticity flag). Set `plane: {weight: 1}` to activate |
-| `cistrans` | `weight` (1.0), `slack` (0.0 rad) | ligand E/Z, protein side-chain χ, peptide ω and acyclic sp2 torsions, with explicit periodicity |
+| `cistrans` | `weight` (1.0), `slack` (0.0 rad) | ligand acyclic double-bond E/Z geometry; period 1 preserves the stereoisomer |
+| `torsion` | `weight` (0.0), `slack` (0.0 rad) | protein side-chain χ, peptide ω and acyclic sp2 torsions, with explicit periodicity; enable with `torsion: {weight: 1}` |
 | `vdw` | `weight` (1.0), `mode` (`"both"`), `scale` (1.0), `dmax` (5.0 Å), `max_neighbors` (32), `neighbor_skin` (2.0 Å) | chemical contact distances and optional ESD-based clash penalties, with unrestricted CG steps and exact Verlet caches validated at every trial |
 
 ### ESD normalization of conformer geometry
 
-`conformer_restraints_config.use_esd` selects ESD normalization for **all six conformer
+`conformer_restraints_config.use_esd` selects ESD normalization for **all seven conformer
 terms**. It accepts a boolean and defaults to `false`, including when omitted. This covers
 reference targets, built-in links, dictionary geometry, approximate torsions, and both
 static and dynamic VdW contacts. By default, ordinary bond, angle, chiral and periodic
@@ -1013,7 +1022,7 @@ failed minimization; also examine convergence diagnostics and geometric deviatio
 ### `monomer_library` — refinement targets for polymers (not a term)
 
 `monomer_library` sits alongside the term blocks but builds nothing of its own: it changes
-where the **polymer** `bond` / `angle` / `chiral` / `plane` / `cistrans` and inter-residue
+where the **polymer** `bond` / `angle` / `chiral` / `plane` / `torsion` and inter-residue
 link targets and uncertainties come from. It also supplies VdW `type_energy` assignments and
 `ener_lib.cif` parameters for any covered atoms, including ligands and fixed background. Each
 desired energy term and moving entity still needs its normal opt-in.
@@ -1045,8 +1054,8 @@ conformer_restraints_config:
   bond: {}
   angle: {}
   chiral: {}
-  plane: {}
-  cistrans: {}
+  plane: {weight: 1}
+  torsion: {weight: 1}
 ```
 
 | key | type | default | meaning |
@@ -1072,14 +1081,15 @@ Dictionary ESD and user `slack` are separate. The energy formulas below assume
 - **Inverse-variance weighting:** bond, angle, torsion and chiral use
   `weight * (max(abs(deviation) - slack, 0) / ESD)**2`. Dictionary-derived `slack` defaults
   to zero for every term, including chiral. Explicit slack keeps its usual units: Å for bond
-  and plane, radians for angle and cistrans, Å³ for chiral. Angular dictionary targets and
+  and plane, radians for angle and torsion, Å³ for chiral. Angular dictionary targets and
   ESDs are both converted from degrees to radians.
 - **Plane:** with zero slack, the energy is `weight * sum(atom_plane_distance**2) / ESD**2`,
   using Gemmi's group ESD. Internally this scales the existing best-fit-plane RMS squared by
   the number of modeled atoms. Explicit plane slack still applies to the group's RMS.
   Named nucleobase planes and local peptide planes stay separate; the usual peptide group
   is `{CA, C, O}(previous) + {N}(current)`, without the next Cα.
-- **Torsion:** `omega` and labels beginning `sp2_sp2` are used, plus `chi*` for proteins.
+- **Torsion:** when `torsion` has positive weight, `omega` and labels beginning
+  `sp2_sp2` are used, plus `chi*` for proteins.
   Backbone φ/ψ and the complete nucleic-acid backbone torsion set are not enabled. The residual is
   `wrap(period * (angle - target)) / period`, with `period <= 0` treated as 1.
 - **Peptide state:** each sample chooses the nearer cis/trans omega target from its coordinates
@@ -1105,7 +1115,8 @@ weight conventions.
 
 ### Torsions without a monomer library
 
-An omitted or false `monomer_library` never downloads a dictionary. Standard-residue RDKit
+Enable general torsions with `torsion: {weight: 1}`. An omitted or false
+`monomer_library` never downloads a dictionary. Standard-residue RDKit
 templates supply chemical bond orders for protein χ and acyclic sp2 torsions; ligand source
 graphs supply the same classification for ligands. Only atoms already present are used.
 Unknown residues, missing χ atoms and degenerate χ references are logged and skipped.
@@ -1115,7 +1126,7 @@ Unknown residues, missing χ atoms and degenerate χ references are logged and s
 respectively. Acyclic conjugated sp2–sp2 single bonds use period 2 and ESD 5°; ligand targets
 come from the same relaxed, stereo-checked coordinates as the other ligand geometry.
 Peptide ω uses cis 0° / trans 180°, ESD 5°, with the nearest state fixed for each minimization.
-Double-bond E/Z restraints use ESD 5° and keep period 1, so a trans double bond never gains a
+The separate `cistrans` double-bond E/Z restraints use ESD 5° and keep period 1, so a trans double bond never gains a
 second cis minimum. These chemical approximations are not dictionary-derived uncertainties.
 
 ### `relax_force_field` — which force field idealises the ligand reference (not a term)
@@ -1129,7 +1140,7 @@ A predictor's cached ligand conformer is not refinement geometry either: boltz v
 cache Kekulé-localizes aromatic rings (~1.34/1.48 Å alternating), and other tools' `ref_pos` carries
 its own bond/angle idiosyncrasies. Measuring targets straight off it would just reproduce them. So
 the conformer is first **locally relaxed** — the fold is preserved, only local geometry idealises —
-and the bond/angle/chiral/cistrans/plane targets are measured off the relaxed copy.
+and the bond/angle/chiral/cistrans/torsion/plane targets are measured off the relaxed copy.
 
 ```yaml
 conformer_restraints_config:
@@ -1191,7 +1202,7 @@ Behaviour worth knowing:
   whose bond orders are real.
 - **The `plane` count can change with the force field.** Plane-group membership is confirmed by the
   **relaxed** conformer being coplanar within 0.1 Å, so a borderline-puckered ring can be restrained
-  under one force field and dropped under another. Every other count (bonds/angles/chirals/cistrans)
+  under one force field and dropped under another. Every other count (bonds/angles/chirals/cistrans/torsion)
   is topology-derived and must not move.
 - **Polymers are untouched.** Monomer-library and reference-conformer polymer residues are never
   force-field relaxed, so this setting cannot affect them.
@@ -1209,7 +1220,8 @@ quantity $x$:
 | `angle` | bond angle $\theta$ (radians) | $\theta_0$ |
 | `chiral` | signed volume $V = (a_1 - a_0)\cdot\big((a_2 - a_0)\times(a_3 - a_0)\big)$ | $V_0$ (handedness) |
 | `plane` | group's out-of-plane RMS deviation $\sqrt{\lambda_{\min}/N}$ ($\lambda_{\min}$ = smallest eigenvalue of the centred covariance) | $0$ (planar) |
-| `cistrans` | torsion $\phi$, residual $\operatorname{wrap}(n(\phi-\phi_0))/n$ | $\phi_0$ and periodicity $n$ |
+| `cistrans` | E/Z torsion $\phi$, residual $\operatorname{wrap}(\phi-\phi_0)$ | reference $\phi_0$, period 1 |
+| `torsion` | torsion $\phi$, residual $\operatorname{wrap}(n(\phi-\phi_0))/n$ | $\phi_0$ and periodicity $n$ |
 
 Conformer angles with `abs(target_degrees - 180) < 0.5` use
 `2 * weight * (1 + cos(theta))` instead of squared angle deviation. Packed reference and
@@ -1535,7 +1547,7 @@ $[-\pi, \pi]$ first. Write `wrap(dihedral(A,B,C,D) - t)**2` (harmonic), **not** 
 `harmonic(dihedral(A,B,C,D), t)`: the naïve form counts $\phi = +179^\circ$ against $t = -179^\circ$
 as a $358^\circ$ deviation (huge energy, and a gradient pointing the *long way* round) instead of the
 correct $2^\circ$. `wrap(x)` $= \mathrm{atan2}(\sin x, \cos x)$ is exactly the fold the
-built-in `dihedral_restraints_config` / `improper_restraints_config` / conformer `cistrans` apply internally — see the Math table.
+built-in `dihedral_restraints_config` / `improper_restraints_config` / conformer `cistrans` and `torsion` apply internally — see the Math table.
 For a window, wrap relative to the centre: `flat_bottomed(wrap(dihedral(...) - centre), -w, w)` — and
 because the deviation is wrapped, this window **can straddle $\pm 180^\circ$** (the built-in
 flat-bottomed dihedral cannot). Note `t` / `centre` are in **radians** (a custom formula does no degree

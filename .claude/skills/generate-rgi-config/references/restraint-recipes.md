@@ -103,7 +103,8 @@ group; explicit indices may select prediction groups only.
 ## 3. Conformer — "keep the ligand chemically sensible"
 
 Holds a **ligand** near its ideal RDKit geometry while the pocket forms: bond lengths,
-bond angles, chirality (`chiral`), cis/trans of double bonds (`cistrans`), best-fit-plane
+bond angles, chirality (`chiral`), cis/trans of double bonds (`cistrans`), optional
+sp2 single-bond torsions (`torsion`), best-fit-plane
 flatness of rings + sp2 groups (`plane`, opt-in), and clash avoidance (`vdw`). It is a single
 dict (not a list).
 
@@ -112,22 +113,24 @@ dict (not a list).
 ```yaml
 conformer_restraints_config:
   start_sigma: 1            # often applied late, once the pocket exists (optional)
+  # torsion: {weight: 1.0}  # OFF by default; general chi/omega/sp2 torsions
   # plane: {weight: 1.0}  # OFF by default; add it to flatten aromatic rings + sp2 groups (best-fit plane)
 ```
 
 An empty conformer block enables bond/angle/chiral/cistrans/vdw at weight 1. Omit their
 sub-blocks unless overriding values; disable unwanted terms explicitly with weight 0.
-Plane stays off even with `plane: {}` and requires an explicit positive weight.
-Overlapping conformer planes yield to cistrans; unrelated planes remain active.
+Plane and torsion stay off even with empty sub-blocks and require explicit positive weights.
+Overlapping conformer planes yield to enabled cistrans/torsion tuples; unrelated planes remain active.
 
 > ⚠ **A conformer block does nothing without the per-ligand opt-in flag** (placement
 > differs per tool — see `tools.md`). This is the single most common silent no-op. Always
 > write the opt-in alongside the block.
 
-Ligand `cistrans` covers acyclic non-aromatic double bonds and conjugated single
-sp2-sp2 axes; it requires real bond orders. Enabled `plane` covers aromatic/conjugated
-rings and non-ring sp2 groups, except groups containing all four atoms of an active
-cistrans torsion. Report the built spec's counts, which depend on the modeled atoms,
+Ligand `cistrans` covers acyclic non-aromatic double bonds; `torsion` covers conjugated
+single sp2-sp2 axes. Both require real bond orders. For polymers, `torsion` covers
+chi/omega/sp2. Enabled `plane` covers aromatic/conjugated rings and non-ring sp2 groups,
+except groups containing all four atoms of an active cistrans or torsion tuple. Report the
+built spec's counts, which depend on the modeled atoms,
 reference relaxation, dictionary geometry, and overlap filtering.
 
 ---

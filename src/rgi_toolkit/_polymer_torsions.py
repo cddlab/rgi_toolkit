@@ -131,7 +131,7 @@ def add_polymer_torsions(targets, residues, connections, coords):
     """Add approximate torsions only where the configured library has no coverage."""
     from rgi_toolkit.monlib_geom import PeptideChoice
 
-    before = len(targets.terms["cistrans"])
+    before = len(targets.terms["torsion"])
     failures = []
     for meta in residues:
         if targets.atoms.issuperset(meta["names"].values()) and meta["names"]:
@@ -165,9 +165,9 @@ def add_polymer_torsions(targets, residues, connections, coords):
             if row is None:
                 failures.append(context + f" chi{number + 1} (degenerate reference)")
             else:
-                targets.terms["cistrans"].append(row)
+                targets.terms["torsion"].append(row)
                 axes.add(tuple(sorted(indices[1:3])))
-        targets.terms["cistrans"].extend(sp2_torsions(mol, mapping, coords, axes))
+        targets.terms["torsion"].extend(sp2_torsions(mol, mapping, coords, axes))
     for previous, current in connections:
         if (
             current["mol_type"] != "protein"
@@ -191,7 +191,7 @@ def add_polymer_torsions(targets, residues, connections, coords):
         selector = len(targets.peptides)
         targets.peptides.append(PeptideChoice(indices, -math.pi, 0.0))
         for cis, value in ((0, -math.pi), (1, 0.0)):
-            targets.terms["cistrans"].append(
+            targets.terms["torsion"].append(
                 GeometryTarget(
                     indices,
                     value,
@@ -200,8 +200,8 @@ def add_polymer_torsions(targets, residues, connections, coords):
                     conditions=((selector, cis),),
                 )
             )
-    targets.terms["cistrans"] = deduplicate(targets.terms["cistrans"])
-    count = len(targets.terms["cistrans"]) - before
+    targets.terms["torsion"] = deduplicate(targets.terms["torsion"])
+    count = len(targets.terms["torsion"]) - before
     if count:
         logger.info(
             "[rgi_toolkit] approximate polymer torsions: %d rows (including cis/trans alternatives)",

@@ -23,6 +23,7 @@ from rgi_toolkit.spec import (
     GroupPlaneArrays,
     PlaneArrays,
     RestraintSpec,
+    TorsionArrays,
     VdwArrays,
 )
 
@@ -223,6 +224,14 @@ def _make_spec(
         chiral=chiral,
         plane=plane,
         cistrans=cistrans,
+        torsion=TorsionArrays(
+            idx=np.array([[8, 9, 10, 11], [1, 3, 5, 7]], dtype=np.int64),
+            phi0=np.array([0.3, -1.4]),
+            slack=np.array([0.02, 0.04]),
+            weight=np.array([0.25, 0.4]),
+            mask=np.array([1.0, 0.0]),
+            period=np.array([2, 3]),
+        ),
         vdw=vdw,
         distance=distance if include_distance else None,
         group_angle=group_angle,
@@ -607,7 +616,9 @@ def test_group_plane_grad_parity_torch_jax():
 
     spec = _make_spec(include_groups=False, include_distance=False)
     # keep ONLY group_plane so the comparison isolates this term
-    spec.bond = spec.angle = spec.chiral = spec.cistrans = spec.vdw = spec.plane = None
+    spec.bond = spec.angle = spec.chiral = spec.cistrans = spec.torsion = spec.vdw = (
+        spec.plane
+    ) = None
     pos = _positions()
 
     prep_np = numpy_energy.prepare_spec(spec)

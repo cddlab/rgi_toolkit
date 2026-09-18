@@ -58,7 +58,8 @@ def chiral_energy(ops, positions, idx, vol0, slack, weight, mask, both=None):
     return ops.sum(weight * delta * delta * mask)
 
 
-def cistrans_energy(ops, positions, idx, phi0, slack, weight, mask, period=None):
+def torsion_energy(ops, positions, idx, phi0, slack, weight, mask, period=None):
+    """Shared periodic dihedral penalty for torsion and E/Z restraints."""
     phi = G.dihedral_points(
         ops,
         positions[..., idx[:, 0], :],
@@ -70,6 +71,9 @@ def cistrans_energy(ops, positions, idx, phi0, slack, weight, mask, period=None)
     deviation = G.wrap(ops, period * (phi - phi0)) / period
     delta = G.symmetric_flat_bottom_delta(ops, deviation, slack)
     return ops.sum(weight * delta * delta * mask)
+
+
+cistrans_energy = torsion_energy
 
 
 def _safe_vdw_diff(ops, diff, first, second):

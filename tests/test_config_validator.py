@@ -12,14 +12,26 @@ from rgi_toolkit.config import RestraintsConfig
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.parametrize(
+    "conformer, expected",
+    [
+        ({}, "bond, angle, chiral, cistrans, vdw"),
+        ({"torsion": {}}, "bond, angle, chiral, cistrans, vdw"),
+        ({"torsion": {"weight": 1}}, "bond, angle, chiral, cistrans, torsion, vdw"),
+        (
+            {"cistrans": {"weight": 0}, "torsion": {"weight": 1}},
+            "bond, angle, chiral, torsion, vdw",
+        ),
+    ],
+)
 def test_validator_resolves_chai_sidecar_before_optin_check(
-    validator, tmp_path, capsys
+    validator, tmp_path, capsys, conformer, expected
 ):
     (tmp_path / "sidecar.json").write_text(
         json.dumps(
             {
                 "conformer_restraints": {"B": True},
-                "conformer_restraints_config": {},
+                "conformer_restraints_config": conformer,
             }
         )
     )
@@ -27,7 +39,7 @@ def test_validator_resolves_chai_sidecar_before_optin_check(
     wrapper.write_text("config_path: sidecar.json\n")
     assert validator["main"]([str(wrapper)]) == 0
     output = capsys.readouterr().out
-    assert "conformer terms: bond, angle, chiral, cistrans, vdw" in output
+    assert f"conformer terms: {expected}\n" in output
     assert "NO sequence entity opts in" not in output
 
 

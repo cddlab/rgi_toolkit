@@ -208,7 +208,7 @@ the setup spec counts (13); undeclared deps / CPU torch builds (14).
   jax agree on energy and gradient, so whichever backend the tool uses is sound.
 - **GPU (real device, usually via the tool's batch/sbatch harness)**:
   - **first, read the `setup` spec counts** (`built spec: bonds=.. angles=..
-    chirals=.. plane=.. cistrans=.. distances=.. rmsd=.. group_angle=..
+    chirals=.. plane=.. cistrans=.. torsion=.. distances=.. rmsd=.. group_angle=..
     group_dihedral=.. vdw=..`) and confirm the count is non-zero for every
     restraint type you requested — a type that built 0 restraints reports a perfect
     `finalize` energy of `0.00000`, so near-zero energy alone does NOT prove a
@@ -216,7 +216,7 @@ the setup spec counts (13); undeclared deps / CPU torch builds (14).
     in that string — it logs a SEPARATE `base_pair=P pairs -> H h-bonds + C coplanar
     groups` line and also feeds the `distances=` / `plane=` counts;)
   - distance: the predicted structure's centroid distance reaches the target;
-  - conformer: spec counts non-zero AND `finalize` bond/angle/chiral/plane/cistrans
+  - conformer: spec counts non-zero AND `finalize` bond/angle/chiral/plane/cistrans/torsion
     energies are small, or the ligand RMSD differs between restraint-on and restraint-off runs;
   - batch: put two structures with *different* configs in one run and confirm
     each uses its own (the decisive test that there is no cross-contamination).

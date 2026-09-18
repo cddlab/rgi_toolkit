@@ -79,7 +79,7 @@ def _energy_grad(spec, coords, backend):
         ("angle", GeometryTarget((0, 1, 2), 1.8, 0.05)),
         ("chiral", GeometryTarget((0, 1, 2, 3), 0.8, 0.04, both=True)),
         ("plane", GeometryTarget((0, 1, 2, 3, 4), 0.0, 0.02)),
-        ("cistrans", GeometryTarget((0, 1, 2, 3), -0.7, 0.08, period=3)),
+        ("torsion", GeometryTarget((0, 1, 2, 3), -0.7, 0.08, period=3)),
     ],
 )
 @pytest.mark.parametrize("use_esd", [True, False])
@@ -138,7 +138,7 @@ def test_torsion_uses_periodic_wells_without_changing_angular_esd(period):
     target = GeometryTarget(
         (0, 1, 2, 3), math.radians(30), math.radians(5), period=period
     )
-    spec = _pack({"cistrans": [target]})
+    spec = _pack({"torsion": [target]})
     for turn in range(n):
         coords = _torsion_coords(30 + 360 * turn / n + 10)
         assert _energy_grad(spec, coords, "numpy")[0] == pytest.approx((10 / 5) ** 2)
@@ -201,7 +201,7 @@ def _switching_spec():
                 GeometryTarget((4, 5), distance, 0.1, conditions=((0, cis),))
                 for cis, distance in [(0, 1), (1, 2)]
             ],
-            "cistrans": [GeometryTarget((0, 1, 2, 3), 0, 0.2)],
+            "torsion": [GeometryTarget((0, 1, 2, 3), 0, 0.2)],
         },
         [PeptideChoice((0, 1, 2, 3), -math.pi, 0)],
     )
@@ -281,7 +281,7 @@ def test_minimize_freezes_state_across_searches_and_vdw_blocks_then_reselects(
     if custom:
         from tests.test_custom import _spec_from_entries
 
-        spec.cistrans = None
+        spec.torsion = None
         spec.custom = _spec_from_entries(
             [
                 {
@@ -390,7 +390,7 @@ def test_compiled_cuda_dictionary_energy_and_gradients_match_eager():
     append_library_arrays(
         spec, additions, {"plane": {"weight": 1}}, {i: i for i in range(6)}
     )
-    spec.cistrans.period[:] = 3
+    spec.torsion.period[:] = 3
     base = torch_energy.prepare_spec(spec, device="cuda", dtype=torch.float64)
     value_and_grad = torch.func.grad_and_value(torch_energy.total_energy, argnums=0)
     compiled = torch.compile(value_and_grad, fullgraph=True)

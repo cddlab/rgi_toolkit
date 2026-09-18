@@ -297,7 +297,7 @@ def test_each_peptide_link_family_has_its_own_cis_and_trans_targets(
         assert row.value == pytest.approx(expected - 0.02 * cis)
         (omega,) = [
             r
-            for r in _active(targets.terms["cistrans"], [cis])
+            for r in _active(targets.terms["torsion"], [cis])
             if r.atoms == (1, 2, 6, 7)
         ]
         assert omega.value == pytest.approx(0 if cis else -math.pi)
@@ -309,7 +309,7 @@ def test_chi_omega_and_sp2_selected_with_dictionary_sign_and_period(
     peptide_library,
 ):
     targets = _targets(peptide_library, _residues(("AAA",)))
-    rows = targets.terms["cistrans"]
+    rows = targets.terms["torsion"]
     assert len(rows) == 3
     (sp2,) = [r for r in rows if r.atoms == (0, 1, 2, 3)]
     assert sp2.value == pytest.approx(-math.radians(37))
@@ -339,7 +339,7 @@ def test_gemmi_add_change_delete_operations_do_not_mutate_shared_components(
     assert angles[((1, "N"), (1, "CA"), (1, "C"))].esd == pytest.approx(3)
     assert ((1, "N"), (1, "CA"), (1, "CB")) not in angles
     assert angles[((1, "N"), (1, "C"), (1, "O"))].value == pytest.approx(125)
-    torsions = {r.label: r for r in rows["cistrans"]}
+    torsions = {r.label: r for r in rows["torsion"]}
     assert "phi" not in torsions and "sp2_sp2_leaving" not in torsions
     assert (
         torsions["sp2_sp2_changed"].value,
@@ -401,7 +401,7 @@ def test_missing_cis_dictionary_never_forces_trans_omega(peptide_library, caplog
         peptide_library, _residues(("AAA", "AAA")), on_missing="fallback"
     )
     assert not targets.peptides
-    assert not any(r.atoms == (1, 2, 6, 7) for r in targets.terms["cistrans"])
+    assert not any(r.atoms == (1, 2, 6, 7) for r in targets.terms["torsion"])
     assert "omega omitted" in caplog.text
 
 

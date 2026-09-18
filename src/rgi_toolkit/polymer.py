@@ -288,7 +288,7 @@ def build_polymer_geometry(
 
     targets = _load_library(conformer_config, residue_meta, connections)
     cohere_mixed_library_links(targets, residue_meta, ref_pos)
-    if conformer_weight(conformer_config, "cistrans") > 0:
+    if conformer_weight(conformer_config, "torsion") > 0:
         from rgi_toolkit._polymer_torsions import add_polymer_torsions
 
         add_polymer_torsions(targets, residue_meta, connections, ref_pos)

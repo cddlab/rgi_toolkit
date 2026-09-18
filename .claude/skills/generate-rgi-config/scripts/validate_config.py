@@ -242,7 +242,7 @@ def _validate_one(location: str, cfg: dict, enclosing: dict, *, base_dir=None) -
     conf = rc.conformer_config
     conf_terms = [
         t
-        for t in ("bond", "angle", "chiral", "plane", "cistrans", "vdw")
+        for t in ("bond", "angle", "chiral", "plane", "cistrans", "torsion", "vdw")
         if conformer_weight(conf, t) > 0
     ]
     if conf_terms:

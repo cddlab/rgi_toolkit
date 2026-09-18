@@ -262,4 +262,5 @@ individual restraint section with a JSON/YAML file. Relative includes are resolv
 the input-file boundary (the working directory for Python input). See
 [shared file-reference syntax](config.md#external-configuration-files).
 An empty `conformer_restraints_config: {}` enables bond/angle/chiral/cistrans/vdw at
-weight 1 on opted-in molecules; plane requires an explicit positive weight.
+weight 1 on opted-in molecules; plane and torsion require an explicit positive weight.
+The cistrans term retains ligand E/Z; chi/omega/sp2 belong to torsion.

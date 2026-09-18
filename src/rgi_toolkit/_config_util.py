@@ -35,14 +35,16 @@ def finite_float(value, label: str) -> float:
 
 
 def conformer_weight(config: dict | None, key: str) -> float:
-    """Five default-on terms; plane requires an explicit positive weight.
+    """Five default-on terms; plane and torsion require a positive weight.
 
     None disables the entire conformer layer; an empty mapping enables defaults.
     An explicit null weight disables one term, as does any nonpositive value.
     """
     if config is None:
         return 0.0
-    weight = (config.get(key) or {}).get("weight", 0.0 if key == "plane" else 1.0)
+    weight = (config.get(key) or {}).get(
+        "weight", 0.0 if key in ("plane", "torsion") else 1.0
+    )
     return 0.0 if weight is None else float(weight)
 
 

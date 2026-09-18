@@ -11,9 +11,9 @@ from rgi_toolkit.spec import (
     AngleArrays,
     BondArrays,
     ChiralArrays,
-    CisTransArrays,
     PeptideStateArrays,
     PlaneArrays,
+    TorsionArrays,
 )
 
 
@@ -78,7 +78,7 @@ def append_library_arrays(spec, targets, config, g2l, *, reference_plane_conditi
                     **common,
                 )
             else:
-                array = CisTransArrays(
+                array = TorsionArrays(
                     idx=idx,
                     phi0=value,
                     period=np.asarray([r.period for r in rows], dtype=np.int64),
