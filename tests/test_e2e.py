@@ -619,7 +619,12 @@ def test_conformer_targets_and_minima_match_scipy(solver, kind, capsys):
     diagnostic(cr, out, solver, capsys, actual)
 
 
-def test_intramolecular_vdw_matches_dense_scipy(solver, capsys):
+@pytest.mark.parametrize(
+    "scale_config, scale",
+    [({}, 0.75), ({"scale": 1.0}, 1.0)],
+    ids=["default-scale", "unit-scale"],
+)
+def test_intramolecular_vdw_matches_dense_scipy(solver, capsys, scale_config, scale):
     mol, reference = ligand("CCCC")
     coords = reference.copy()
     coords[0], coords[3] = [0, 0, 0], [2, 0, 0]
@@ -634,7 +639,7 @@ def test_intramolecular_vdw_matches_dense_scipy(solver, capsys):
             "conformer_restraints_config": {
                 "relax_force_field": {"ligand": "none"},
                 "use_esd": True,
-                "vdw": {"mode": "intramolecular", "weight": 0.04},
+                "vdw": {"mode": "intramolecular", "weight": 0.04, **scale_config},
                 **{
                     key: {"weight": 0}
                     for key in ("bond", "angle", "chiral", "cistrans")
@@ -643,13 +648,14 @@ def test_intramolecular_vdw_matches_dense_scipy(solver, capsys):
         },
         solver,
     )
-    # Only terminal carbons are a nonexcluded 1-4 pair: (1.94 - .15) * 2 = 3.58 A.
+    # Only terminal carbons are a nonexcluded 1-4 pair: (1.94 - .15) * 2 = 3.58 A before scaling.
+    contact = 3.58 * scale
     assert len(cr.spec.vdw.idx) == 1
     assert cr.spec.vdw_config is None
 
     def objective(flat):
         points = flat.reshape(4, 3)
-        return min(np.linalg.norm(points[0] - points[3]) - 3.58, 0.0) ** 2
+        return min(np.linalg.norm(points[0] - points[3]) - contact, 0.0) ** 2
 
     diagnostic(cr, coords, solver, capsys, objective(coords.ravel()))
     result = scipy_solution(objective, coords, solver[1])
@@ -661,14 +667,21 @@ def test_intramolecular_vdw_matches_dense_scipy(solver, capsys):
     diagnostic(cr, out, solver, capsys, objective(out.ravel()))
 
 
-def test_dynamic_vdw_new_contacts_match_dense_scipy(solver, capsys):
+@pytest.mark.parametrize(
+    "scale_config, scale",
+    [({}, 0.75), ({"scale": 1.0}, 1.0)],
+    ids=["default-scale", "unit-scale"],
+)
+def test_dynamic_vdw_new_contacts_match_dense_scipy(
+    solver, capsys, scale_config, scale
+):
     mol = Chem.MolFromSmiles("C")
     mol.AddConformer(Chem.Conformer(1))
     ids = (1, 3, 5)
     coords = np.full((6, 3), 20.0)
     # Initial energy lies below the far-side stationary point. All monotone solvers
     # can therefore be compared in the same basin, with no initial clash.
-    coords[list(ids)] = [[1, 0, 0], [8, 0, 0], [15, 0, 0]]
+    coords[list(ids)] = [[2, 0, 0], [7, 0, 0], [15, 0, 0]]
     elements = np.zeros(6, dtype=int)
     elements[list(ids)] = 6
     adapter = Adapter(
@@ -700,6 +713,7 @@ def test_dynamic_vdw_new_contacts_match_dense_scipy(solver, capsys):
                     "weight": 0.04,
                     "dmax": 0.5,
                     "neighbor_skin": 0.0,
+                    **scale_config,
                 },
             },
             "custom_restraints_config": [{"fn": pull}],
@@ -711,18 +725,22 @@ def test_dynamic_vdw_new_contacts_match_dense_scipy(solver, capsys):
 
     # Both atoms of an ordinary carbon contact have a 1.94 A radius. The chosen
     # weight cancels ESD**2 = .2**2; score EVERY background on every reference call.
+    contact = 3.88 * scale
+    assert np.linalg.norm(coords[1] - coords[3]) > contact
+
     def objective(point):
         distances = np.linalg.norm(point - coords[[3, 5]], axis=1)
         return np.sum((point - [5, 0, 0]) ** 2) + np.sum(
-            np.minimum(distances - 3.88, 0) ** 2
+            np.minimum(distances - contact, 0) ** 2
         )
 
     diagnostic(cr, coords, solver, capsys, objective(coords[1]))
     result = scipy_solution(objective, coords[1], solver[1])
     assert np.max(np.abs(finite_gradient(objective, result.x))) < 1e-6, result
-    np.testing.assert_allclose(result.x, [4.56, 0, 0], atol=1e-6)
+    np.testing.assert_allclose(result.x, [(5 + 7 - contact) / 2, 0, 0], atol=1e-6)
     out = drive(cr, coords, solver)[-1]
     np.testing.assert_allclose(out[1], result.x, rtol=0, atol=1e-3)
+    assert np.linalg.norm(out[1] - coords[3]) < contact
     assert abs(objective(out[1]) - result.fun) < 1e-6
     assert np.max(np.abs(finite_gradient(objective, out[1]))) < 1e-3
     np.testing.assert_array_equal(out[[0, 2, 3, 4, 5]], coords[[0, 2, 3, 4, 5]])
