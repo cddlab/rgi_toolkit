@@ -23,11 +23,11 @@ script because it is idempotent and a fresh clone starts with none of them.
 
 Two entries are counter-intuitive and worth stating outright:
 
-- **`transformers_restr`'s upstream is `Biohub/transformers`, NOT `huggingface/transformers`.**
-  The fork's history does reach back to huggingface's initial commit, so the repo *looks*
-  like plain transformers — but `esmfold2` (the model RGI hooks into) exists only in the
-  Biohub fork. Pointing `upstream` at huggingface would pull a firehose of unrelated
-  commits and would never deliver esmfold2 updates.
+- **`transformers_restr`'s configured upstream is the historical `Biohub/transformers` fork.**
+  On 2026-09-19 this repository returned 404 even with authenticated access. Preserve
+  the checkout and report the unavailable upstream; do not silently retarget it to
+  `huggingface/transformers`. Hugging Face now ships ESMFold2, but it is a different
+  integration baseline. Current `esm_restr` uses its own native sampling loop.
 - **`esm_restr`'s upstream is `Biohub/esm`** — the repo formerly known as
   `evolutionaryscale/esm`. The old URL still redirects, so both fetch fine; prefer the
   current name so the remote doesn't depend on a redirect.
@@ -45,13 +45,14 @@ is for orienting before you start.
 | `chai-lab_restr` | `chai_lab/chai1.py` (loop hooks + sidecar YAML load); `data/dataset/all_atom_feature_context.py`; `requirements.in` |
 | `alphafold3_restr` | `model/network/diffusion_head.py` (loop hook inside the scan); `model/restraints/` (new dir: `adapter.py`, `combined_restraints.py`); `common/folding_input.py`; `run_alphafold.py` (**see the AF3 warning below**); `pyproject.toml`, `uv.lock` |
 | `openfold-3_restr` | `core/model/structure/diffusion_module.py` (loop hook); `projects/of3_all_atom/model.py`; `core/data/primitives/structure/query.py`, `projects/of3_all_atom/config/inference_query_format.py` (config); `core/utils/tensor_utils.py`; `pixi.toml` |
-| `esm_restr` | `esm/models/esmfold2/prepare_input.py`, `processor.py`, `conformers.py`; `esm/utils/structure/input_builder.py`; `pyproject.toml`, `pixi.lock` |
+| `esm_restr` | `esm/models/esmfold2/layers.py` (native loop hook), `model.py`, `experimental.py`, `prepare_input.py`, `processor.py`, `conformers.py`; `esm/utils/structure/input_builder.py`; `pyproject.toml`, `pixi.lock` |
 | `transformers_restr` | `src/transformers/models/esmfold2/modeling_esmfold2_common.py` (**the loop hook**), `modeling_esmfold2.py`, `modeling_esmfold2_experimental.py` |
 
-Note that the two ESMFold2 repos are coupled: the model and diffusion loop live in
-`transformers_restr`, the user API in `esm_restr`. An upstream sync of one may require the
-other. If `Biohub/transformers` changes `DiffusionStructureHead.sample`, that is the exact
-function RGI hooks — expect a conflict and re-derive the hook rather than force-fitting it.
+Since ESM 3.4.1, the model, diffusion loop and user API all live in `esm_restr`.
+Both native model variants forward restraints into `DiffusionStructureHead.sample`.
+The old `transformers_restr` dependency is removed; Transformers 4.57.6 remains a
+standard utility dependency. Preserve the native hook when synchronizing ESM.
+The optional `EsmFold2HFAdapter` does not support RGI.
 
 ## Per-tool gotchas
 
@@ -150,8 +151,8 @@ git -C <tool> grep -c -i 'rgi' rgi-integration -- pixi.lock          # after
 The AF3, OpenFold3, and ESM locks contain the `rgi-toolkit` distribution and its Git
 revision. Verify the distribution name, repository URL, and resolved commit together:
 a pre-rename commit still contains the old package metadata and namespace, even when
-accessed through the new repository URL. ESM also locks the Transformers integration;
-refresh that revision when its hook source changes.
+accessed through the new repository URL. Current ESM locks the standard Transformers
+package rather than a Git fork; the RGI sampling hook is in ESM itself.
 
 Git will sometimes **auto-merge a lock with no conflict** (this happened to esm's
 `pixi.lock` and af3's `uv.lock` on 2026-07-17). That result is not resolver output and may

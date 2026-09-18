@@ -10,44 +10,45 @@ ESMFold2 + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided
 > writes a validated `restraints_config` where this tool expects it. Use it when hand-writing the
 > full config below is unnecessary.
 
-ESMFold2 (ESM3-based) folds in **single-sequence mode** (a language-model folder — no MSA, hence no
+ESMFold2 folds in **single-sequence mode** (a language-model folder — no MSA, hence no
 MSA-server option).
 
-ESMFold2 spans **two** repos — install both on `rgi-integration`:
-- **`transformers_restr`** — the model + diffusion loop
-  (`src/transformers/models/esmfold2/modeling_esmfold2_common.py`, where the per-step
-  `restraints.minimize` hook lives).
-- **`esm_restr`** — the user API `ESMFold2InputBuilder.fold` (`esm/models/esmfold2/`), which builds
-  the adapter + `CombinedRestraints` and threads restraints through `forward()` into `sample()`.
+Use **`esm_restr` on `rgi-integration`**. Since ESM 3.4.1, the native model and
+diffusion loop live in `esm/models/esmfold2/`. `ESMFold2InputBuilder.fold` builds
+one adapter and `CombinedRestraints` per input, then passes it through the model
+to `DiffusionStructureHead.sample` in `layers.py`. The hook minimizes the
+denoised coordinates before rigid alignment and integration, with the pre-churn
+sigma and a zero-based step index.
+
+Both native `EsmFold2Model` and `EsmFold2ExperimentalModel` use this hook.
+The optional `EsmFold2HFAdapter` does not support RGI; use a native model when
+passing `restraints_config`. The historical `transformers_restr` fork is no
+longer needed by this integration.
 
 ## Installation
 
-ESMFold2 uses a **pixi** environment. Both engines are declared as dependencies in `esm_restr`'s
-`pyproject.toml`: the **`transformers_restr`** fork (installed as the `transformers` package — it
-carries the per-step `restraints.minimize` hook) and the `rgi_toolkit` engine. So `pixi install` pulls
-both, with no extra steps. Run on a CUDA GPU (RTX 4090 / sm_89; this pixi env's torch is cu124, no
-Blackwell sm_120 kernels).
+ESMFold2 uses a **pixi** environment. `esm_restr`'s `pyproject.toml` installs
+the native model and `rgi_toolkit`. The upstream package selects PyTorch 2.11
+and Transformers 4.57.6; Transformers supplies shared utilities rather than
+the RGI sampling loop. Use a CUDA device compatible with the installed PyTorch
+build for production inference.
 
 ```bash
-git clone https://github.com/cddlab/esm_restr.git
+git clone --branch rgi-integration https://github.com/cddlab/esm_restr.git
 cd esm_restr
-pixi install                                     # pulls transformers_restr (hooked) + rgi_toolkit
+pixi install
 ```
-
-To use Blackwell (sm_120): add a cu128 `[tool.pixi.pypi-options]` extra-index + `pixi update torch`
-and remove the cu124-pinned `cuequivariance` (esmfold2 falls back to pure torch).
 
 ### Co-development
 
-Clone `transformers_restr` / `rgi_toolkit` as siblings and override the git deps AFTER `pixi install`
-(e.g. `pixi run python -m pip install -e ../RGI-toolkit`). Editing the **esmfold2 hook** is the one
-catch: `pip install -e ../transformers_restr` does **not** win over the installed `transformers`
-(same package name → no editable finder), so copy the model dir over and assert the hook:
+Clone `RGI-toolkit` alongside `esm_restr`, then install both editably in a uv
+environment. The native ESM source contains the sampling hook, so edits take
+effect directly:
 
 ```bash
-SP=$(pixi run python -c "import transformers,os;print(os.path.dirname(transformers.__file__))")
-cp -rf ../transformers_restr/src/transformers/models/esmfold2/. "$SP/models/esmfold2/"
-pixi run python -c "import inspect; from transformers.models.esmfold2 import modeling_esmfold2_common as m; assert 'restraints.minimize' in inspect.getsource(m), 'esmfold2 hook missing — copy-over failed'"
+uv venv --python 3.12
+uv pip install -e . -e ../RGI-toolkit
+uv run --no-project python restr_example.py
 ```
 
 ## Configuration
@@ -87,11 +88,10 @@ Because ESMFold2's API is already Python, the custom **code path**
 
 from __future__ import annotations
 
-from transformers.models.esmfold2.modeling_esmfold2 import ESMFold2Model
-
 from esm.models.esmfold2 import (
     DNAInput,
     ESMFold2InputBuilder,
+    EsmFold2Model,
     LigandInput,
     ProteinInput,
     RNAInput,
@@ -213,7 +213,7 @@ RESTRAINTS_CONFIG = {
 
 
 def main() -> None:
-    model = ESMFold2Model.from_pretrained("biohub/ESMFold2").cuda()
+    model = EsmFold2Model.from_pretrained("biohub/ESMFold2").cuda()
     model.train(False)  # inference / eval mode
 
     spi = StructurePredictionInput(
@@ -246,28 +246,27 @@ if __name__ == "__main__":
 
 ## Run
 
-Save as `run_restr_example.sh` and run it on a GPU machine (`bash run_restr_example.sh`). A fresh
-`pixi install` ships the hooked transformers (the `transformers_restr` dep), so the runner is just
-build-env + fold:
+Save as `run_restr_example.sh` in `esm_restr` and run it on a GPU machine
+(`bash run_restr_example.sh`):
 
 ```bash
 #!/bin/bash
-# ESMFold2 RGI example runner (pixi env). Run on an sm_89 CUDA GPU (RTX 4090): the pixi
-# env's torch is cu124 (no Blackwell sm_120 kernels).
+# ESMFold2 RGI example runner. Run on a CUDA compute node.
 set -e
 
-pixi install                     # pulls transformers_restr (hooked) + rgi_toolkit
+pixi install
 pixi run python restr_example.py
 ```
 
 ## Verify results
 
 With `verbose: True`, the `setup` log prints `built spec: n_active=.. bonds=.. ... distances=..
-rmsd=.. group_angle=.. group_dihedral=..` — confirm the counts are non-zero. The esm pixi env has no
-gemmi, so run the centroid check with another tool's venv: `../chai-lab_restr/.venv/bin/python
-../check_dist.py out_esm.cif`. If setup/finalize log but the structure is unchanged (an unrestrained
-"stall"), the imported `transformers` lacks the esmfold2 hook — confirm the `transformers_restr` dep
-installed (a co-dev editable needs the copy-over from the Install section).
+rmsd=.. group_angle=.. group_dihedral=..` — confirm the configured terms are present.
+Check final residuals and measure the requested geometry from `out_esm.cif`.
+If the hook is missing, confirm that `esm_restr` is on `rgi-integration` and
+that the model comes from `esm.models.esmfold2`. The sampler and API tests in
+`esm_restr/tests/models/` cover unchanged no-op sampling, pre-churn gates,
+per-input isolation, and distance optimization for multiple samples.
 
 ## External restraint configuration
 

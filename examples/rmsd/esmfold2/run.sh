@@ -1,9 +1,8 @@
 #!/bin/bash
 # esmfold2 RGI example -- dual-ref RMSD morph -> midpoint of 1GGG(open)/1WDN(closed), target 3.0 A
-# Restraint config = bench-rgi minimal; MSA is fetched from a server so the example is
-# self-contained. (AlphaFold3 is the exception -- it needs external model params + DBs.)
+# ESMFold2 uses single-sequence input and downloads model weights when needed.
 # GPU only: run on a GPU compute node (not a shared login node).
-# Requires the esm_restr (+ transformers_restr) checkout to exist as a sibling of rgi_toolkit/.
+# Requires esm_restr on rgi-integration alongside RGI-toolkit.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WS="$HERE"; while [ "$WS" != / ] && [ ! -d "$WS/RGI-toolkit" ]; do WS="$(dirname "$WS")"; done
@@ -14,6 +13,6 @@ WS="$HERE"; while [ "$WS" != / ] && [ ! -d "$WS/RGI-toolkit" ]; do WS="$(dirname
 done )
 PIXI="$WS/esm_restr/.pixi-bin/pixi"; [ -x "$PIXI" ] || PIXI=pixi
 cd "$HERE"
-# ESMFold2 folds single-sequence (no MSA). Runs on sm_89 (the pixi env torch is cu124).
+# Use the native ESM model and its RGI sampling hook.
 "$PIXI" run --manifest-path "$WS/esm_restr/pyproject.toml" \
-    env PYTHONPATH="$WS/transformers_restr/src" python "$HERE/run_rmsd.py"
+    python "$HERE/run_rmsd.py"

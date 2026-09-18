@@ -9,10 +9,10 @@ import os
 
 from esm.models.esmfold2 import (
     ESMFold2InputBuilder,
+    EsmFold2Model,
     ProteinInput,
     StructurePredictionInput,
 )
-from transformers.models.esmfold2.modeling_esmfold2 import ESMFold2Model
 
 SEQUENCE = "ADKKLVVATDTAFVPFEFKQGDKYVGFDVDLWAAIAKELKLDYELKPMDFSGIIPALQTKNVDLALAGITITDERKKAIDFSDGYYKSGLLVMVKANNNDVKSVKDLDGKVVAVKSGTGSVDYAKANIKTKDLRQFPNIDNAYMELGTNRADAVLHDTPNILYFIKTAGNGQFKAVGDSLEAQQYGIAFPKGSDELRDKVNGALKTLRENGTYNEIYKKWFGTEPK"  # noqa: E501
 
@@ -49,7 +49,7 @@ RESTRAINTS_CONFIG = {
 
 
 def main() -> None:
-    model = ESMFold2Model.from_pretrained("biohub/ESMFold2").cuda()
+    model = EsmFold2Model.from_pretrained("biohub/ESMFold2").cuda()
     model.train(False)
 
     spi = StructurePredictionInput(sequences=[ProteinInput(id="A", sequence=SEQUENCE)])
