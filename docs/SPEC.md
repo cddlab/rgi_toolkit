@@ -454,7 +454,7 @@ Its reference is **SciPy 1.17.1**, specifically
 [`_minimize_cg`](https://github.com/scipy/scipy/blob/v1.17.1/scipy/optimize/_optimize.py),
 [Wolfe1/Wolfe2 searches](https://github.com/scipy/scipy/blob/v1.17.1/scipy/optimize/_linesearch.py),
 and [`DCSRCH`/`dcstep`](https://github.com/scipy/scipy/blob/v1.17.1/scipy/optimize/_dcsrch.py).
-The adapted code retains the SciPy BSD notice in [`LICENSES/scipy.txt`](../LICENSES/scipy.txt),
+The adapted code retains the SciPy BSD notice in [`LICENSE`](../LICENSE),
 shipped in source and wheel distributions, and the MINPACK attribution in the source.
 SciPy remains a pinned development oracle; runtime minimization imports no SciPy.
 

@@ -1,8 +1,9 @@
 """Shared PR+ solvers for Torch eager/CUDA and JAX JIT/scan.
 
 Direction updates and step initialization follow scipy.optimize._minimize_cg
-1.17.1, distributed under BSD-3-Clause (LICENSES/scipy.txt). Array evaluation is
-backend-specific; the optimization and line-search transitions are shared.
+1.17.1, distributed under BSD-3-Clause (see the SciPy notice in LICENSE).
+Array evaluation is backend-specific; the optimization and line-search
+transitions are shared.
 The optional Armijo mode retains the historical PR+ update and stopping rules,
 with expanding initial steps for ordinary mean derivatives.
 """

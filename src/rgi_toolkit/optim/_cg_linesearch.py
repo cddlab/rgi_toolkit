@@ -1,7 +1,7 @@
 """SciPy 1.17.1 More--Thuente and bracket/zoom strong-Wolfe searches.
 
 Adapted from scipy.optimize._dcsrch and _linesearch (BSD-3-Clause); see the
-distributed LICENSES/scipy.txt. DCSRCH/dcstep originate in MINPACK-1 (1983) and
+SciPy notice in LICENSE. DCSRCH/dcstep originate in MINPACK-1 (1983) and
 MINPACK-2 (1993), Argonne National Laboratory / University of Minnesota, by
 Jorge J. More, David J. Thuente, Brett M. Averick, and Richard G. Carter.
 

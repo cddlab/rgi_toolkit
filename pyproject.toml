@@ -41,7 +41,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-license-files = ["LICENSE", "LICENSES/*.txt"]
+license-files = ["LICENSE"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
