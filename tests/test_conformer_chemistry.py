@@ -239,7 +239,7 @@ def test_servalcat_contact_rules(first, second, one_four, expected):
 @pytest.mark.parametrize("use_esd", [True, False])
 def test_one_four_exclusions_depend_on_planes_independently_of_energy_blocks(use_esd):
     chain = _ligand("CCCCC")
-    config = {"vdw": {}, "use_esd": use_esd}
+    config = {"vdw": {"scale": 1.0}, "use_esd": use_esd}
     plain = build_spec([chain], conformer_config=config)
     np.testing.assert_array_equal(plain.vdw.idx, [[0, 3], [0, 4], [1, 4]])
     assert np.all(plain.vdw.weight == pytest.approx(25 if use_esd else 1))
@@ -360,7 +360,9 @@ def test_static_vdw_energy_and_gradient_use_contact_esd(backend, use_esd):
         )
         for i, smiles in enumerate(("[Zn+2]", "[O-]"))
     ]
-    spec = build_spec(ligands, conformer_config={"vdw": {}, "use_esd": use_esd})
+    spec = build_spec(
+        ligands, conformer_config={"vdw": {"scale": 1.0}, "use_esd": use_esd}
+    )
     sigma = 0.2 if use_esd else 1
     assert spec.vdw.r_min[0] == pytest.approx(2.02)
     assert spec.vdw.weight[0] == pytest.approx(1 / sigma**2)
@@ -560,7 +562,7 @@ def _typed_optimizer_spec(custom=False, use_esd=True):
     )
     config = {
         # This fixture checks typed scoring and caches, independently of cap failure.
-        "conformer_restraints_config": {"vdw": {}, "use_esd": use_esd},
+        "conformer_restraints_config": {"vdw": {"scale": 1.0}, "use_esd": use_esd},
         "distance_restraints_config": [
             {
                 "atom_selection1": "index 0",

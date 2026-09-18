@@ -47,7 +47,7 @@ Each `run.sh` locates the workspace root, activates/uses the matching fork's env
   acyclic sp2 restraints use `torsion`, off by default; enable them with `torsion: {weight: 1}`.
   A configured monomer library supplies dictionary targets; otherwise polymer torsions
   use documented RDKit-based approximations without downloading a dictionary. VdW now uses
-  chemical contact distances, ESD 0.2 A (dummy 0.3 A), and default `scale: 1.0`.
+  chemical contact distances, ESD 0.2 A (dummy 0.3 A), and default `scale: 0.75`.
   Existing VdW weights may need retuning against reference geometry terms.
 - The `rmsd/` reference structures (`1GGG.cif`, `1WDN.cif`) are **not stored in the repo** --
   each `rmsd/*/run.sh` `wget`s them from RCSB into its own directory at run time (needs network

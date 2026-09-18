@@ -15,7 +15,7 @@ from typing import Iterable
 _TRUE_STRINGS = ("1", "true", "yes", "on")
 
 
-VDW_SCALE_DEFAULT = 1.0
+VDW_SCALE_DEFAULT = 0.75
 # Verlet skin in Angstroms: extra search radius and displacement budget for rebuilds.
 # Zero skin requires rebuilding after any movement.
 VDW_NEIGHBOR_SKIN_DEFAULT = 2.0

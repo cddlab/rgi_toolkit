@@ -935,7 +935,7 @@ The original plane membership remains available for VdW topology exclusions. Sta
 | `plane` | `weight` (0.0), `slack` (0.0 Å) | **best-fit-plane** flatness of whole planar atom groups ([servalcat](https://github.com/keitaroyam/servalcat)-style) — penalises each group's out-of-plane RMS deviation toward 0. Fires on (a) aromatic/conjugated rings (whole ring) and (b) non-ring sp2 groups (an acyclic double-bond centre + its heavy neighbors: carbonyl / amide / ester / carboxyl / trisubstituted alkene). Group membership is confirmed by the reference conformer being coplanar (not the RDKit aromaticity flag). Set `plane: {weight: 1}` to activate |
 | `cistrans` | `weight` (1.0), `slack` (0.0 rad) | ligand acyclic double-bond E/Z geometry; period 1 preserves the stereoisomer |
 | `torsion` | `weight` (0.0), `slack` (0.0 rad) | protein side-chain χ, peptide ω and acyclic sp2 torsions, with explicit periodicity; enable with `torsion: {weight: 1}` |
-| `vdw` | `weight` (1.0), `mode` (`"both"`), `scale` (1.0), `dmax` (5.0 Å), `max_neighbors` (32), `neighbor_skin` (2.0 Å) | chemical contact distances and optional ESD-based clash penalties, with unrestricted CG steps and exact Verlet caches validated at every trial |
+| `vdw` | `weight` (1.0), `mode` (`"both"`), `scale` (0.75), `dmax` (5.0 Å), `max_neighbors` (32), `neighbor_skin` (2.0 Å) | chemical contact distances and optional ESD-based clash penalties, with unrestricted CG steps and exact Verlet caches validated at every trial |
 
 ### ESD normalization of conformer geometry
 
@@ -1265,7 +1265,7 @@ topology; `dmax` is the baseline cutoff for dynamic neighbor searches.
 The verbose `finalize` `vdw=` value includes these static rows and both optimizer-only dynamic
 halves on Torch and JAX.
 
-**Migration:** `scale` now defaults to 1.0 (formerly 0.75) and multiplies the chemical contact
+`scale` defaults to 0.75 and multiplies the chemical contact
 distance. ESD normalization is off by default. With `use_esd: true`, ESD 0.2 Å
 multiplies the unnormalized VdW energy and gradient by 25 at the same distance and
 contact threshold. Reference geometry terms use the same switch. `weight` remains a

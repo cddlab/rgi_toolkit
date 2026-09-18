@@ -513,7 +513,7 @@ collects chemistry for ALL atoms, including fixed background and nonrestrained l
 Configured `type_energy`/`ener_lib` parameters take priority; otherwise RDKit templates/source
 graphs give approximate chemistry, with warning plus elemental fallback when unavailable.
 Contact priority is 1-4, hydrogen bond, metal, dummy, ordinary; ESD is 0.2 A except dummy
-0.3 A. Hydrogen-inclusive radii are capped at 2 A. `scale` defaults to 1.0 (formerly 0.75)
+0.3 A. Hydrogen-inclusive radii are capped at 2 A. `scale` defaults to 0.75
 and multiplies the resulting contact, not unconditionally a radius sum. Topology and plane
 exclusions survive disabled geometry terms. `energy/_nonbonded.py` gathers common contact,
 inverse-variance and eligibility tables for BOTH neighbor ranking and energy scoring.

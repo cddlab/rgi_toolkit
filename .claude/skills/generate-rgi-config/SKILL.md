@@ -127,7 +127,7 @@ silent failures:
   ESDs enter weights when enabled, not slack. Protein chi/omega and acyclic sp2 torsions use documented
   RDKit-based approximations; omitting `monomer_library` never acquires a dictionary.
   VdW uses chemical contact rules and ESD 0.2 A (dummy atoms 0.3 A), with `scale` default
-  1.0. Read `docs/config.md` before comparing energies with older unnormalized runs.
+  0.75. Read `docs/config.md` before comparing energies with older unnormalized runs.
 - **ESD switch**: `conformer_restraints_config.use_esd` is a boolean, default `false`.
   Set `true` when requested to apply ESD normalization to all seven conformer
   terms, including dictionary/approximate torsions and every VdW path. Keep targets,

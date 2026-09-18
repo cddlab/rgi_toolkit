@@ -155,7 +155,7 @@ def test_vdw_config_fixed_background():
     assert {int(x) for x in spec.vdw_config.background_global} == {n, n + 1}
     assert spec.vdw_config.background_radii.shape == (2,)
     assert spec.vdw_config.max_neighbors == 7
-    assert spec.vdw_config.scale == pytest.approx(1.0)
+    assert spec.vdw_config.scale == pytest.approx(0.75)
 
     with pytest.raises(ValueError, match="max_neighbors must be >= 1"):
         build_spec(
@@ -189,7 +189,7 @@ def test_intramolecular_vdw_static_arrays():
     # Nonplanar 1-4 contacts are retained with reduced contact radii.
     np.testing.assert_array_equal(spec.vdw.idx, [[0, 3], [0, 4], [1, 4]])
     np.testing.assert_allclose(spec.vdw.weight, 1.0)
-    np.testing.assert_allclose(spec.vdw.r_min, [3.56, 3.88, 3.56])
+    np.testing.assert_allclose(spec.vdw.r_min, np.array([3.56, 3.88, 3.56]) * 0.75)
     assert int(spec.vdw.idx.max()) < spec.n_active
 
     # explicit mode=intermolecular keeps ONLY the dynamic/inter paths (no static intra);
