@@ -3,6 +3,13 @@
 This file provides guidance to coding agents, including Codex and Claude Code, when
 working with code in this repository. `CLAUDE.md` is a symlink to this file.
 
+## Development priorities
+
+- Keep RGI features and behavior as equivalent as practical across all supported
+  predictor models and backends.
+- Consider runtime, memory usage, and convergence together when implementing or
+  changing RGI. Preserve numerical correctness and avoid regressions in these areas.
+
 ## Commands
 
 ```bash
