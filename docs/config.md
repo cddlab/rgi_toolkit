@@ -313,8 +313,8 @@ distance, angle, volume, …) from its target. Four block names choose how $\del
 |---|---|---|
 | `harmonic` | $x - t$ | penalise any deviation from $t$ |
 | `flat-bottomed` | $0$ for $t_1 \le x \le t_2$; $x - t_1$ below; $x - t_2$ above | no penalty inside the window |
-| `flat-bottomed1` | $\min(0,\, x - t_1)$ | lower bound — penalise only $x \lt t_1$ |
-| `flat-bottomed2` | $\max(0,\, x - t_2)$ | upper bound — penalise only $x \gt t_2$ |
+| `flat-bottomed1` | $`\min(0,\, x - t_1)`$ | lower bound — penalise only $x \lt t_1$ |
+| `flat-bottomed2` | $`\max(0,\, x - t_2)`$ | upper bound — penalise only $x \gt t_2$ |
 
 The same four shapes drive the `distance` / `angle` / `dihedral` / `improper` / `plane` / `rmsd` blocks (only
 the target key differs: `target_distance` / `target_angle` / `target_dihedral` / `target_improper` / `target_plane` /
@@ -403,7 +403,7 @@ The measured quantity is the angle at centroid $c_2$ (with $c_k$ the centroid of
 \theta = \arccos\left( \frac{(c_1 - c_2)\cdot(c_3 - c_2)}{\lVert c_1 - c_2 \rVert\,\lVert c_3 - c_2 \rVert} \right)
 ```
 
-penalised by $E = \sum w\,\delta^2(\theta)$ with the usual shapes (see Penalty shapes). Targets are in **degrees**
+penalised by $`E = \sum w\,\delta^2(\theta)`$ with the usual shapes (see Penalty shapes). Targets are in **degrees**
 by default — set `unit: radians` on the entry to give them in radians (stored internally as radians
 either way).
 
@@ -462,7 +462,7 @@ n_1 = b_1 \times b_2, \quad n_2 = b_2 \times b_3, \quad \hat{b}_2 = b_2 / \lVert
 ```
 
 This is the signed `atan2` convention (range $\pm 180^\circ$); it is penalised by
-$E = \sum w\,\delta^2(\phi)$ (see Penalty shapes). The `harmonic` shape is **periodicity-safe**: the
+$`E = \sum w\,\delta^2(\phi)`$ (see Penalty shapes). The `harmonic` shape is **periodicity-safe**: the
 deviation $\phi - t$ is wrapped to $[-180^\circ, 180^\circ]$ before squaring, so e.g. $+179^\circ$
 and $-179^\circ$ count as a $2^\circ$ difference. The `flat-bottomed` shapes use the raw angle and
 therefore **cannot straddle $\pm 180^\circ$** (`target_dihedral1 < target_dihedral2` is enforced).
@@ -1220,8 +1220,8 @@ quantity $x$:
 | `angle` | bond angle $\theta$ (radians) | $\theta_0$ |
 | `chiral` | signed volume $V = (a_1 - a_0)\cdot\big((a_2 - a_0)\times(a_3 - a_0)\big)$ | $V_0$ (handedness) |
 | `plane` | group's out-of-plane RMS deviation $\sqrt{\lambda_{\min}/N}$ ($\lambda_{\min}$ = smallest eigenvalue of the centred covariance) | $0$ (planar) |
-| `cistrans` | E/Z torsion $\phi$, residual $\operatorname{wrap}(\phi-\phi_0)$ | reference $\phi_0$, period 1 |
-| `torsion` | torsion $\phi$, residual $\operatorname{wrap}(n(\phi-\phi_0))/n$ | $\phi_0$ and periodicity $n$ |
+| `cistrans` | E/Z torsion $\phi$, residual $\mathrm{wrap}(\phi-\phi_0)$ | reference $\phi_0$, period 1 |
+| `torsion` | torsion $\phi$, residual $\mathrm{wrap}(n(\phi-\phi_0))/n$ | $\phi_0$ and periodicity $n$ |
 
 Conformer angles with `abs(target_degrees - 180) < 0.5` use
 `2 * weight * (1 + cos(theta))` instead of squared angle deviation. Packed reference and
@@ -1457,7 +1457,7 @@ $\lVert\cdot\rVert$ is the Euclidean norm:
 |---|---|---|---|
 | `centroid(A)` | vector | $c_A$ = mean of $A$'s atoms | a building block — subtract two, or feed one to `norm` / `dot` |
 | `distance(A,B)` | scalar | $\lVert c_A - c_B \rVert$ | a separation between two groups; a **difference of two distances** encodes symmetry / equidistance |
-| `angle(A,B,C)` | scalar (rad) | $\arccos\big( (c_A - c_B)\cdot(c_C - c_B) / (\lVert c_A - c_B \rVert\,\lVert c_C - c_B \rVert) \big)$, vertex $B$ | the bend of three groups about the vertex $B$ |
+| `angle(A,B,C)` | scalar (rad) | $`\arccos\big( (c_A - c_B)\cdot(c_C - c_B) / (\lVert c_A - c_B \rVert\,\lVert c_C - c_B \rVert) \big)`$, vertex $B$ | the bend of three groups about the vertex $B$ |
 | `dihedral(A,B,C,D)` | scalar (rad) | torsion about the B–C centroid axis, range $\pm\pi$ | the twist / handedness across four groups — a **periodic** quantity: wrap its deviation, see below |
 | `improper(A,B,C,D)` | scalar (rad) | signed out-of-plane angle about the B–C centroid axis, range $\pm\pi$ | the custom-form counterpart of `improper_restraints_config`; wrap its deviation |
 | `chiral(A,B,C,D)` | scalar (Angstrom cubed) | $(c_B-c_A)\cdot((c_C-c_A)\times(c_D-c_A))$ | signed volume about A, identical to conformer chiral for single atoms; no division by six |
@@ -1563,9 +1563,9 @@ it free inside a window, above a floor, or below a ceiling:
 | call | definition | effect — use when |
 |---|---|---|
 | `harmonic(x, t)` | $(x - t)^2$ | quadratic toward $t$ — pin $x$ at a target |
-| `flat_bottomed(x, lo, hi)` | $\min(0,\, x - \text{lo})^2 + \max(0,\, x - \text{hi})^2$ | zero inside $[\text{lo}, \text{hi}]$ — keep $x$ within a band |
-| `flat_bottomed1(x, lo)` | $\min(0,\, x - \text{lo})^2$ | lower bound — enforce $x \ge \text{lo}$ only |
-| `flat_bottomed2(x, hi)` | $\max(0,\, x - \text{hi})^2$ | upper bound — enforce $x \le \text{hi}$ only |
+| `flat_bottomed(x, lo, hi)` | $`\min(0,\, x - \text{lo})^2 + \max(0,\, x - \text{hi})^2`$ | zero inside $[\text{lo}, \text{hi}]$ — keep $x$ within a band |
+| `flat_bottomed1(x, lo)` | $`\min(0,\, x - \text{lo})^2`$ | lower bound — enforce $x \ge \text{lo}$ only |
+| `flat_bottomed2(x, hi)` | $`\max(0,\, x - \text{hi})^2`$ | upper bound — enforce $x \le \text{hi}$ only |
 
 `flat_bottomed` / `flat_bottomed1` / `flat_bottomed2` are the same maths (and names) as the built-in
 `flat-bottomed` / `flat-bottomed1` / `flat-bottomed2` blocks.
