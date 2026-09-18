@@ -70,18 +70,12 @@ Consequences for a sync:
   alarmed by the merge commit; do be alarmed by a conflict.
 - Do **not** `git rebase` or `--force` to "clean it up". The divergence is the deliberate,
   history-preserving choice.
-- Local `main` sits ahead of `origin/main` with unpushed commits (the revert `5dd09f1`, and
-  an upstream merge `72e21c0`, have both been held back from publication by the user's
-  choice). `sync_status.sh` flags this. Tell the user before pushing — your push publishes
-  those too.
-- What "not pushing boltz's `main`" actually withholds is **only the branch pointer**, not
-  the commits. `main` is fully merged into `rgi-integration`, and `origin/rgi-integration`
-  is already published, so `5dd09f1` and `72e21c0` are *already reachable on the remote*
-  (verify with `git merge-base --is-ancestor 5dd09f1 origin/rgi-integration`). The
-  consequence: `origin/main` still points at the old-RGI `72ae28e`, so the
-  "`git diff main..rgi-integration` is exactly the RGI patch" contract holds **locally but
-  not on GitHub**. Don't describe boltz as contract-clean on the remote until `origin/main`
-  is pushed.
+- The previously withheld mirror commits (`5dd09f1` and `72e21c0`) were published
+  to `origin/main` on 2026-09-19 after the user requested commit/push for the
+  upstream synchronization. They were already reachable through the published
+  `rgi-integration` branch. The mirror contract now holds locally and on GitHub:
+  `main` has the upstream tree, and its diff against `rgi-integration` isolates RGI.
+  Check the live refs on later syncs rather than assuming either branch is unchanged.
 
 Upstream also has a habit of dropping RGI plumbing here without conflicting: merge `f99e260`
 silently removed the per-ligand `conformer_restraint` opt-in across `types.py` / `schema.py`
