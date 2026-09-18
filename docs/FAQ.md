@@ -23,6 +23,17 @@ Possible remedies are:
 Note that releasing a restraint with `stop_sigma` may cause the final structure to no longer
 satisfy the restraint target.
 
+## Why does my ligand still have incorrect cis/trans geometry or chirality?
+
+Try increasing `restraints_config.max_iter` to allow more optimizer iterations per denoising
+step. Also check whether any structure can satisfy all active restraints with zero loss.
+Incompatible targets or an infeasible combination of restraints can make zero loss impossible,
+regardless of the iteration limit.
+
+In some cases, the model produces an intermediate, distorted conformation of a bridged compound.
+This can leave the minimizer trapped in a local minimum with nonzero loss, even when a zero-loss
+conformation is possible. Increasing `max_iter` alone may not resolve such a local minimum.
+
 ## How can I invert chirality or switch cis/trans in only part of a ligand?
 
 Add entries to `chiral_restraints_config` or `dihedral_restraints_config` under
