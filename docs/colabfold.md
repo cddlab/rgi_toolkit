@@ -1,9 +1,9 @@
 # ColabFold notebooks
 
-[ColabFold's RGI branch](https://github.com/th2ch-g/ColabFold/tree/rgi-integration)
+[ColabFold's RGI branch](https://github.com/th2ch-g/ColabFold_restr/tree/rgi-integration)
 provides beginner forms for the toolkit's existing predictor families. Start with its
-[Colab notebook](https://colab.research.google.com/github/th2ch-g/ColabFold/blob/rgi-integration/ColabFold2_preview.ipynb)
-and [usage guide](https://github.com/th2ch-g/ColabFold/blob/rgi-integration/docs/rgi.md).
+[Colab notebook](https://colab.research.google.com/github/th2ch-g/ColabFold_restr/blob/rgi-integration/ColabFold2_preview.ipynb)
+and [usage guide](https://github.com/th2ch-g/ColabFold_restr/blob/rgi-integration/docs/rgi.md).
 
 The preview supports AlphaFold3, OpenFold3, Boltz2, Protenix2, RoseTTAFold3, Chai1,
 OpenDDE and the three exposed ESMFold2 variants through ColabFold's shared JAX port.
