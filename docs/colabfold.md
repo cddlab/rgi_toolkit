@@ -1,9 +1,38 @@
 # RGI in ColabFold notebooks
 
-Open [ColabFold2 preview](https://colab.research.google.com/github/th2ch-g/ColabFold_restr/blob/rgi-integration/ColabFold2_preview.ipynb), choose a GPU runtime and predictor, and enter your molecules.
-Enable **use_rgi**, run the restraints cell, edit the form, and then run prediction.
-Leave **use_rgi** off for vanilla. Predictions always read the current form values;
-there is no separate Apply step. Rerunning the restraints cell preserves your edits.
+Open [ColabFold2 preview](https://colab.research.google.com/github/th2ch-g/ColabFold_restr/blob/rgi-integration/ColabFold2_preview.ipynb). The notebook shows the setup steps before anything is run.
+
+1. In **1. Install and choose RGI**, check **use_rgi** and click the play button on the left.
+2. Enter your sequences and ligands in **2. Enter molecules**, then run that cell.
+3. Find **3. Configure RGI — click ▶ to open the settings** and click its play button.
+   **The editable form appears directly below this cell after it runs.** The notebook
+   introduction also links straight to this cell.
+4. Click **Add distance**, **Add conformer**, **Add angle**, **Add custom** or **Add RMSD**.
+   Fill in the entry below the buttons. Repeat to add more restraints.
+5. Click **Check RGI settings**, then run **4. Predict structure**.
+
+For RGI, stop at the configuration step and edit the form before prediction.
+A new form has no restraints; running prediction first explains how to open and fill it.
+For vanilla, leave **use_rgi** unchecked. If the form says RGI is OFF, enable the switch
+in step 1, rerun installation, then rerun step 3. When changing a finished configuration,
+edit its controls and rerun prediction; rerunning the form cell preserves your entries.
+In Boltz-1, the switch is in **1. Enter molecules and choose RGI**, and the form is
+**4. Configure RGI** after installation and MSA generation.
+
+### First example: one distance
+
+For a protein chain A with at least 50 residues, click **Add distance** and fill in:
+
+| Visible field | Value | Meaning |
+| --- | --- | --- |
+| `atom_selection1` | `chain A and resid 1 to 10` | The first group of atoms |
+| `atom_selection2` | `chain A and resid 40 to 50` | The second group of atoms |
+| `penalty` | `harmonic — exact target` | Pull the groups to one distance |
+| `target_distance` | `25` | Desired centroid distance in Angstrom |
+
+Use the chain IDs and residue ranges from **Your input chains** for your own molecules.
+Click **Check RGI settings** and then run **Predict structure**. For a second distance,
+click **Add distance** again or **Duplicate** on the first entry and edit its selections.
 
 The editor and config helpers live in **RGI-toolkit**, in `notebook_widgets.py` and
 `notebook.py`. ColabFold supplies the molecule input and its predictor-specific hooks.
@@ -11,7 +40,7 @@ The editor uses the toolkit's native configuration names and selection DSL.
 
 ## Add, combine and repeat restraints
 
-Select a **Type** and click **Add restraint**. Each card can be edited, duplicated,
+The five **Add** buttons show each native type and what it does. Each entry can be edited, duplicated,
 disabled or removed. For example, add two distances, an angle, two RMSDs and a custom
 energy together. They become separate entries in the corresponding native lists;
 adding another restraint never replaces a previous entry.
@@ -28,8 +57,8 @@ adding another restraint never replaces a previous entry.
 that card; do not create a conformer entry per chain. The other four types support any
 number of entries. Explicitly disabling a card excludes it from prediction.
 
-Click **Validate / show config** to inspect the native YAML before prediction.
-This validates syntax. Actual atom matches, reference pairing and nonzero built counts
+Click **Check RGI settings** before prediction. The next step is shown below the button.
+Expand **View the native RGI configuration** to inspect the YAML. This check validates syntax. Actual atom matches, reference pairing and nonzero built counts
 are checked by the engine during setup, before the model forward pass.
 
 ## Selections
@@ -95,8 +124,9 @@ and reference-backed selections. Each custom card has its own selections and lab
 
 ## RMSD
 
-Upload a reference using Colab's Files panel, select `ref_pdb` or `ref_cif`, and enter its
-path in **reference_file**. Use `atom_selection_target` and `atom_selection_ref` for
+Click **Upload reference** inside the RMSD entry to choose a PDB/mmCIF file. The
+reference format and file path are filled in automatically. Alternatively, choose
+`ref_pdb` or `ref_cif` and enter an existing runtime path in **reference_file**. Use `atom_selection_target` and `atom_selection_ref` for
 both fit and measurement, or expand **Separate fit and calc selections** to set the four
 native `_fit`/`_calc` fields independently. Empty selections retain the toolkit's
 whole-structure behavior. `pairing` and `best_effort` use the native defaults.
@@ -107,13 +137,13 @@ references and regions. See the [RMSD reference](config.md#rmsd_restraints_confi
 
 ## Full YAML/JSON and files
 
-**Configuration input** selects `form`, `YAML/JSON`, or `file`. Whole-config text and files
+**Input method** selects the form, pasted YAML/JSON, or a YAML/JSON file. Whole-config text and files
 are separate from the custom energy type. They support all toolkit sections, including
 dihedral, improper, chiral, plane and base pairing. A config file's reference paths are
 relative to that file. Upload any referenced structures too.
 
 Use **Load into form** to edit the five supported types as cards. Other native sections
-remain in **Global settings / other toolkit sections**, so importing does not discard them.
+remain under **Advanced global settings**, so importing does not discard them.
 For conformer in YAML/file mode, also set **conformer_chains** to opt the intended entities in.
 
 ## Predictors, results and vanilla
@@ -148,9 +178,14 @@ Install the optional `notebook` extra to use the toolkit's editor outside Colab:
 from rgi_toolkit.notebook_widgets import RestraintEditor
 editor = RestraintEditor()
 editor.display()
-# Read this when starting prediction, after the user has edited the widgets.
-config = editor.get_config()
-chains = editor.get_conformer_chains()
+```
+
+After adding and editing entries, read them in a separate prediction cell:
+
+```python
+from rgi_toolkit.notebook_widgets import read_editor
+
+config, chains = read_editor(editor)
 ```
 
 `notebook.make_config` validates a native mapping, YAML/JSON text, or file;

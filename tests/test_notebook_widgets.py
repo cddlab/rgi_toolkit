@@ -6,11 +6,36 @@ import pytest
 
 pytest.importorskip("ipywidgets")
 
-from rgi_toolkit.notebook_widgets import RestraintEditor  # noqa: E402
+from rgi_toolkit.notebook_widgets import RestraintEditor, read_editor  # noqa: E402
+
+
+def distance_editor():
+    editor = RestraintEditor()
+    editor.add_buttons["distance"].click()
+    return editor
+
+
+def test_new_editor_requires_an_explicit_restraint_and_points_to_the_next_step():
+    editor = RestraintEditor()
+    assert editor.cards == []
+    assert set(editor.add_buttons) == {
+        "distance",
+        "conformer",
+        "angle",
+        "custom",
+        "RMSD",
+    }
+    with pytest.raises(ValueError, match="Configure RGI"):
+        read_editor(editor)
+    with pytest.raises(ValueError, match="left-hand play button"):
+        read_editor()
+    editor.add_buttons["distance"].click()
+    config, _ = read_editor(editor)
+    assert len(config["distance_restraints_config"]) == 1
 
 
 def test_add_duplicate_disable_and_remove_read_current_values():
-    editor = RestraintEditor()
+    editor = distance_editor()
     first = editor.cards[0]
     first.fields["atom_selection1"].value = "chain A and (resid 1 to 4 or resid 8)"
     first.duplicate.click()
@@ -30,10 +55,9 @@ def test_add_duplicate_disable_and_remove_read_current_values():
 
 
 def test_five_types_repeated_entries_and_conformer_defaults():
-    editor = RestraintEditor()
+    editor = distance_editor()
     for kind in ("angle", "custom", "RMSD", "conformer"):
-        editor.kind.value = kind
-        editor.add_button.click()
+        editor.add_buttons[kind].click()
     rmsd = editor.cards[3]
     rmsd.fields["reference_file"].value = "reference.cif"
     rmsd.fields["reference_format"].value = "ref_cif"
@@ -54,7 +78,7 @@ def test_five_types_repeated_entries_and_conformer_defaults():
 
 
 def test_custom_groups_formula_and_labels_are_independent():
-    editor = RestraintEditor()
+    editor = distance_editor()
     card = editor.add("custom")
     card.selections.add("C", "chain C and name CA")
     card.fields["energy"].value = "(distance(A, B) - distance(A, C))**2"
@@ -70,7 +94,7 @@ def test_custom_groups_formula_and_labels_are_independent():
 
 
 def test_penalty_window_and_native_advanced_settings():
-    editor = RestraintEditor()
+    editor = distance_editor()
     card = editor.cards[0]
     card.fields["penalty"].value = "flat-bottomed"
     card.fields["target_distance1"].value = 20
@@ -122,7 +146,26 @@ def test_yaml_supports_other_toolkit_sections_and_import_keeps_them():
 
 
 def test_disabled_invalid_entry_does_not_block_prediction():
-    editor = RestraintEditor()
+    editor = distance_editor()
     card = editor.add("RMSD")
     card.enabled.value = False
     assert set(editor.get_config()) == {"verbose", "distance_restraints_config"}
+
+
+def test_reference_upload_sets_a_portable_path_and_native_format(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    editor = RestraintEditor()
+    card = editor.add("RMSD")
+    content = b"data_reference\n"
+    card._upload_reference(
+        {"new": [{"name": "../reference.cif", "content": memoryview(content)}]}
+    )
+    config, _ = read_editor(editor)
+    reference = config["rmsd_restraints_config"][0]["ref_cif"]
+    from pathlib import Path
+
+    assert not Path(reference).is_absolute()
+    assert Path(reference).parent == Path(".cache/rgi-references")
+    assert Path(reference).read_bytes() == content
+    card._upload_reference({"new": [{"name": "empty.pdb", "content": memoryview(b"")}]})
+    assert "nonempty" in editor.status.value

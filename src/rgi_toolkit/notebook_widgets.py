@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import html
 import json
+from pathlib import Path
 
 import ipywidgets as W
 import yaml
@@ -21,6 +23,13 @@ TERMS = {
     "vdw": 1,
     "plane": 0,
     "torsion": 0,
+}
+TYPE_HELP = {
+    "distance": "Set the distance between two atom groups (Angstrom).",
+    "conformer": "Keep selected chains close to their reference chemical geometry.",
+    "angle": "Set the angle between three atom groups; group 2 is the vertex.",
+    "custom": "Write an energy formula using named atom groups.",
+    "RMSD": "Match a region to a reference PDB or mmCIF structure.",
 }
 
 
@@ -102,9 +111,11 @@ class RestraintCard:
         self.fields, self.boxes, self.body = {}, {}, []
         self.base = copy.deepcopy(config or {})
         self.enabled = W.Checkbox(value=True, description="Enabled")
+        self.enabled.observe(lambda _: editor._update_summary(), names="value")
         self.remove = W.Button(description="Remove", icon="trash")
         self.remove.on_click(lambda _: editor.remove(self))
-        buttons = [W.HTML(f"<b>{kind}</b>"), self.enabled, self.remove]
+        buttons = [W.HTML(f"<b>{kind} #{editor.serial}</b>"), self.enabled, self.remove]
+        self.body.append(W.HTML(TYPE_HELP[kind]))
         if kind != "conformer":
             self.duplicate = W.Button(description="Duplicate", icon="copy")
             self.duplicate.on_click(self._duplicate)
@@ -115,23 +126,42 @@ class RestraintCard:
                     break
                 if kind == "distance" and i == 2:
                     span = "40 to 50"
-                self._text(f"atom_selection{i}", f"chain A and resid {span}")
+                self._text(
+                    f"atom_selection{i}",
+                    f"chain A and resid {span}",
+                    f"Atom group {i}. Example: chain A and resid {span}. "
+                    "Use the chain IDs shown above; residue numbering starts at 1.",
+                )
             if kind == "angle":
                 self.body.append(W.HTML("Group 2 is the vertex of the angle."))
                 self._choice("unit", ("degrees", "radians"), "degrees")
         elif kind == "RMSD":
+            self.reference_upload = W.FileUpload(
+                accept=".pdb,.cif,.mmcif",
+                multiple=False,
+                description="Upload reference",
+                layout=W.Layout(width="auto"),
+            )
+            self.reference_upload.observe(self._upload_reference, names="value")
+            self.body.append(self.reference_upload)
             ref_key = "ref_cif" if "ref_cif" in self.base else "ref_pdb"
             self._choice("reference_format", ("ref_pdb", "ref_cif"), ref_key)
             self._text(
                 "reference_file",
                 self.base.pop(ref_key, ""),
-                "Upload a PDB/mmCIF file using the Files panel.",
+                "Upload reference fills this in automatically. You can also enter "
+                "the path to a file already in this notebook's runtime.",
             )
             for side in ("target", "ref"):
                 self._text(
                     f"atom_selection_{side}",
                     "chain A and name CA" if config is None else "",
-                    "Optional shorthand: use these atoms for both fit and calc.",
+                    (
+                        "Atoms in your prediction."
+                        if side == "target"
+                        else "Atoms in the uploaded reference."
+                    )
+                    + " Example: chain A and name CA. Leave empty for the whole structure.",
                 )
             selection_start = len(self.body)
             for side in ("target", "ref"):
@@ -151,7 +181,8 @@ class RestraintCard:
             self._text(
                 "energy",
                 "harmonic(distance(A, B), 25.0)",
-                "A toolkit energy expression. Custom angles are in radians.",
+                "Example: harmonic(distance(A, B), 25.0) targets 25 Angstrom between "
+                "the groups named A and B below. Custom angles are in radians.",
             )
             self._text(
                 "use", "", "Optional registered function name instead of energy."
@@ -171,7 +202,8 @@ class RestraintCard:
             self._text(
                 "conformer_chains",
                 chains,
-                "Entity opt-in: comma-separated chain IDs, or ligands.",
+                "Enter chain IDs from the table above, e.g. B,C. "
+                "Use ligands to select all ligand chains.",
             )
             self.body.append(
                 W.HTML(
@@ -251,10 +283,36 @@ class RestraintCard:
         self.body[start:] = [accordion]
 
     def _duplicate(self, _):
-        config = self.read()
-        if self.kind == "custom":
-            config["name"] += f"_{self.editor.serial + 1}"
-        self.editor.add(self.kind, config)
+        try:
+            config = self.read()
+            if self.kind == "custom":
+                config["name"] += f"_{self.editor.serial + 1}"
+            self.editor.add(self.kind, config)
+        except (ValueError, TypeError, yaml.YAMLError) as error:
+            self.editor.status.value = html.escape(str(error))
+
+    def _upload_reference(self, change):
+        if not change["new"]:
+            return
+        try:
+            upload = change["new"][0]
+            name, content = Path(upload["name"]).name, bytes(upload["content"])
+            if (
+                Path(name).suffix.lower() not in (".pdb", ".cif", ".mmcif")
+                or not content
+            ):
+                raise ValueError("Choose a nonempty PDB or mmCIF reference file.")
+            folder = Path(".cache") / "rgi-references"
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / f"{hashlib.sha256(content).hexdigest()[:12]}-{name}"
+            path.write_bytes(content)
+            self.fields["reference_file"].value = str(path)
+            self.fields["reference_format"].value = (
+                "ref_pdb" if path.suffix.lower() == ".pdb" else "ref_cif"
+            )
+            self.editor.status.value = f"Reference uploaded: {html.escape(name)}"
+        except (ValueError, OSError) as error:
+            self.editor.status.value = html.escape(str(error))
 
     def _add(self, name, widget, help_text=""):
         self.fields[name] = widget
@@ -271,8 +329,10 @@ class RestraintCard:
             name, W.Text(value="" if value is None else str(value)), help_text
         )
 
-    def _number(self, name, default):
-        return self._add(name, W.FloatText(value=float(self.base.pop(name, default))))
+    def _number(self, name, default, help_text=""):
+        return self._add(
+            name, W.FloatText(value=float(self.base.pop(name, default))), help_text
+        )
 
     def _choice(self, name, options, default):
         return self._add(
@@ -287,16 +347,27 @@ class RestraintCard:
     def _penalty(self):
         kind = next((key for key in PENALTIES if key in self.base), "harmonic")
         params = self.base.pop(kind, {})
-        self._choice("penalty", PENALTIES, kind)
+        meanings = ("exact target", "allowed range", "lower bound", "upper bound")
+        self._choice(
+            "penalty",
+            tuple(
+                (f"{key} — {meaning}", key) for key, meaning in zip(PENALTIES, meanings)
+            ),
+            kind,
+        )
         self.quantity = {"RMSD": "rmsd"}.get(self.kind, self.kind)
         target = f"target_{self.quantity}"
         default = {"distance": 25, "angle": 90, "rmsd": 0}[self.quantity]
-        for key, value in (
-            (target, default),
-            (target + "1", max(0, default - 2)),
-            (target + "2", default + 2),
+        unit = "selected angle unit" if self.kind == "angle" else "Angstrom"
+        for (key, value), meaning in zip(
+            (
+                (target, default),
+                (target + "1", max(0, default - 2)),
+                (target + "2", default + 2),
+            ),
+            ("Desired value", "Minimum allowed value", "Maximum allowed value"),
         ):
-            self._number(key, params.pop(key, value))
+            self._number(key, params.pop(key, value), f"{meaning} ({unit}).")
         if params:
             raise ValueError(f"Unexpected {kind} parameter(s): {sorted(params)}")
 
@@ -396,18 +467,37 @@ class RestraintEditor:
     def __init__(self, chains=(), config=None, conformer_chains="ligands"):
         self.cards, self.serial = [], 0
         self.chain_info, self.status = W.HTML(), W.HTML()
+        self.summary = W.HTML()
         self.container, self.preview_output = W.VBox(), W.Output()
-        self.kind = W.Dropdown(options=tuple(FORM_SECTIONS), description="Type")
-        self.add_button = W.Button(description="Add restraint", icon="plus")
-        self.add_button.on_click(self._add_clicked)
+        self.add_buttons = {}
+        choices = []
+        for kind in FORM_SECTIONS:
+            button = W.Button(
+                description=f"Add {kind}", icon="plus", layout=W.Layout(width="auto")
+            )
+            button.on_click(lambda _, kind=kind: self._add_clicked(kind))
+            self.add_buttons[kind] = button
+            choices.append(
+                W.VBox(
+                    [button, W.HTML(TYPE_HELP[kind])],
+                    layout=W.Layout(width="210px", margin="4px 12px 4px 0"),
+                )
+            )
         self.preview_button = W.Button(
-            description="Validate / show config",
+            description="Check RGI settings",
             icon="check",
             layout=W.Layout(width="auto", align_self="flex-start"),
         )
         self.preview_button.on_click(self._preview)
         self.settings = W.Textarea(value="verbose: true\n", rows=3)
-        self.mode = W.Dropdown(options=("form", "YAML/JSON", "file"), value="form")
+        self.mode = W.Dropdown(
+            options=(
+                ("Edit the form below", "form"),
+                ("Paste YAML / JSON", "YAML/JSON"),
+                ("Read a YAML / JSON file", "file"),
+            ),
+            value="form",
+        )
         self.config_text = W.Textarea(
             rows=12, placeholder="distance_restraints_config: ..."
         )
@@ -423,6 +513,7 @@ class RestraintEditor:
         )
         self.external_box = W.VBox(
             [
+                self.chain_info,
                 self.text_box,
                 self.path_box,
                 _label(
@@ -433,40 +524,74 @@ class RestraintEditor:
                 self.import_button,
             ]
         )
-        self.form_box = W.VBox(
+        self.global_settings = W.Accordion(
             [
-                W.HBox([self.kind, self.add_button]),
-                self.container,
                 _label(
                     "Global settings / other toolkit sections (YAML/JSON)",
                     self.settings,
+                )
+            ],
+            selected_index=None,
+        )
+        self.global_settings.set_title(0, "Advanced global settings")
+        self.native_config = W.Textarea(
+            disabled=True, rows=10, layout=W.Layout(width="100%")
+        )
+        self.native_preview = W.Accordion([self.native_config], selected_index=None)
+        self.native_preview.set_title(0, "View the native RGI configuration")
+        self.native_preview.layout.display = "none"
+        self.form_box = W.VBox(
+            [
+                W.HTML(
+                    "<h4>1. Add the restraints you need</h4>"
+                    "Click a button. Repeat to add another restraint of the same type."
                 ),
+                W.HBox(choices, layout=W.Layout(flex_flow="row wrap")),
+                self.summary,
+                W.HTML(
+                    "<h4>2. Fill in each restraint below</h4>"
+                    "Edit the atom groups and target values. "
+                    "Duplicate copies an entry; Enabled includes it in prediction."
+                ),
+                self.chain_info,
+                W.HTML(
+                    "<b>How to choose atoms:</b> <code>chain A</code> selects a whole chain; "
+                    "<code>chain A and resid 1 to 10</code> selects residues 1–10; "
+                    "add <code>and name CA</code> for C-alpha atoms only. "
+                    "Use the chain IDs in the table. Residue numbers start at 1 in each chain. "
+                    "The full RGI-toolkit selection language is also accepted."
+                ),
+                self.container,
+                self.global_settings,
             ]
         )
         self.widget = W.VBox(
             [
-                self.chain_info,
                 W.HTML(
-                    "<b>Selections use the RGI-toolkit DSL.</b> Examples: "
-                    "<code>chain A and resid 1 to 10 and backbone</code>; "
-                    "<code>chain A and (resid 1 to 10 or resid 40 to 50)</code>. "
-                    "Residue numbers start at 1 within each chain."
+                    "<h3>Configure RGI</h3>"
+                    "Add restraints here, fill in their fields, then check the settings. "
+                    "When you are finished, run the next <b>Predict structure</b> cell."
                 ),
-                _label("Configuration input", self.mode),
+                _label("Input method", self.mode),
                 self.status,
                 self.form_box,
                 self.external_box,
+                W.HTML(
+                    "<h4>3. Check, then run prediction</h4>"
+                    "Click below to check the settings. Then run the next "
+                    "<b>Predict structure</b> cell. Later edits are read automatically."
+                ),
                 self.preview_button,
                 self.preview_output,
+                self.native_preview,
             ]
         )
         self.mode.observe(lambda change: self._source_visibility(), names="value")
         self._source_visibility()
         self.set_chains(chains)
-        if config is None:
-            self.add("distance")
-        else:
+        if config is not None:
             self.load_config(config, conformer_chains=conformer_chains)
+        self._update_summary()
 
     def _source_visibility(self):
         self.form_box.layout.display = "" if self.mode.value == "form" else "none"
@@ -484,17 +609,27 @@ class RestraintEditor:
             self.status.value = html.escape(str(error))
 
     def set_chains(self, chains):
-        text = "; ".join(
-            f"{row['chain']}: {row['type']}"
-            + (f" ({row['residues']} residues)" if row.get("residues") else "")
+        rows = "".join(
+            f"<tr><td style='padding:4px 16px 4px 0'>{html.escape(str(row['chain']))}</td>"
+            f"<td style='padding:4px 16px 4px 0'>{html.escape(str(row['type']))}</td>"
+            f"<td style='padding:4px 16px 4px 0'>"
+            f"{'1–' + str(int(row['residues'])) if row.get('residues') else '—'}</td></tr>"
             for row in chains
         )
-        self.chain_info.value = f"<b>Input chains:</b> {html.escape(text)}"
+        self.chain_info.value = (
+            "<b>Your input chains</b><table><thead><tr>"
+            "<th style='padding-right:16px;text-align:left'>Chain ID</th>"
+            "<th style='padding-right:16px;text-align:left'>Molecule</th>"
+            "<th style='text-align:left'>Residue numbers</th></tr></thead>"
+            f"<tbody>{rows}</tbody></table>"
+            if rows
+            else "Enter your molecules in the notebook to see their chain IDs here."
+        )
 
-    def _add_clicked(self, _):
+    def _add_clicked(self, kind):
         try:
-            self.add(self.kind.value)
-            self.status.value = ""
+            self.add(kind)
+            self.status.value = f"Added {kind}. Fill in its fields below."
         except ValueError as error:
             self.status.value = f"<b>{html.escape(str(error))}</b>"
 
@@ -509,11 +644,27 @@ class RestraintEditor:
         card = RestraintCard(self, kind, config, chains)
         self.cards.append(card)
         self.container.children = tuple(item.widget for item in self.cards)
+        self._update_summary()
         return card
 
     def remove(self, card):
         self.cards.remove(card)
         self.container.children = tuple(item.widget for item in self.cards)
+        self._update_summary()
+
+    def _update_summary(self):
+        enabled = [card for card in self.cards if card.enabled.value]
+        counts = [
+            f"{sum(c.kind == kind for c in enabled)} {kind}"
+            for kind in FORM_SECTIONS
+            if any(c.kind == kind for c in enabled)
+        ]
+        self.summary.value = (
+            "<b>Enabled:</b> " + "; ".join(counts)
+            if counts
+            else "<b>No restraints yet.</b> Click Add distance, Add conformer, "
+            "Add angle, Add custom or Add RMSD above to begin."
+        )
 
     def load_config(self, config, *, conformer_chains="ligands"):
         config = copy.deepcopy(make_config(config))
@@ -525,16 +676,31 @@ class RestraintEditor:
                     self.add(kind, entry, chains=conformer_chains)
         self.settings.value = yaml.safe_dump(config, sort_keys=False)
         self.container.children = tuple(card.widget for card in self.cards)
+        self._update_summary()
 
     def get_config(self):
         if self.mode.value == "YAML/JSON":
             return make_config(config_text=self.config_text.value)
         if self.mode.value == "file":
             return make_config(config_path=self.config_path.value)
-        return compose_config(
-            [(card.kind, card.read()) for card in self.cards if card.enabled.value],
-            settings=_mapping(self.settings.value),
-        )
+        items = []
+        for i, card in enumerate(self.cards, 1):
+            if card.enabled.value:
+                try:
+                    items.append((card.kind, card.read()))
+                except (ValueError, TypeError, yaml.YAMLError) as error:
+                    raise ValueError(f"{card.kind} entry {i}: {error}") from error
+        settings = _mapping(self.settings.value)
+        if not items and not any(
+            key.endswith("_restraints_config") and value is not None
+            for key, value in settings.items()
+        ):
+            raise ValueError(
+                "No RGI restraints are enabled. In the Configure RGI cell, "
+                "click Add distance (or another type), fill in its fields, "
+                "then run Predict structure. For vanilla, turn use_rgi off."
+            )
+        return compose_config(items, settings=settings)
 
     def get_conformer_chains(self):
         if self.mode.value != "form":
@@ -548,12 +714,16 @@ class RestraintEditor:
         with self.preview_output:
             self.preview_output.clear_output(wait=True)
             try:
-                print(yaml.safe_dump(self.get_config(), sort_keys=False))
+                config = self.get_config()
+                self.native_config.value = yaml.safe_dump(config, sort_keys=False)
+                self.native_preview.layout.display = ""
+                print("Settings checked. Next: run the Predict structure cell below.")
                 print(
-                    "Syntax validated. Actual atom matches and counts are checked during setup."
+                    "Atom availability and reference pairing are checked when prediction starts."
                 )
-                print("Prediction reads current form values; no Apply step is needed.")
+                print("Prediction reads your current edits automatically.")
             except (ValueError, TypeError, OSError, yaml.YAMLError) as error:
+                self.native_preview.layout.display = "none"
                 print(f"Fix the configuration before prediction: {error}")
 
     def display(self):
@@ -562,7 +732,24 @@ class RestraintEditor:
 
 def show_editor(chains, previous=None):
     """Show the same controls again without discarding edits on cell reruns."""
+    try:
+        from google.colab import output
+    except ImportError:
+        pass
+    else:
+        output.enable_custom_widget_manager()
     editor = previous if previous is not None else RestraintEditor(chains)
     editor.set_chains(chains)
     editor.display()
     return editor
+
+
+def read_editor(editor=None):
+    """Give a missing notebook step an actionable error before prediction starts."""
+    if editor is None:
+        raise ValueError(
+            "RGI settings are not open yet. Run the Configure RGI cell with its "
+            "left-hand play button, add restraints in the form below it, "
+            "then run Predict structure. For vanilla, turn use_rgi off."
+        )
+    return editor.get_config(), editor.get_conformer_chains()
