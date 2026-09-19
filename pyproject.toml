@@ -28,6 +28,11 @@ jax = [
     "jaxlib",
     "jaxopt",
 ]
+# Optional Colab/Jupyter controls; the engine does not import notebook widgets.
+notebook = [
+    "ipywidgets>=8,<9",
+    "ipython>=8",
+]
 
 [dependency-groups]
 dev = [

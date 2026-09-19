@@ -6,12 +6,16 @@ for parsing, atom selection, geometry and optimization.
 
 from __future__ import annotations
 
-import math
+import copy
 import re
 
 import numpy as np
 
-from rgi_toolkit.config import RestraintsConfig, resolve_restraints_config
+from rgi_toolkit.config import (
+    RESTRAINT_SECTIONS,
+    RestraintsConfig,
+    resolve_restraints_config,
+)
 from rgi_toolkit.selection import AtomSelector
 
 
@@ -36,80 +40,73 @@ def residue_selection(chain: str, residues: str, atoms: str = "all") -> str:
     return selection
 
 
-def make_config(
-    preset: str,
-    *,
-    selection1: str = "",
-    selection2: str = "",
-    distance: float = 25.0,
-    tolerance: float = 0.0,
-    custom: str = "",
-    config_path: str = "",
-    base_dir=None,
-) -> dict:
-    """Build a distance/ligand preset, or load a full shared YAML/JSON config.
+FORM_SECTIONS = {
+    "distance": "distance_restraints_config",
+    "conformer": "conformer_restraints_config",
+    "angle": "angle_restraints_config",
+    "custom": "custom_restraints_config",
+    "RMSD": "rmsd_restraints_config",
+}
 
-    A nonzero tolerance creates a free interval around the requested distance.
-    Ligand presets still require the host to opt the intended entities in.
+
+def make_config(config=None, *, config_text="", config_path="", base_dir=None):
+    """Validate one ordinary RGI mapping, YAML/JSON text, or external file.
+
+    ``custom`` keeps its toolkit meaning: a custom energy entry. Whole-config
+    text and files are separate input methods, not restraint types.
     """
-    presets = {"distance", "ligand_geometry", "distance+ligand_geometry", "custom"}
-    if preset not in presets:
-        raise ValueError(
-            f"Unknown RGI preset {preset!r}; choose one of {sorted(presets)}."
-        )
-    if preset == "custom":
-        if bool(custom.strip()) == bool(config_path.strip()):
-            raise ValueError(
-                "Provide either YAML/JSON text or a config file, not both."
-            )
-        if config_path.strip():
-            config = {"config_path": config_path.strip()}
-        else:
-            import yaml
+    sources = (config is not None, bool(config_text.strip()), bool(config_path.strip()))
+    if sum(sources) != 1:
+        raise ValueError("Provide exactly one config mapping, YAML/JSON text, or file.")
+    if config_path.strip():
+        config = {"config_path": config_path.strip()}
+    elif config_text.strip():
+        import yaml
 
-            config = yaml.safe_load(custom)
-            if not isinstance(config, dict):
-                raise ValueError("RGI YAML/JSON must contain a configuration mapping.")
-            if set(config) == {"restraints_config"}:
-                config = config["restraints_config"]
-        config = resolve_restraints_config(config, base_dir=base_dir)
-    else:
-        config = {"verbose": True}
-        if "distance" in preset:
-            distance, tolerance = float(distance), float(tolerance)
-            if not math.isfinite(distance) or distance <= 0:
-                raise ValueError(
-                    "Distance must be a positive finite number in Angstrom."
-                )
-            if not math.isfinite(tolerance) or not 0 <= tolerance < distance:
-                raise ValueError(
-                    "Tolerance must be nonnegative and smaller than distance."
-                )
-            AtomSelector(selection1)
-            AtomSelector(selection2)
-            penalty = (
-                {"harmonic": {"target_distance": distance}}
-                if tolerance == 0
-                else {
-                    "flat-bottomed": {
-                        "target_distance1": distance - tolerance,
-                        "target_distance2": distance + tolerance,
-                    }
-                }
-            )
-            config["distance_restraints_config"] = [
-                {
-                    "atom_selection1": selection1,
-                    "atom_selection2": selection2,
-                    **penalty,
-                }
-            ]
-        if "ligand_geometry" in preset:
-            config["conformer_restraints_config"] = {"plane": {"weight": 1.0}}
+        config = yaml.safe_load(config_text)
+    if not isinstance(config, dict):
+        raise ValueError("RGI config must be a mapping.")
+    if set(config) == {"restraints_config"}:
+        config = config["restraints_config"]
+    config = resolve_restraints_config(copy.deepcopy(config), base_dir=base_dir)
     if not isinstance(config, dict):
         raise ValueError("RGI config must be a mapping.")
     RestraintsConfig.from_dict(config)
+    if not any(
+        config.get(key) is not None
+        and (key == "conformer_restraints_config" or bool(config[key]))
+        for key in RESTRAINT_SECTIONS
+    ):
+        raise ValueError("Add at least one enabled restraint.")
     return config
+
+
+def compose_config(items, *, settings=None, base_dir=None):
+    """Append native entries without losing repeated types or mixed restraints.
+
+    Each item is a ``(type, native_entry)`` pair. Conformer is one shared mapping
+    in the toolkit; its entity opt-ins belong to the predictor input.
+    """
+    config = copy.deepcopy(settings) if settings is not None else {"verbose": True}
+    if not isinstance(config, dict):
+        raise ValueError("Global settings must be a mapping.")
+    for kind, entry in items:
+        if kind not in FORM_SECTIONS:
+            raise ValueError(
+                f"Choose an RGI restraint type: {', '.join(FORM_SECTIONS)}."
+            )
+        section = FORM_SECTIONS[kind]
+        if not isinstance(entry, dict):
+            raise ValueError(f"{section} entries must be mappings.")
+        if kind == "conformer":
+            if config.get(section) is not None:
+                raise ValueError(
+                    "conformer uses one shared configuration; select multiple chains."
+                )
+            config[section] = copy.deepcopy(entry)
+        else:
+            config.setdefault(section, []).append(copy.deepcopy(entry))
+    return make_config(config, base_dir=base_dir)
 
 
 def restraint_inventory(restraints) -> dict[str, int]:

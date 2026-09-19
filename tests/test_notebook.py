@@ -1,4 +1,4 @@
-"""Validate notebook presets against real configuration and selection behavior."""
+"""Validate notebook configs against real configuration and selection behavior."""
 
 import json
 
@@ -8,6 +8,7 @@ import pytest
 from rgi_toolkit.atom_context import AtomRecord
 from rgi_toolkit.combined import CombinedRestraints
 from rgi_toolkit.notebook import (
+    compose_config,
     distance_report,
     make_config,
     residue_selection,
@@ -36,23 +37,33 @@ def test_invalid_ranges_fail_before_prediction(residues):
         residue_selection("A", residues)
 
 
-@pytest.mark.parametrize(
-    "distance,tolerance", [(0, 0), (float("nan"), 0), (4, 4), (4, -1)]
-)
-def test_invalid_distances_fail_before_prediction(distance, tolerance):
+@pytest.mark.parametrize("distance", [float("nan"), float("inf")])
+def test_invalid_distances_fail_before_prediction(distance):
     with pytest.raises(ValueError):
         make_config(
-            "distance",
-            selection1="chain A",
-            selection2="chain B",
-            distance=distance,
-            tolerance=tolerance,
+            {
+                "distance_restraints_config": [
+                    {
+                        "atom_selection1": "chain A",
+                        "atom_selection2": "chain B",
+                        "harmonic": {"target_distance": distance},
+                    }
+                ]
+            }
         )
 
 
-def test_preset_builds_real_spec_and_measures_each_sample():
+def test_native_config_builds_real_spec_and_measures_each_sample():
     config = make_config(
-        "distance", selection1="chain A", selection2="chain B", distance=25, tolerance=2
+        {
+            "distance_restraints_config": [
+                {
+                    "atom_selection1": "chain A",
+                    "atom_selection2": "chain B",
+                    "flat-bottomed": {"target_distance1": 23, "target_distance2": 27},
+                }
+            ]
+        }
     )
     restraints = CombinedRestraints()
     restraints.setup(Adapter(), config=config)
@@ -73,15 +84,64 @@ def test_external_config_resolves_relative_references(tmp_path):
         ]
     }
     (tmp_path / "rgi.json").write_text(json.dumps(config))
-    actual = make_config("custom", config_path="rgi.json", base_dir=tmp_path)
+    actual = make_config(config_path="rgi.json", base_dir=tmp_path)
     assert actual["rmsd_restraints_config"][0]["ref_pdb"] == str(
         tmp_path / "target.pdb"
     )
 
 
-def test_custom_accepts_yaml_and_rejects_ambiguous_sources():
-    assert make_config("custom", custom="conformer_restraints_config: {}")
-    with pytest.raises(ValueError, match="either"):
-        make_config("custom", custom="{}", config_path="rgi.yaml")
+def test_native_config_text_is_separate_from_custom_energy():
+    assert make_config(config_text="conformer_restraints_config: {}")
+    with pytest.raises(ValueError, match="exactly one"):
+        make_config(config_text="{}", config_path="rgi.yaml")
     with pytest.raises(ValueError):
-        make_config("custom", custom="[1, 2]")
+        make_config(config_text="[1, 2]")
+
+
+def test_multiple_types_and_repeated_entries_keep_native_fields():
+    distance = {
+        "atom_selection1": "chain A and name CA",
+        "atom_selection2": "chain B",
+        "harmonic": {"target_distance": 25},
+        "move": 2,
+        "start_step": 5,
+    }
+    angle = {
+        "atom_selection1": "chain A",
+        "atom_selection2": "chain B",
+        "atom_selection3": "chain C",
+        "harmonic": {"target_angle": 90},
+    }
+    custom = {"selections": {"P": "protein"}, "energy": "harmonic(rg(P), 12)"}
+    rmsd = {
+        "ref_cif": "reference.cif",
+        "atom_selection_target_fit": "backbone",
+        "atom_selection_ref_fit": "backbone",
+        "harmonic": {"target_rmsd": 0},
+    }
+    config = compose_config(
+        [
+            ("distance", distance),
+            ("distance", distance),
+            ("conformer", {}),
+            ("angle", angle),
+            ("custom", custom),
+            ("RMSD", rmsd),
+            ("RMSD", rmsd),
+        ]
+    )
+    assert len(config["distance_restraints_config"]) == 2
+    assert len(config["rmsd_restraints_config"]) == 2
+    assert config["angle_restraints_config"] == [angle]
+    assert config["custom_restraints_config"] == [custom]
+    assert config["conformer_restraints_config"] == {}
+    config["distance_restraints_config"][0]["harmonic"]["target_distance"] = 35
+    assert distance["harmonic"]["target_distance"] == 25
+    assert config["distance_restraints_config"][1]["harmonic"]["target_distance"] == 25
+
+
+def test_conformer_is_one_shared_config_and_empty_inputs_fail():
+    with pytest.raises(ValueError, match="one shared"):
+        compose_config([("conformer", {}), ("conformer", {})])
+    with pytest.raises(ValueError, match="at least one"):
+        compose_config([])

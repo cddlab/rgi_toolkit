@@ -32,6 +32,6 @@ jobs:
         # `--extra torch` pulls the CPU-only wheel (see the pytorch-cpu index in
         # pyproject.toml): the torch backend is the primary one (boltz / protenix /
         # chai / esmfold2). Install JAX too so AF3 and backend parity tests run.
-        run: uv sync --frozen --extra torch --extra jax
+        run: uv sync --frozen --extra torch --extra jax --extra notebook
       - name: Test
         run: uv run pytest -m "not gpu"

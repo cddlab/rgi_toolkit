@@ -3,9 +3,9 @@
 Restraint-Guided Inference (RGI) toolkit for diffusion-based structure predictors
 (PyTorch and JAX).
 
-**New to RGI?** The [ColabFold notebooks](docs/colabfold.md) provide optional RGI,
-distance and ligand-geometry forms, custom YAML/JSON, and final-distance reports.
-Leave `use_rgi` off for vanilla prediction.
+The [ColabFold notebooks](docs/colabfold.md) provide forms for **distance, conformer,
+angle, custom and RMSD**, including repeated and mixed restraints with native atom
+selections. Leave `use_rgi` off for vanilla prediction.
 
 **Implemented and available in the following 10 models** (across 8 predictor integrations):
 
