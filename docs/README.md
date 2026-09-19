@@ -8,6 +8,8 @@ contracts, optimizer algorithms, and verification against independent implementa
 
 ## Tool guides
 
+For a form-based introduction, use the [ColabFold notebooks](colabfold.md).
+
 | Predictor         | Backend | Config placement                                              | Guide                              |
 | ----------------- | ------- | ------------------------------------------------------------- | ---------------------------------- |
 | Boltz-1 / Boltz-2 | PyTorch | `restraints_config` in the input YAML                         | [Boltz](boltz_restr.md)            |
