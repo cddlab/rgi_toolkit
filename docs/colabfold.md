@@ -149,7 +149,5 @@ selection, geometry and optimization remain in RGI-toolkit. The optional
 `notebook_widgets.RestraintEditor` is still available for separate Jupyter applications;
 ColabFold does not use it or require `ipywidgets`.
 
-`examples/colabfold/mixed_restraints.py` exercises vanilla, all five types together,
-then vanilla again and checks written CIF geometry. ColabFold scripts cover the
-model matrix and batch isolation. Generated results belong under `.cache`. Release
-Colab sessions after collecting E2E results.
+ColabFold scripts cover the model matrix and batch isolation. Generated results belong
+under `.cache`. Release Colab sessions after collecting E2E results.
