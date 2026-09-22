@@ -401,11 +401,12 @@ def test_vdw_mode_ligand_protein_removed():
         build_spec([lcA], [], {"vdw": {"weight": 1.0, "mode": "ligand_protein"}})
 
 
-@pytest.mark.parametrize("term,default", [("bond", 0.0), ("chiral", 0.05)])
+@pytest.mark.parametrize("term", ["bond", "angle", "chiral", "cistrans", "plane"])
+@pytest.mark.parametrize("default", [0.0, 0.05])
 def test_conf_slack_null_handling_uniform(term, default):
     """Omitted/null slack uses each term's default; an explicit zero stays zero.
 
-    The chiral default of 0.05 distinguishes correct parsing from truthiness coercion.
+    A synthetic nonzero fallback guards against replacing explicit zero by truthiness.
     """
     from rgi_toolkit.featurizer import _conf_slack
 
@@ -415,6 +416,40 @@ def test_conf_slack_null_handling_uniform(term, default):
     assert _conf_slack({term: {"slack": None}}, term, default) == default  # null
     assert _conf_slack({term: {"slack": 0}}, term, default) == 0.0  # explicit 0 kept
     assert _conf_slack({term: {"slack": 0.3}}, term, default) == pytest.approx(0.3)
+
+
+@pytest.mark.parametrize(
+    "chiral_config,expected",
+    [
+        (None, (0.0004, 0.0064)),
+        ({}, (0.0004, 0.0064)),
+        ({"slack": None}, (0.0004, 0.0064)),
+        ({"slack": 0}, (0.0004, 0.0064)),
+        ({"slack": 0.05}, (0.0, 0.0009)),
+    ],
+)
+def test_conformer_chiral_default_is_harmonic(chiral_config, expected):
+    """Small volume errors are penalized unless a tolerance is explicitly requested."""
+    from rgi_toolkit.energy import numpy_energy
+
+    mol = Chem.MolFromSmiles("C[C@H](O)N")
+    reference = np.array([[1, 0, 0], [0, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float)
+    ligand = LigandConf(mol, reference, np.arange(4), conformer_restraints=True)
+    config = {
+        key: {"weight": 0} for key in ("bond", "angle", "cistrans", "plane", "vdw")
+    }
+    config["relax_force_field"] = {"ligand": "none"}
+    if chiral_config is not None:
+        config["chiral"] = chiral_config
+    spec = build_spec([ligand], conformer_config=config)
+    assert spec.chiral is not None and len(spec.chiral.idx) == 1
+    prepared = numpy_energy.prepare_spec(spec)
+    for deviation, energy in zip((0.02, 0.08), expected, strict=True):
+        query = reference.copy()
+        query[3, 2] += deviation
+        assert numpy_energy.total_energy(
+            query[spec.active_sites], prepared
+        ) == pytest.approx(energy)
 
 
 def test_intramolecular_vdw_does_not_use_reference_distance_cutoff():

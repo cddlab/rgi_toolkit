@@ -871,7 +871,7 @@ def build_spec(
     aw = _conf_weight(conformer_config, "angle")
     asl = _conf_slack(cfg, "angle", 0.0)
     cw = _conf_weight(conformer_config, "chiral")
-    csl = _conf_slack(cfg, "chiral", 0.05)
+    csl = _conf_slack(cfg, "chiral", 0.0)
     dw = _conf_weight(conformer_config, "cistrans")
     dsl = _conf_slack(cfg, "cistrans", 0.0)
     tw = _conf_weight(conformer_config, "torsion")

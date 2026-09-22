@@ -133,7 +133,7 @@ command passes `--use_msa true`, so protenix runs its (ColabFold-compatible) MSA
         "stop_sigma": -1,
         "bond": { "weight": 1.0, "slack": 0.0 },
         "angle": { "weight": 1.0, "slack": 0.0 },
-        "chiral": { "weight": 1.0, "slack": 0.05 },
+        "chiral": { "weight": 1.0, "slack": 0.0 },
         "plane": { "weight": 1.0 },
         "cistrans": { "weight": 1.0, "slack": 0.0 },
         "vdw": { "weight": 1.0 }

@@ -197,8 +197,8 @@ SSSR perception splits a purine in two. Keep actual local peptide planes, typica
 weight, **not slack**: with `use_esd: true`, `_monlib_spec.py` packs `weight / ESD**2`;
 otherwise it packs `weight`. Plane additionally
 multiplies by group size so its existing RMS-squared kernel equals the per-atom squared sum.
-Explicit user slack remains separate; dictionary slack defaults to 0 for all terms (reference
-chiral keeps 0.05). Nonpositive ESD disables energy, retaining topology exclusions; nonfinite
+Explicit user slack remains separate; reference and dictionary slack default to 0 for all
+terms, including chiral. Nonpositive ESD disables energy, retaining topology exclusions; nonfinite
 active targets/ESDs raise. With `use_esd: true`, reference geometry is also ESD-normalized:
 `_conformer_esd.py` supplies Gemmi-style coordinate-fallback ESDs (bond 0.02 A,
 angle 3 degrees), propagates reference chiral ESDs through the same three-bond /
