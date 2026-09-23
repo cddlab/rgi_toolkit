@@ -253,6 +253,14 @@ def _extract_conformer(
             if b.GetIsAromatic() or b.IsInRing():
                 continue
             aj, ak = b.GetBeginAtom(), b.GetEndAtom()
+            # Cumulated double bonds have a linear endpoint (e.g. azides and
+            # allenes), so this four-atom E/Z dihedral is undefined there.
+            if any(
+                other.GetIdx() != b.GetIdx() and other.GetBondTypeAsDouble() >= 2
+                for atom in (aj, ak)
+                for other in atom.GetBonds()
+            ):
+                continue
             j, k = aj.GetIdx(), ak.GetIdx()
             nbr_j = [n.GetIdx() for n in aj.GetNeighbors() if n.GetIdx() != k]
             nbr_k = [n.GetIdx() for n in ak.GetNeighbors() if n.GetIdx() != j]

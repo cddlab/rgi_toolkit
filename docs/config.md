@@ -933,7 +933,7 @@ The original plane membership remains available for VdW topology exclusions. Sta
 | `angle` | `weight` (1.0), `slack` (0.0 rad) | bond angles toward ideal; targets within 0.5° of 180° use a stable cosine residual |
 | `chiral` | `weight` (1.0), `slack` (0.0 Å³) | signed chiral volume; the library may also allow either sign |
 | `plane` | `weight` (0.0), `slack` (0.0 Å) | **best-fit-plane** flatness of whole planar atom groups ([servalcat](https://github.com/keitaroyam/servalcat)-style) — penalises each group's out-of-plane RMS deviation toward 0. Fires on (a) aromatic/conjugated rings (whole ring) and (b) non-ring sp2 groups (an acyclic double-bond centre + its heavy neighbors: carbonyl / amide / ester / carboxyl / trisubstituted alkene). Group membership is confirmed by the reference conformer being coplanar (not the RDKit aromaticity flag). Set `plane: {weight: 1}` to activate |
-| `cistrans` | `weight` (1.0), `slack` (0.0 rad) | ligand acyclic double-bond E/Z geometry; period 1 preserves the stereoisomer |
+| `cistrans` | `weight` (1.0), `slack` (0.0 rad) | ligand acyclic double-bond E/Z geometry; period 1 preserves the stereoisomer. Cumulated double bonds (e.g. azides and allenes) are excluded because their linear endpoint does not define this dihedral |
 | `torsion` | `weight` (0.0), `slack` (0.0 rad) | protein side-chain χ, peptide ω and acyclic sp2 torsions, with explicit periodicity; enable with `torsion: {weight: 1}` |
 | `vdw` | `weight` (1.0), `mode` (`"both"`), `scale` (0.75), `dmax` (5.0 Å), `max_neighbors` (32), `neighbor_skin` (2.0 Å) | chemical contact distances and optional ESD-based clash penalties, with unrestricted CG steps and exact Verlet caches validated at every trial |
 

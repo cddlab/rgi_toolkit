@@ -187,6 +187,28 @@ def _ligand(smiles, offset=0, enabled=True):
     )
 
 
+@pytest.mark.parametrize("smiles", ["CN=[N+]=[N-]", "CC=C=CC", "CC=C=O"])
+def test_cumulated_double_bonds_do_not_define_ez_dihedrals(smiles):
+    from rgi_toolkit.featurizer import _extract_conformer
+
+    ligand = _ligand(smiles)
+    bonds, angles, _chirals, cistrans, _planes = _extract_conformer(
+        [ligand], relax=False
+    )
+    assert bonds and angles
+    assert not cistrans
+
+
+def test_azide_does_not_remove_isolated_or_conjugated_alkene_restraints():
+    from rgi_toolkit.featurizer import _extract_conformer
+
+    ligand = _ligand("CN=[N+]=[N-].C/C=C/C=C/C")
+    _bonds, _angles, _chirals, cistrans, _planes = _extract_conformer(
+        [ligand], relax=False
+    )
+    assert {(row[1], row[2]) for row in cistrans} == {(5, 6), (7, 8)}
+
+
 def test_ligand_sp2_uses_relaxed_coords_and_preserves_double_bond_ez(monkeypatch):
     from rgi_toolkit import featurizer
 
