@@ -36,7 +36,7 @@ from rgi_toolkit.optim._cell_list import (
     CELL_OFFSETS,
 )
 from rgi_toolkit.optim._cg_config import EPS, GTOL
-from rgi_toolkit.optim._options import resolve_line_search
+from rgi_toolkit.optim._options import resolve_gtol, resolve_line_search
 from rgi_toolkit.spec import check_active_vdw_int32_safe
 
 logger = logging.getLogger(__name__)
@@ -460,6 +460,7 @@ def make_minimizer(
     *,
     line_search=None,
     return_info=False,
+    gtol=GTOL,
 ):
     """Return a callable pytree ``minimize(coords, sigma, step) -> coords``.
 
@@ -478,7 +479,9 @@ def make_minimizer(
         raise ValueError("return_info is supported only for method='cg'")
     from rgi_toolkit.optim._jax_state import prepare_minimizer
 
-    return prepare_minimizer(spec, max_iter, line_search, return_info)
+    return prepare_minimizer(
+        spec, max_iter, line_search, return_info, resolve_gtol(gtol)
+    )
 
 
 @sequential_vmap
@@ -587,6 +590,7 @@ def _minimize(minimizer, coords, sigma, step):
                 active,
                 options.max_iter,
                 line_search=options.line_search,
+                gtol=options.gtol,
                 cache=cache,
                 prepare=lambda u, c: prepare(physical(u), c),
             )
@@ -606,7 +610,7 @@ def _minimize(minimizer, coords, sigma, step):
                     value_and_grad=True,
                     has_aux=True,
                     maxiter=options.max_iter,
-                    tol=GTOL,
+                    tol=options.gtol,
                     linesearch="zoom",
                     implicit_diff=False,
                 )

@@ -450,6 +450,7 @@ class CombinedRestraints:
                 max_iter=self.config.max_iter,
                 method=self.config.method,
                 line_search=self.config.line_search,
+                gtol=self.config.gtol,
             )
         elif b == "jax":
             from rgi_toolkit.optim.jax_optim import make_minimizer
@@ -459,6 +460,7 @@ class CombinedRestraints:
                 max_iter=self.config.max_iter,
                 method=self.config.method,
                 line_search=self.config.line_search,
+                gtol=self.config.gtol,
             )
         else:
             raise ValueError(f"unknown backend: {b}")
@@ -499,6 +501,7 @@ class CombinedRestraints:
                     max_iter=self.config.max_iter,
                     method=self.config.method,
                     line_search=self.config.line_search,
+                    gtol=self.config.gtol,
                     return_info=True,
                 )
             return self._minimize_info_fn

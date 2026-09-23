@@ -1,8 +1,18 @@
 """Backend-independent optimizer selection and validation."""
 
+from rgi_toolkit._config_util import finite_float
+
 CG_METHODS = frozenset({"cg", "ncg", "nonlinear-cg", "nonlinearcg"})
 LBFGS_METHODS = frozenset({"l-bfgs", "lbfgs"})
 LINE_SEARCHES = frozenset({"armijo", "strong-wolfe"})
+
+
+def resolve_gtol(value):
+    """Validate a configured gradient threshold before constructing a solver."""
+    value = finite_float(value, "gtol")
+    if value < 0:
+        raise ValueError("gtol must be >= 0")
+    return value
 
 
 def resolve_line_search(method, line_search=None):

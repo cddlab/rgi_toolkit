@@ -29,7 +29,8 @@ from rgi_toolkit.group_geom_restr_data import (
     DihedralRestraintData,
     ImproperRestraintData,
 )
-from rgi_toolkit.optim._options import resolve_line_search
+from rgi_toolkit.optim._cg_config import GTOL
+from rgi_toolkit.optim._options import resolve_gtol, resolve_line_search
 from rgi_toolkit.plane_restr_data import PlaneRestraintData, count_plane_groups
 from rgi_toolkit.ref_geom_restr_data import RefGeomData, is_ref_anchored
 from rgi_toolkit.rmsd_restr_data import RmsdData
@@ -103,6 +104,7 @@ class RestraintsConfig:
     method: str = "CG"
     line_search: str | None = None
     max_iter: int = 100
+    gtol: float = GTOL
     # Shared conformer window; +inf starts at the first diffusion step.
     conf_start_sigma: float = float("inf")
     conf_stop_sigma: float = -1.0  # shared conformer lower bound; -1 = never released
@@ -147,6 +149,7 @@ class RestraintsConfig:
             "method",
             "line_search",
             "max_iter",
+            "gtol",
             "conformer_restraints_config",
             "custom_restraints_config",
             "base_pair_restraints_config",
@@ -278,6 +281,7 @@ class RestraintsConfig:
             method=method,
             line_search=line_search,
             max_iter=int(max_iter),
+            gtol=resolve_gtol(config.get("gtol", GTOL)),
             conf_start_sigma=conf_start_sigma,
             conf_stop_sigma=conf_stop_sigma,
             conf_start_step=conf_start_step,

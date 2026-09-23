@@ -41,6 +41,7 @@ restraints_config:
   method: ...         # "CG" | "l-bfgs"
   line_search: ...    # CG only: "strong-wolfe" (default) | "armijo"
   max_iter: ...       # int
+  gtol: ...           # nonnegative finite float, default 1e-5
   # --- restraints (each block optional) ---
   distance_restraints_config: [ ... ]   # list
   angle_restraints_config:    [ ... ]   # list  (group-centroid angle)
@@ -114,6 +115,7 @@ and [one section](../examples/distance/boltz-2/qbp_25.00.yaml).
 | `method` | str | `"CG"` | Optimizer: `"CG"` (nonlinear conjugate gradient) or `"l-bfgs"` (opt-in). |
 | `line_search` | str | `"strong-wolfe"` | CG only: `"armijo"` or `"strong-wolfe"`. Omit this key with L-BFGS. |
 | `max_iter` | int | `100` | Nonnegative maximum optimizer iterations per denoising step, shared by all methods. |
+| `gtol` | float | `1e-5` | Nonnegative finite gradient tolerance for CG and L-BFGS on both backends. Smaller values request tighter optimization. |
 
 Choose one of these three configurations inside `restraints_config`:
 
@@ -135,11 +137,16 @@ Omitting both keys selects CG with Strong Wolfe. Armijo restores the historical
 backtracking search and stops when the relative energy change is below `1e-9`;
 this is reported as `FUNCTION_TOLERANCE`, distinct from gradient convergence.
 Strong Wolfe retains the SciPy-style PR+ solver and its gradient-based stopping rule.
-CG and L-BFGS use a gradient tolerance of `1e-5` on both backends.
-For CG this matches SciPy; Armijo additionally has the energy-change stop.
+CG and L-BFGS default to a gradient tolerance of `1e-5` on both backends.
+Set `gtol: 1e-8` inside `restraints_config` to request a tighter threshold.
+CG and Torch L-BFGS use the gradient infinity norm; JAX L-BFGS retains its
+library's Euclidean gradient norm. For CG the default matches SciPy;
+Armijo additionally has the energy-change stop.
 This threshold bounds the gradient, not the distance or angle error; large groups
 can retain a measurable residual because their centroid gradients are divided by
 the number of atoms.
+Tightening `gtol` does not increase `max_iter`, remove other stopping rules,
+or guarantee a zero loss for competing restraints or a local minimum.
 L-BFGS uses the backend library's line search; an explicit `line_search` key with
 L-BFGS raises an error. See the [solver specification](SPEC.md#optimizers).
 

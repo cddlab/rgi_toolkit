@@ -443,7 +443,7 @@ step is carried between iterations. An accepted energy change smaller than
 the stopping rule of `11de8b4`; it is not a claim that the gradient converged.
 
 Both modes require finite values/gradients and representable coordinate movement,
-and report gradient convergence only when `max(abs(g)) <= 1e-5`. A failed search
+and report gradient convergence only when `max(abs(g)) <= gtol`. A failed search
 keeps the last accepted coordinates and terminates the invocation. There is no
 per-atom displacement clipping or failed-search retry. Neighbor lists are checked
 before every trial, including rejected trials.
@@ -508,7 +508,7 @@ Both Wolfe2 bracket orientations share one zoom body, and DCSRCH and Wolfe2 each
 request values and gradients at one loop site. This avoids duplicate compiled objective bodies
 without changing trial order, interpolation or search budgets.
 
-For Strong Wolfe, only `max(abs(g)) <= 1e-5` reports convergence. There is no energy-change
+For Strong Wolfe, only `max(abs(g)) <= gtol` reports convergence. There is no energy-change
 stop or restart latch, no accepted-step doubling, and no steepest-descent retry
 after failed searches. Failure returns the last accepted coordinates and terminates
 that minimization, even if earlier iterations moved atoms. The next denoising
@@ -563,10 +563,10 @@ is described by [Liu and Nocedal (1989)](https://link.springer.com/article/10.10
 
 | Backend | Delegation and explicit RGI options | Other stopping/history settings |
 | --- | --- | --- |
-| Torch | [`torch.optim.LBFGS`](https://github.com/pytorch/pytorch/blob/v2.6.0/torch/optim/lbfgs.py), `max_iter`, `tolerance_grad=1e-5`, `line_search_fn="strong_wolfe"` | Upstream defaults; the locked Torch 2.6 uses change tolerance `1e-9`, history size 100 |
-| JAX | [`jaxopt.LBFGS`](https://jaxopt.github.io/stable/_autosummary/jaxopt.LBFGS.html), `maxiter`, `tol=1e-5`, `linesearch="zoom"`, `implicit_diff=False` | Standard zoom search; upstream history size 10 and maximum 30 line-search steps |
+| Torch | [`torch.optim.LBFGS`](https://github.com/pytorch/pytorch/blob/v2.6.0/torch/optim/lbfgs.py), `max_iter`, `tolerance_grad=gtol`, `line_search_fn="strong_wolfe"` | Upstream defaults; the locked Torch 2.6 uses change tolerance `1e-9`, history size 100 |
+| JAX | [`jaxopt.LBFGS`](https://jaxopt.github.io/stable/_autosummary/jaxopt.LBFGS.html), `maxiter`, `tol=gtol`, `linesearch="zoom"`, `implicit_diff=False` | Standard zoom search; upstream history size 10 and maximum 30 line-search steps |
 
-CG and both L-BFGS adapters share the `1e-5` gradient threshold. Torch uses
+CG and both L-BFGS adapters use the configured `gtol`, which defaults to `1e-5`. Torch uses
 an infinity norm; JAXopt uses a Euclidean norm. Their other stopping rules differ.
 JAX's former backtracking override could fail a search without moving; its library
 tolerance of `1e-3` could then stop large centroid restraints far from their targets.

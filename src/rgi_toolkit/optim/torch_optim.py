@@ -25,7 +25,7 @@ import torch
 from rgi_toolkit.energy import torch_energy
 from rgi_toolkit.energy._terms import CONF_KEYS, PER_ENTRY_KEYS, TERM_BY_KEY
 from rgi_toolkit.optim._cg_config import GTOL
-from rgi_toolkit.optim._options import resolve_line_search
+from rgi_toolkit.optim._options import resolve_gtol, resolve_line_search
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +42,19 @@ def _max_disp(current, reference) -> float:
 
 class TorchRestraintOptimizer:
     def __init__(
-        self, spec, max_iter: int = 100, method: str = "CG", *, line_search=None
+        self,
+        spec,
+        max_iter: int = 100,
+        method: str = "CG",
+        *,
+        line_search=None,
+        gtol=GTOL,
     ):
         self.spec = spec
         self.max_iter = max_iter
         self.method = method
         self.line_search = resolve_line_search(method, line_search)
+        self.gtol = resolve_gtol(gtol)
         self._prepared = None
         self._prepared_g = {}  # cache {gate-state -> stable pre-gated prepared} (GPU CG)
         self._active_idx = None
@@ -455,6 +462,7 @@ class TorchRestraintOptimizer:
                     active,
                     mi,
                     line_search=self.line_search,
+                    gtol=self.gtol,
                     cache=cache,
                     prepare=lambda u, c: runtime.prepare(physical(u), c),
                 )
@@ -465,7 +473,7 @@ class TorchRestraintOptimizer:
                 opt = torch.optim.LBFGS(
                     [active],
                     max_iter=mi,
-                    tolerance_grad=GTOL,
+                    tolerance_grad=self.gtol,
                     line_search_fn="strong_wolfe",
                 )
 
@@ -502,7 +510,7 @@ class TorchRestraintOptimizer:
         active,
         energy_fn,
         max_iter,
-        gtol=GTOL,
+        gtol=None,
         state=None,
         **search_options,
     ):
@@ -526,7 +534,7 @@ class TorchRestraintOptimizer:
             value_grad,
             active.detach(),
             max_iter,
-            gtol=gtol,
+            gtol=self.gtol if gtol is None else resolve_gtol(gtol),
             state=state,
             **search_options,
         )
