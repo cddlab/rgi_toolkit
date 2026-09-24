@@ -94,7 +94,6 @@ def _custom_term(spec):
 class _SolverOptions:
     max_iter: int
     gtol: float
-    loss_tol: float | None
     line_search: str | None
     return_info: bool
     active: bool
@@ -136,7 +135,7 @@ class JaxMinimizer:
         return self(positions.reshape(-1, 3), sigma, step).reshape(positions.shape)
 
 
-def prepare_minimizer(spec, max_iter, line_search, return_info, gtol, loss_tol=None):
+def prepare_minimizer(spec, max_iter, line_search, return_info, gtol):
     """Prepare runtime arrays once on the host; retain only graph choices as metadata."""
     fixed = moving = None
     vc, ac = spec.vdw_config, spec.active_vdw_config
@@ -185,7 +184,6 @@ def prepare_minimizer(spec, max_iter, line_search, return_info, gtol, loss_tol=N
         _SolverOptions(
             max_iter,
             gtol,
-            loss_tol,
             line_search,
             return_info,
             spec.is_active(),

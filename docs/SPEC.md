@@ -90,8 +90,8 @@ decode the integer status on the host or compare it within JAX control flow.
 | `CGStatus` | Meaning |
 | --- | --- |
 | `INACTIVE` (0) | No active restraint window; no evaluations, with zero counters/value/norm |
-| `CONVERGED` (1) | Initial or accepted gradient meets `gtol`, or the explicit `loss_tol` target is met |
-| `MAX_ITER` (2) | The iteration budget ended before the configured convergence criterion was met |
+| `CONVERGED` (1) | Initial or accepted gradient meets `gtol` |
+| `MAX_ITER` (2) | The iteration budget ended before gradient convergence |
 | `LINE_SEARCH_FAILED` (3) | No acceptable step for the configured line search within its budget |
 | `NONFINITE` (4) | A nonfinite initial evaluation or the final failed search trial/slope |
 | `NO_PROGRESS` (5) | The final failed trial cannot change representable coordinates |
@@ -509,7 +509,7 @@ Both Wolfe2 bracket orientations share one zoom body, and DCSRCH and Wolfe2 each
 request values and gradients at one loop site. This avoids duplicate compiled objective bodies
 without changing trial order, interpolation or search budgets.
 
-By default, Strong Wolfe reports convergence only when `max(abs(g)) <= gtol`. There is no energy-change
+For Strong Wolfe, only `max(abs(g)) <= gtol` reports convergence. There is no energy-change
 stop or restart latch, no accepted-step doubling, and no steepest-descent retry
 after failed searches. Failure returns the last accepted coordinates and terminates
 that minimization, even if earlier iterations moved atoms. The next denoising
@@ -557,18 +557,6 @@ More--Thuente and bracketing algorithms documented in the pinned SciPy sources.
 Their smooth-objective assumptions do not establish a convergence theorem for
 RGI's sometimes modified-gradient molecular objective.
 
-### Optional loss target
-
-`loss_tol` defaults to `None`, preserving all existing stopping rules. When set,
-convergence instead requires `abs(active_objective) <= loss_tol`; `0.0` means
-exact zero in the working floating-point arithmetic. CG uses this criterion at
-initialization, after accepted steps, and for its prospective-direction shortcut.
-Armijo's relative-change stopping rule is disabled. `max_iter`, finite-value
-checks, line-search budgets, and inability to make representable progress remain.
-An unattainable target or nonzero-loss stationary point is not convergence.
-This setting does not change the objective, gradients, or restraint weights,
-and does not perturb the starting coordinates.
-
 ### L-BFGS
 
 L-BFGS is delegated to existing libraries rather than reimplemented. The method
@@ -579,15 +567,7 @@ is described by [Liu and Nocedal (1989)](https://link.springer.com/article/10.10
 | Torch | [`torch.optim.LBFGS`](https://github.com/pytorch/pytorch/blob/v2.6.0/torch/optim/lbfgs.py), `max_iter`, `tolerance_grad=gtol`, `line_search_fn="strong_wolfe"` | Upstream defaults; the locked Torch 2.6 uses change tolerance `1e-9`, history size 100 |
 | JAX | [`jaxopt.LBFGS`](https://jaxopt.github.io/stable/_autosummary/jaxopt.LBFGS.html), `maxiter`, `tol=gtol`, `linesearch="zoom"`, `implicit_diff=False` | Standard zoom search; upstream history size 10 and maximum 30 line-search steps |
 
-With `loss_tol` set, Torch retains the native L-BFGS algorithm, history, evaluation
-budget, and Strong-Wolfe search, but sets its gradient/change tolerances to zero.
-A closure guard exits once the loss target is reached and retains that evaluated
-coordinate set, even when found inside a line search. JAX retains its native
-updates/cache handling and tests the loss instead of its gradient norm between
-updates; an initially satisfied target takes no step. Failed JAX searches stop
-the opt-in solve. Neither path is a global-search or restart algorithm.
-
-By default, CG and both L-BFGS adapters use `gtol`, which defaults to `1e-5`. Torch uses
+CG and both L-BFGS adapters use the configured `gtol`, which defaults to `1e-5`. Torch uses
 an infinity norm; JAXopt uses a Euclidean norm. Their other stopping rules differ.
 JAX's former backtracking override could fail a search without moving; its library
 tolerance of `1e-3` could then stop large centroid restraints far from their targets.

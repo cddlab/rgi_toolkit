@@ -42,7 +42,6 @@ restraints_config:
   line_search: ...    # CG only: "strong-wolfe" (default) | "armijo"
   max_iter: ...       # int
   gtol: ...           # nonnegative finite float, default 1e-5
-  loss_tol: ...       # optional absolute loss threshold; null keeps default stops
   # --- restraints (each block optional) ---
   distance_restraints_config: [ ... ]   # list
   angle_restraints_config:    [ ... ]   # list  (group-centroid angle)
@@ -117,7 +116,6 @@ and [one section](../examples/distance/boltz-2/qbp_25.00.yaml).
 | `line_search` | str | `"strong-wolfe"` | CG only: `"armijo"` or `"strong-wolfe"`. Omit this key with L-BFGS. |
 | `max_iter` | int | `100` | Nonnegative maximum optimizer iterations per denoising step, shared by all methods. |
 | `gtol` | float | `1e-5` | Nonnegative finite gradient tolerance for CG and L-BFGS on both backends. Smaller values request tighter optimization. |
-| `loss_tol` | float or null | `null` | Opt-in absolute objective threshold. Replaces gradient convergence and disables change-tolerance stopping. `0.0` requests exact zero loss; iteration, evaluation, line-search, and numerical-progress limits remain. |
 
 Choose one of these three configurations inside `restraints_config`:
 
@@ -149,17 +147,6 @@ can retain a measurable residual because their centroid gradients are divided by
 the number of atoms.
 Tightening `gtol` does not increase `max_iter`, remove other stopping rules,
 or guarantee a zero loss for competing restraints or a local minimum.
-For controlled comparisons, set `loss_tol: 0.0` to require an exactly zero evaluated
-objective before reporting CG convergence. A positive value accepts
-`abs(loss) <= loss_tol`. This opt-in setting replaces the gradient stopping rule
-and disables Armijo's relative-change stop and Torch L-BFGS's change tolerance.
-The default `null` preserves existing behavior. All methods/backends support the
-option. Torch L-BFGS retains its native evaluation limit; failed searches,
-non-finite values, and lack of representable progress can still end a solve.
-`max_iter` remains an upper bound. A positive-loss stationary point is not made
-escapable by changing the stopping rule, and zero loss may be unattainable for
-incompatible restraints or custom objectives. This option does not perturb
-coordinates, change restraint weights, or add a global search.
 L-BFGS uses the backend library's line search; an explicit `line_search` key with
 L-BFGS raises an error. See the [solver specification](SPEC.md#optimizers).
 
