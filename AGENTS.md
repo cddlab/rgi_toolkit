@@ -96,10 +96,14 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
    Rebuilds preserve the objective
    and CG history. JAX L-BFGS reuses the accepted cache through JAXopt auxiliary state
    (`_jax_lbfgs.py`); every trial still checks its displacement, with unchanged library
-   search, history and stopping rules. `max_atom_step` and `neighbor_rebuild_interval` are retired
+   search, history and default stopping rules. `max_atom_step` and `neighbor_rebuild_interval` are retired
    config keys and raise migration errors. `method='l-bfgs'` remains opt-in;
    omit `line_search` with L-BFGS (an explicit key raises). JAX L-BFGS uses standard
    zoom search; CG and both L-BFGS adapters use the shared `GTOL=1e-5`.
+   Optional `loss_tol` replaces gradient convergence with `abs(loss) <= loss_tol`
+   and disables change-tolerance exits. It defaults to `None`; normal behavior is
+   unchanged. Zero requests exact zero, but iteration/evaluation/search limits
+   and numerical failure still stop a solve. It does not escape stationary points.
    JAX L-BFGS's previous backtracking override and
    library tolerance `1e-3` could leave large centroid restraints unmoved.
    Array-backed and formula/callable custom centroids use ordinary mean derivatives,

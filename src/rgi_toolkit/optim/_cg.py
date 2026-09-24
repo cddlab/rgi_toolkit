@@ -33,7 +33,7 @@ from rgi_toolkit.optim._cg_config import (
 )
 from rgi_toolkit.optim._cg_linesearch import strong_wolfe
 from rgi_toolkit.optim._cg_scalar import HostScalars, JaxScalars
-from rgi_toolkit.optim._options import resolve_line_search
+from rgi_toolkit.optim._options import resolve_line_search, resolve_loss_tol
 from rgi_toolkit.optim.info import CGInfo, CGStatus
 
 
@@ -168,6 +168,7 @@ def run_cg(
     *,
     line_search=None,
     gtol=GTOL,
+    loss_tol=None,
     ftol=ARMIJO_FTOL,
     max_ls=ARMIJO_MAX_ITER,
     state=None,
@@ -179,18 +180,22 @@ def run_cg(
 ):
     """Return coordinates and resumable state, including cumulative diagnostics."""
     is_armijo = resolve_line_search("CG", line_search) == "armijo"
+    loss_tol = resolve_loss_tol(loss_tol)
     s, xp = backend.s, backend.s.xp
     backend.prepare = prepare
     zero, izero = s.scalar(0), s.integer(0)
     empty = CGInfo(s.integer(CGStatus.INACTIVE), izero, izero, izero, zero, zero)
     old_info = empty if state is None else state.info
 
+    def converged(t):
+        return t.grad_norm <= gtol if loss_tol is None else abs(t.f) <= loss_tol
+
     def fresh(_):
         t = backend.evaluate(vg, x0, x0, x0 * 0, zero, izero, cache)
-        converged = t.finite & (t.grad_norm <= gtol)
+        done = t.finite & converged(t)
         status = xp.where(
             t.finite,
-            xp.where(converged, CGStatus.CONVERGED, CGStatus.MAX_ITER),
+            xp.where(done, CGStatus.CONVERGED, CGStatus.MAX_ITER),
             CGStatus.NONFINITE,
         )
         info = CGInfo(
@@ -207,7 +212,7 @@ def run_cg(
             -t.g,
             t.gg,
             t.f + xp.sqrt(t.gg) / 2.0,
-            t.finite & ~converged,
+            t.finite & ~done,
             info,
             t.cache,
             s.scalar(ARMIJO_INITIAL_STEP / ARMIJO_STEP_GROW),
@@ -273,7 +278,7 @@ def run_cg(
                 _d, dg = next_direction(t)
                 return xp.isfinite(dg) & (dg <= -DESCENT_C * t.gg)
 
-            return s.cond(t.grad_norm <= gtol, lambda _: s.boolean(True), descent, t)
+            return s.cond(converged(t), lambda _: s.boolean(True), descent, t)
 
         usable = (
             xp.isfinite(slope)
@@ -323,14 +328,14 @@ def run_cg(
 
         def accepted(_):
             d, _dg = next_direction(t)
-            converged = t.grad_norm <= gtol
+            done = converged(t)
             small_change = (
                 abs(t.f - st.f) < ftol * (1.0 + abs(st.f))
-                if is_armijo
+                if is_armijo and loss_tol is None
                 else s.boolean(False)
             )
             status = xp.where(
-                converged,
+                done,
                 CGStatus.CONVERGED,
                 xp.where(small_change, CGStatus.FUNCTION_TOLERANCE, CGStatus.MAX_ITER),
             )
@@ -350,7 +355,7 @@ def run_cg(
                     d,
                     t.gg,
                     st.f,
-                    ~(converged | small_change),
+                    ~(done | small_change),
                     info,
                     t.cache,
                     t.alpha,

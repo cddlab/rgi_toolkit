@@ -15,6 +15,16 @@ def resolve_gtol(value):
     return value
 
 
+def resolve_loss_tol(value):
+    """Resolve an optional absolute objective target; None keeps library defaults."""
+    if value is None:
+        return None
+    value = finite_float(value, "loss_tol")
+    if value < 0:
+        raise ValueError("loss_tol must be >= 0")
+    return value
+
+
 def resolve_line_search(method, line_search=None):
     """Resolve the CG default, or return None for L-BFGS's own line search."""
     name = str(method).lower()

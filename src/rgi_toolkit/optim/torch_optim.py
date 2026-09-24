@@ -25,7 +25,11 @@ import torch
 from rgi_toolkit.energy import torch_energy
 from rgi_toolkit.energy._terms import CONF_KEYS, PER_ENTRY_KEYS, TERM_BY_KEY
 from rgi_toolkit.optim._cg_config import GTOL
-from rgi_toolkit.optim._options import resolve_gtol, resolve_line_search
+from rgi_toolkit.optim._options import (
+    resolve_gtol,
+    resolve_line_search,
+    resolve_loss_tol,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +53,14 @@ class TorchRestraintOptimizer:
         *,
         line_search=None,
         gtol=GTOL,
+        loss_tol=None,
     ):
         self.spec = spec
         self.max_iter = max_iter
         self.method = method
         self.line_search = resolve_line_search(method, line_search)
         self.gtol = resolve_gtol(gtol)
+        self.loss_tol = resolve_loss_tol(loss_tol)
         self._prepared = None
         self._prepared_g = {}  # cache {gate-state -> stable pre-gated prepared} (GPU CG)
         self._active_idx = None
@@ -463,6 +469,7 @@ class TorchRestraintOptimizer:
                     mi,
                     line_search=self.line_search,
                     gtol=self.gtol,
+                    loss_tol=self.loss_tol,
                     cache=cache,
                     prepare=lambda u, c: runtime.prepare(physical(u), c),
                 )
@@ -470,12 +477,7 @@ class TorchRestraintOptimizer:
                 info = state.info
             else:
                 active.requires_grad_(True)
-                opt = torch.optim.LBFGS(
-                    [active],
-                    max_iter=mi,
-                    tolerance_grad=self.gtol,
-                    line_search_fn="strong_wolfe",
-                )
+                from rgi_toolkit.optim._torch_lbfgs import minimize as lbfgs_minimize
 
                 def closure():
                     nonlocal cache
@@ -484,7 +486,7 @@ class TorchRestraintOptimizer:
                     active.grad = g.detach()
                     return f.detach()
 
-                opt.step(closure)
+                lbfgs_minimize(active, closure, mi, self.gtol, self.loss_tol)
             new_active = active.detach()
 
         # Retain input coordinates if optimization produces non-finite values.
@@ -530,6 +532,7 @@ class TorchRestraintOptimizer:
             return gradient, energy.detach()
 
         search_options.setdefault("line_search", self.line_search)
+        search_options.setdefault("loss_tol", self.loss_tol)
         out, result = torch_cg(
             value_grad,
             active.detach(),

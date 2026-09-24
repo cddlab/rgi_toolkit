@@ -36,7 +36,11 @@ from rgi_toolkit.optim._cell_list import (
     CELL_OFFSETS,
 )
 from rgi_toolkit.optim._cg_config import EPS, GTOL
-from rgi_toolkit.optim._options import resolve_gtol, resolve_line_search
+from rgi_toolkit.optim._options import (
+    resolve_gtol,
+    resolve_line_search,
+    resolve_loss_tol,
+)
 from rgi_toolkit.spec import check_active_vdw_int32_safe
 
 logger = logging.getLogger(__name__)
@@ -461,6 +465,7 @@ def make_minimizer(
     line_search=None,
     return_info=False,
     gtol=GTOL,
+    loss_tol=None,
 ):
     """Return a callable pytree ``minimize(coords, sigma, step) -> coords``.
 
@@ -480,7 +485,12 @@ def make_minimizer(
     from rgi_toolkit.optim._jax_state import prepare_minimizer
 
     return prepare_minimizer(
-        spec, max_iter, line_search, return_info, resolve_gtol(gtol)
+        spec,
+        max_iter,
+        line_search,
+        return_info,
+        resolve_gtol(gtol),
+        resolve_loss_tol(loss_tol),
     )
 
 
@@ -591,6 +601,7 @@ def _minimize(minimizer, coords, sigma, step):
                 options.max_iter,
                 line_search=options.line_search,
                 gtol=options.gtol,
+                loss_tol=options.loss_tol,
                 cache=cache,
                 prepare=lambda u, c: prepare(physical(u), c),
             )
@@ -604,19 +615,28 @@ def _minimize(minimizer, coords, sigma, step):
                 g, f = value_grad(a, current)
                 return (f, current), g
 
-            opt = (
-                CachedLBFGS(
-                    fun=lbfgs_value_grad,
-                    value_and_grad=True,
-                    has_aux=True,
-                    maxiter=options.max_iter,
-                    tol=options.gtol,
-                    linesearch="zoom",
-                    implicit_diff=False,
-                )
-                .run(active, cache)
-                .params
+            solver = CachedLBFGS(
+                fun=lbfgs_value_grad,
+                value_and_grad=True,
+                has_aux=True,
+                maxiter=options.max_iter,
+                tol=options.gtol,
+                loss_tol=options.loss_tol,
+                linesearch="zoom",
+                implicit_diff=False,
             )
+            if options.loss_tol is None:
+                opt = solver.run(active, cache).params
+            elif options.max_iter == 0:
+                opt = active
+            else:
+                value = lbfgs_value_grad(active, cache)[0][0]
+                opt = jax.lax.cond(
+                    jnp.isfinite(value) & (jnp.abs(value) > options.loss_tol),
+                    lambda a: solver.run(a, cache).params,
+                    lambda a: a,
+                    active,
+                )
             info = inactive_info()
         active = jnp.where(jnp.all(jnp.isfinite(opt)), opt, active)
         return result(coords.at[..., active_idx, :].set(active), info)
