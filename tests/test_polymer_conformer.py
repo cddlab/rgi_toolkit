@@ -188,9 +188,10 @@ def test_protein_builds_peptide_link_plane_and_vdw_exclusions():
     # Peptide C-N and the CA-C-N 1-3 pair must never receive VdW repulsion.
     assert 2 * spec.n_active + 5 in set(av.chemistry["excluded"].tolist())
     assert 1 * spec.n_active + 5 in set(av.chemistry["excluded"].tolist())
-    # The omega CA-C-N-CA 1-4 pair spans different planes and remains eligible.
-    assert 1 * spec.n_active + 6 in set(av.chemistry["one_four"].tolist())
-    assert 1 * spec.n_active + 6 not in set(av.chemistry["excluded"].tolist())
+    # The omega CA-C-N-CA 1-4 pair is excluded even across different planes.
+    assert av.chemistry["one_four"].size == 0
+    assert 1 * spec.n_active + 6 in set(av.chemistry["excluded"].tolist())
+    # The N-CA-C-N-CA 1-5 pair remains eligible.
     assert 0 * spec.n_active + 6 not in set(av.chemistry["excluded"].tolist())
 
 

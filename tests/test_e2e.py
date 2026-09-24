@@ -625,13 +625,13 @@ def test_conformer_targets_and_minima_match_scipy(solver, kind, capsys):
     ids=["default-scale", "unit-scale"],
 )
 def test_intramolecular_vdw_matches_dense_scipy(solver, capsys, scale_config, scale):
-    mol, reference = ligand("CCCC")
+    mol, reference = ligand("CCCCC")
     coords = reference.copy()
-    coords[0], coords[3] = [0, 0, 0], [2, 0, 0]
+    coords[0], coords[4] = [0, 0, 0], [2, 0, 0]
     adapter = Adapter(
-        [AtomRecord("L", 1, i) for i in range(4)],
-        [LigandConf(mol, reference, np.arange(4), conformer_restraints=True)],
-        np.full(4, 6),
+        [AtomRecord("L", 1, i) for i in range(5)],
+        [LigandConf(mol, reference, np.arange(5), conformer_restraints=True)],
+        np.full(5, 6),
     )
     cr = setup(
         adapter,
@@ -648,22 +648,22 @@ def test_intramolecular_vdw_matches_dense_scipy(solver, capsys, scale_config, sc
         },
         solver,
     )
-    # Only terminal carbons are a nonexcluded 1-4 pair: (1.94 - .15) * 2 = 3.58 A before scaling.
-    contact = 3.58 * scale
-    assert len(cr.spec.vdw.idx) == 1
+    # Only terminal carbons form a nonexcluded 1-5 pair: 1.94 * 2 = 3.88 A.
+    contact = 3.88 * scale
+    np.testing.assert_array_equal(cr.spec.vdw.idx, [[0, 4]])
     assert cr.spec.vdw_config is None
 
     def objective(flat):
-        points = flat.reshape(4, 3)
-        return min(np.linalg.norm(points[0] - points[3]) - contact, 0.0) ** 2
+        points = flat.reshape(5, 3)
+        return min(np.linalg.norm(points[0] - points[4]) - contact, 0.0) ** 2
 
     diagnostic(cr, coords, solver, capsys, objective(coords.ravel()))
     result = scipy_solution(objective, coords, solver[1])
     assert result.fun < 1e-8, result
     out = drive(cr, coords, solver)[-1]
     assert objective(out.ravel()) <= result.fun + 1e-6
-    np.testing.assert_array_equal(out[1:3], coords[1:3])
-    np.testing.assert_allclose(out[[0, 3]].mean(0), coords[[0, 3]].mean(0), atol=1e-10)
+    np.testing.assert_array_equal(out[1:4], coords[1:4])
+    np.testing.assert_allclose(out[[0, 4]].mean(0), coords[[0, 4]].mean(0), atol=1e-10)
     diagnostic(cr, out, solver, capsys, objective(out.ravel()))
 
 
