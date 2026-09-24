@@ -377,7 +377,7 @@ VdW is an opt-in conformer term. `mode` selects intramolecular, intermolecular, 
 both categories. For an eligible pair, its contribution is
 `weight * min(d - scale * contact, 0)**2` by default. With `use_esd: true`,
 divide the residual by the pair ESD before squaring. Chemical contact priority is
-1-4, hydrogen bond, metal, dummy, then ordinary radius sum. Pair ESD is 0.2 Angstrom
+hydrogen bond, metal, dummy, then ordinary radius sum. Pair ESD is 0.2 Angstrom
 except dummy contacts at 0.3 Angstrom; hydrogen-inclusive radii are capped at
 2 Angstrom. Dictionary energy types take priority over approximate source/template
 chemistry, with a warning and elemental fallback when unavailable. All atoms,
@@ -385,12 +385,13 @@ including fixed background and nonrestrained ligands, are typed.
 
 | Pair path | Construction and movement |
 | --- | --- |
-| Within a restrained ligand | Static eligible pairs; excludes covalent 1-2/1-3 and same-plane 1-4 pairs; independent of reference distance |
+| Within a restrained ligand | Static eligible pairs; excludes all covalent 1-2/1-3/1-4 pairs; independent of plane membership and reference distance |
 | Between restrained ligands | Static all-cross-pairs rows; both endpoints move; no cutoff in unrelated reference coordinate frames |
 | Restrained atoms against background | Dynamic two-set list; background is non-padding atoms outside `active_sites`, held at the invocation's coordinates |
 | Eligible active-active contacts | Dynamic list covering polymer contacts and other moved atoms with conformer-restrained participation; static ligand pairs are excluded to prevent double counting |
 
-Topology and plane exclusions survive disabled geometry weights. A sorted cell
+All paths exclude covalent 1-2/1-3/1-4 pairs, including paths across polymer links.
+These exclusions survive disabled geometry weights and do not depend on plane membership. A sorted cell
 list filters topology, molecule mode and moving participation before selecting a
 fixed-width sparse buffer. One extra candidate detects capacity overflow; such
 query rows use complete pair sums, accumulating chunk gradients immediately to

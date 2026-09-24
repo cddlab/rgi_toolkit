@@ -227,7 +227,7 @@ partners). `P_intra` and `P_ll` are the explicit static pair counts defined belo
 | Active-active pairs involving conformer-restrained atoms | ordinary density: `O(N log N)` per required rebuild | `O(NK)`; overflowing rows add complete pair sums | `O(NK)` plus bounded chunks | A collapsed cell degrades to `O(N^2)` build time, without allocating an `N x N` distance matrix. |
 
 The dynamic rows show coordinate-search/scoring costs. Preparation indexes topology exclusions
-and 1–4 contacts by query atom in sorted, padded rows. With maximum row width `D`, each lookup
+by query atom in sorted, padded rows. With maximum row width `D`, each lookup
 costs `O(log D)` and the row tables use `O(N_query D)` storage. Sparse evaluations reuse contact
 parameters resolved at the last rebuild. If `M` active-active query rows overflow, their fallback
 costs `O(MN)` with fixed-size block padding and `O(N * chunk_size)` working storage.
@@ -1257,17 +1257,16 @@ The contact rules follow [Servalcat's geometry implementation](https://github.co
 
 | Contact, in priority order | $R_{ij}$ | ESD $\sigma_{ij}$ |
 |---|---|---|
-| Eligible 1–4 pair | radius sum minus 0.1 Å per N/O atom or 0.15 Å per other atom | 0.2 Å |
 | Donor–acceptor, including atoms of both classes | radius sum minus 0.3 Å | 0.2 Å |
 | Donor hydrogen–acceptor | acceptor radius plus 0.1 Å | 0.2 Å |
 | Metal contact with both ionic radii available | ionic radius sum | 0.2 Å |
 | One dummy atom / two dummy atoms | `max(0.7, radius sum - 0.7)` / radius sum | 0.3 Å |
 | Other | radius sum | 0.2 Å |
 
-Hydrogen-inclusive radii are preferred and capped at 2 Å. Covalent 1–2 and 1–3 pairs are
-excluded. A 1–4 pair is excluded only when both endpoints belong to a common plane group;
-otherwise its adjusted contact is retained. These exclusions use chemical topology even when
-bond, angle or plane energy blocks are disabled. Static ligand pairs are enumerated from
+Hydrogen-inclusive radii are preferred and capped at 2 Å. All covalent 1–2, 1–3 and 1–4 pairs
+are excluded, regardless of plane membership. These exclusions use chemical topology even
+when bond, angle or plane energy blocks are disabled, including paths across polymer links.
+The same rule applies to static ligand pairs and dynamic contacts. Static pairs are enumerated from
 topology; `dmax` is the baseline cutoff for dynamic neighbor searches.
 The verbose `finalize` `vdw=` value includes these static rows and both optimizer-only dynamic
 halves on Torch and JAX.
@@ -1283,8 +1282,8 @@ and gradient by four.
 
 `vdw.mode` picks **two categories** (default `"both"` = both):
 
-- `"intramolecular"` — clashes **within** one ligand or polymer chain, with the covalent and
-  plane exclusions above. Ligand pairs are static; polymer contacts use dynamic lists.
+- `"intramolecular"` — clashes **within** one ligand or polymer chain, with the covalent
+  exclusions above. Ligand pairs are static; polymer contacts use dynamic lists.
 - `"intermolecular"` — clashes between the ligand and **every other molecule**: the **fixed
   background** (every non-padding atom not being optimized — protein, DNA/RNA, any **non-restrained**
   ligand; dynamic, torch/jax) **and** other **restrained** ligands (≥2 ligands that each set
@@ -1349,7 +1348,7 @@ cutoff (never smaller than `dmax`). Hash collisions are checked against the full
 and each bucket is traversed completely in fixed-width chunks. Chemical topology exclusions,
 molecule mode and moving-atom participation are filtered **before** the K cap. Remaining
 candidates are ranked by clearance `distance - scale * R_ij`, so the most severe clashes
-win even when hydrogen bonds, metals and 1–4 contacts have different thresholds. Small type-pair
+win even when hydrogen bonds and metal contacts have different thresholds. Small type-pair
 tables and sparse topology codes avoid a dense atom-pair parameter matrix. At ordinary density the build remains
 `O(B log B + L log B)` / `O(N log N)`, with linear fixed-width working memory; a collapsed
 structure degrades to `O(LB)` / `O(N^2)` time without allocating a dense distance matrix.

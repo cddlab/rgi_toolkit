@@ -494,7 +494,7 @@ restraint, configured under `conformer_restraints_config.vdw` (one of bond/angle
 plane/cistrans/torsion/vdw). `mode` picks **two categories** (default `both` = both):
 
 - **Intramolecular** (`mode: intramolecular`): clashes WITHIN one ligand or polymer chain. Static
-  ligand pairs exclude 1-2/1-3 and same-plane 1-4 pairs; eligible 1-4 pairs remain.
+  ligand pairs exclude all covalent 1-2/1-3/1-4 pairs, regardless of plane membership.
   There is no reference-coordinate cutoff. Ligand pairs are built in
   `featurizer.py` (`_build_intramolecular_vdw`) and carried in `spec.vdw` (`VdwArrays`).
   Scored in the **energy layer → all backends**.
@@ -525,10 +525,11 @@ All paths share `weight * clamp(d - scale*contact, max=0)**2` by default;
 collects chemistry for ALL atoms, including fixed background and nonrestrained ligands.
 Configured `type_energy`/`ener_lib` parameters take priority; otherwise RDKit templates/source
 graphs give approximate chemistry, with warning plus elemental fallback when unavailable.
-Contact priority is 1-4, hydrogen bond, metal, dummy, ordinary; ESD is 0.2 A except dummy
+Contact priority is hydrogen bond, metal, dummy, ordinary; ESD is 0.2 A except dummy
 0.3 A. Hydrogen-inclusive radii are capped at 2 A. `scale` defaults to 0.75
-and multiplies the resulting contact, not unconditionally a radius sum. Topology and plane
-exclusions survive disabled geometry terms. `energy/_nonbonded.py` gathers common contact,
+and multiplies the resulting contact, not unconditionally a radius sum. Covalent 1-2/1-3/1-4
+exclusions survive disabled geometry terms and apply to dynamic polymer contacts too.
+`energy/_nonbonded.py` gathers common contact,
 inverse-variance and eligibility tables for BOTH neighbor ranking and energy scoring.
 These prepared constants belong to the Torch device/dtype cache; JAX casts table floats to
 the query dtype before its cell-list carry. Active pairs include a conformer-restrained atom

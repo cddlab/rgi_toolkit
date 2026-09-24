@@ -291,16 +291,11 @@ class VdwChemistry:
     def pair(self, first, second):
         key = tuple(sorted((int(first), int(second))))
         distance = self.bond_distances.get(key, 4)
-        if distance < 3 or (
-            distance == 3
-            and self.planes_by_atom.get(key[0], set())
-            & self.planes_by_atom.get(key[1], set())
-        ):
+        if distance <= 3:
             return None
         r, sigma = pair_contact(
             self.types[self.type_ids[first]],
             self.types[self.type_ids[second]],
-            distance == 3,
         )
         return r, 1 / sigma**2 if self.use_esd else 1.0
 
@@ -309,19 +304,17 @@ class VdwChemistry:
         query, target = np.asarray(query), np.asarray(target)
         qmap = {int(g): i for i, g in enumerate(query)}
         tmap = {int(g): i for i, g in enumerate(target)}
-        excluded, one_four = set(), set()
+        excluded = set()
         size = len(target)
         if len(query) * size > np.iinfo(np.int32).max:
             raise ValueError("VdW topology pair codes exceed int32 capacity")
-        for (a, b), distance in self.bond_distances.items():
+        for a, b in self.bond_distances:
             for first, second in ((a, b), (b, a)):
                 if first not in qmap or second not in tmap:
                     continue
                 code = qmap[first] * size + tmap[second]
                 if self.pair(a, b) is None:
                     excluded.add(code)
-                elif distance == 3:
-                    one_four.add(code)
         return {
             "query_types": self.type_ids[query],
             "target_types": self.type_ids[target],
@@ -332,7 +325,8 @@ class VdwChemistry:
                 self.one_four_table, 1 / 0.2**2 if self.use_esd else 1.0
             ),
             "excluded": np.asarray(sorted(excluded), dtype=np.int64),
-            "one_four": np.asarray(sorted(one_four), dtype=np.int64),
+            # Retain the packed schema for compatibility with stored specifications.
+            "one_four": np.empty(0, dtype=np.int64),
             "query_molecules": self.molecules[query],
             "target_molecules": self.molecules[target],
             "query_moving": np.isin(query, list(moving)),

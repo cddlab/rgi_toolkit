@@ -259,15 +259,18 @@ def test_servalcat_contact_rules(first, second, one_four, expected):
 
 
 @pytest.mark.parametrize("use_esd", [True, False])
-def test_one_four_exclusions_depend_on_planes_independently_of_energy_blocks(use_esd):
+@pytest.mark.parametrize("geometry_weight", [0.0, 1.0])
+def test_one_four_exclusions_survive_disabled_geometry_blocks(use_esd, geometry_weight):
     chain = _ligand("CCCCC")
-    config = {"vdw": {"scale": 1.0}, "use_esd": use_esd}
+    config = {
+        "vdw": {"scale": 1.0, "mode": "both"},
+        "use_esd": use_esd,
+        **{key: {"weight": geometry_weight} for key in ("bond", "angle", "plane")},
+    }
     plain = build_spec([chain], conformer_config=config)
-    np.testing.assert_array_equal(plain.vdw.idx, [[0, 3], [0, 4], [1, 4]])
+    np.testing.assert_array_equal(plain.vdw.idx, [[0, 4]])
     assert np.all(plain.vdw.weight == pytest.approx(25 if use_esd else 1))
-    np.testing.assert_allclose(
-        plain.vdw.r_min, [1.94 + 1.92 - 0.3, 3.88, 1.92 + 1.94 - 0.3]
-    )
+    np.testing.assert_allclose(plain.vdw.r_min, [3.88])
     aromatic = _ligand("c1ccccc1")
     assert build_spec([aromatic], conformer_config=config).vdw is None
     explicit = build_spec([aromatic], conformer_config=dict(config, plane={}))
@@ -298,21 +301,43 @@ def test_esd_switch_preserves_vdw_contacts_and_exclusions_in_every_packing_path(
     records = [AtomRecord("D", 1, 5, "DUM", "ligand", "UNK")]
     enabled = build_chemistry([ligand], elements, records, {"use_esd": True})
     disabled = build_chemistry([ligand], elements, records, option)
-    for other, sigma in ((3, 0.2), (4, 0.2), (5, 0.3)):
+    for other, sigma in ((4, 0.2), (5, 0.3)):
         contact, inverse = enabled.pair(0, other)
         assert inverse == pytest.approx(1 / sigma**2)
         assert disabled.pair(0, other) == pytest.approx((contact, 1))
-    assert enabled.pair(0, 1) is disabled.pair(0, 1) is None
+    for other in (1, 2, 3):
+        assert enabled.pair(0, other) is disabled.pair(0, other) is None
     for active in (False, True):
         query, target = np.arange(5), np.arange(6)
         on = enabled.subset(query, target, set(query), set(), active=active)
         off = disabled.subset(query, target, set(query), set(), active=active)
-        assert len(off["excluded"]) > 0 and len(off["one_four"]) > 0
+        assert 3 in off["excluded"] and 3 * len(target) in off["excluded"]
+        assert len(off["one_four"]) == 0
         for key in on:
             if key in ("inv_variances", "one_four_inv_variances"):
                 np.testing.assert_array_equal(off[key], 1)
             else:
                 np.testing.assert_array_equal(on[key], off[key])
+
+
+@pytest.mark.parametrize("backend", ["numpy", "torch", "jax"])
+@pytest.mark.parametrize("active", [False, True])
+def test_one_four_exclusions_cross_peptide_links_in_dynamic_paths(backend, active):
+    from rgi_toolkit.energy._nonbonded import pair_parameters
+
+    adapter, coords = _peptide("AA")
+    records = list(adapter.iter_atoms())
+    lookup = {(r.resid, r.name): r.index for r in records}
+    chemistry = build_chemistry([], adapter.get_elements(), records)
+    query = np.array([lookup[1, "CB"]])
+    # CB1-CA1-C1-N2-CA2: the last target is 1-5, across the peptide link.
+    target = np.array([lookup[1, "C"], lookup[2, "N"], lookup[2, "CA"]])
+    moving = set(query) | set(target) if active else set(query)
+    host = chemistry.subset(query, target, moving, set(), active=active)
+    ops = get_ops(backend)
+    prepared = prepare_chemistry(ops, host, ops.prepare_constant(coords))
+    _, _, allowed = pair_parameters(ops, prepared, 0, ops.asint(np.arange(3)))
+    np.testing.assert_array_equal(np.asarray(allowed), [False, False, True])
 
 
 def test_dictionary_vdw_types_cover_ligands_and_fixed_background(tmp_path, caplog):
@@ -415,7 +440,7 @@ def test_static_vdw_energy_and_gradient_use_contact_esd(backend, use_esd):
 @pytest.mark.parametrize("backend", ["torch", "jax"])
 @pytest.mark.parametrize("active", [False, True])
 def test_typed_cell_lists_match_dense_contacts_in_collapsed_batches(backend, active):
-    # More than one cell chunk, multiple molecules, excluded and eligible 1-4 pairs,
+    # More than one cell chunk, multiple molecules, excluded 1-4 and eligible 1-5 pairs,
     # exact overlaps and heterogeneous atom radii all share the same bucket.
     ligands = [_ligand("CCNCO", 5 * i) for i in range(12)]
     chemistry = build_chemistry(ligands, None)

@@ -170,7 +170,7 @@ def test_vdw_config_fixed_background():
 def test_intramolecular_vdw_static_arrays():
     """vdw mode=intramolecular builds a static spec.vdw (works in jax/numpy too),
     not the dynamic fixed-background vdw_config."""
-    m = Chem.MolFromSmiles("CCCCC")  # pentane: two nonplanar 1-4 pairs and one 1-5 pair
+    m = Chem.MolFromSmiles("CCCCC")  # pentane: only the 1-5 pair is nonbonded
     m = Chem.AddHs(m)
     AllChem.EmbedMolecule(m, randomSeed=1)
     m = Chem.RemoveHs(m)  # 5 heavy atoms
@@ -186,10 +186,10 @@ def test_intramolecular_vdw_static_arrays():
     # static VdwArrays, not the dynamic fixed-background config
     assert spec.vdw is not None
     assert spec.vdw_config is None
-    # Nonplanar 1-4 contacts are retained with reduced contact radii.
-    np.testing.assert_array_equal(spec.vdw.idx, [[0, 3], [0, 4], [1, 4]])
+    # Nonplanar 1-4 contacts are excluded, just like planar 1-4 contacts.
+    np.testing.assert_array_equal(spec.vdw.idx, [[0, 4]])
     np.testing.assert_allclose(spec.vdw.weight, 1.0)
-    np.testing.assert_allclose(spec.vdw.r_min, np.array([3.56, 3.88, 3.56]) * 0.75)
+    np.testing.assert_allclose(spec.vdw.r_min, np.array([3.88]) * 0.75)
     assert int(spec.vdw.idx.max()) < spec.n_active
 
     # explicit mode=intermolecular keeps ONLY the dynamic/inter paths (no static intra);
@@ -223,7 +223,7 @@ def test_vdw_both_modes_compose():
         elements=elements,
     )
     assert spec.vdw is not None  # static intramolecular (all backends)
-    assert spec.vdw.idx.shape == (3, 2)  # two 1-4 pairs plus C1-C5
+    assert spec.vdw.idx.shape == (1, 2)  # only C1-C5
     assert spec.vdw_config is not None  # dynamic fixed-background pairs
     assert {int(x) for x in spec.vdw_config.background_global} == {n, n + 1}
 
@@ -352,11 +352,11 @@ def test_interligand_vdw_default_both():
 
 def test_interligand_vdw_composes_with_intra():
     """mode='both' CONCATENATES intra (per ligand) + inter (cross) pairs into one
-    spec.vdw: two pentanes give 6 intra (two 1-4 pairs and one 1-5 pair each) + n*n inter."""
-    lcA, n = _lig_heavy_at("CCCCC", base=0, seed=1)  # pentane: 3 intra pairs
+    spec.vdw: two pentanes give 2 intra (one 1-5 pair each) + n*n inter."""
+    lcA, n = _lig_heavy_at("CCCCC", base=0, seed=1)  # pentane: 1 intra pair
     lcB, _ = _lig_heavy_at("CCCCC", base=100, seed=2)
     spec = build_spec([lcA, lcB], [], {"vdw": {"weight": 1.0, "dmax": 10.0}})
-    assert spec.vdw.idx.shape == (6 + n * n, 2)
+    assert spec.vdw.idx.shape == (2 + n * n, 2)
 
 
 def test_interligand_vdw_only_in_both_mode():
@@ -472,7 +472,7 @@ def test_intramolecular_vdw_does_not_use_reference_distance_cutoff():
 
     assert np.linalg.norm(coords[0] - coords[4]) > 5.0
     assert spec.vdw is not None
-    np.testing.assert_array_equal(spec.vdw.idx, [[0, 3], [0, 4], [1, 4]])
+    np.testing.assert_array_equal(spec.vdw.idx, [[0, 4]])
 
 
 def test_vdw_cg_controls_are_stored_on_spec():

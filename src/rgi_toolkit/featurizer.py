@@ -672,8 +672,8 @@ def _build_intramolecular_vdw(
 ) -> VdwArrays | None:
     """Static intramolecular VdW repulsion within each ligand (all backends).
 
-    Excludes 1-2/1-3 and same-plane 1-4 pairs. Every other pair uses its chemical
-    contact distance and inverse-ESD-squared weight, including eligible 1-4 contacts.
+    Excludes all covalent 1-2, 1-3 and 1-4 pairs, regardless of plane membership.
+    Every other pair uses its chemical contact distance and optional ESD weight.
     Reference distance is deliberately not a build filter. Unlike the
     dynamic fixed-background ``VdwConfig``, the pair list is fixed, so this term also
     works in the jax/numpy backends via ``VdwArrays``. Enabled when

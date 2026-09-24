@@ -215,7 +215,7 @@ class ActiveVdwConfig:
     """Dynamic active-active VdW neighbours involving conformer-restrained atoms.
 
     A fixed-width Verlet-style neighbour cache is validated before every trial.
-    Typed topology excludes 1-2/1-3 and same-plane 1-4 pairs before the K-neighbour
+    Typed topology excludes all covalent 1-2/1-3/1-4 pairs before the K-neighbour
     cap. Without ``chemistry``, the explicit ``polymer_mask`` and ``excluded_codes``
     define eligibility, and the radii sum / 0.2-A ESD define the penalty.
     """
