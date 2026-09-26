@@ -65,7 +65,7 @@ class LigandConf:
     # Optional source-graph molecule in the same atom order as ``mol``. For SMILES
     # inputs this retains the original @/@@ and E/Z annotations even when a tool
     # rebuilds ``mol`` from reference coordinates. It supports stereochemistry
-    # validation/recovery and complete chemical typing for VdW and added sp2 torsions.
+    # validation/recovery and covalent topology for VdW and added sp2 torsions.
     # Bond/angle/plane target extraction still uses ``mol``. None uses the coordinate
     # molecule as the chemical-graph fallback.
     stereo_mol: "Chem.Mol | None" = None

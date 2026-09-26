@@ -522,12 +522,12 @@ plane/cistrans/torsion/vdw). `mode` picks **two categories** (default `both` = b
 
 All paths share `weight * clamp(d - scale*contact, max=0)**2` by default;
 `use_esd: true` divides the residual by ESD before squaring. `_vdw_chemistry.py`
-collects chemistry for ALL atoms, including fixed background and nonrestrained ligands.
-Configured `type_energy`/`ener_lib` parameters take priority; otherwise RDKit templates/source
-graphs give approximate chemistry, with warning plus elemental fallback when unavailable.
-Contact priority is hydrogen bond, metal, dummy, ordinary; ESD is 0.2 A except dummy
-0.3 A. Hydrogen-inclusive radii are capped at 2 A. `scale` defaults to 0.75
-and multiplies the resulting contact, not unconditionally a radius sum. Covalent 1-2/1-3/1-4
+assigns RDKit `GetRvdw(atomic_number)` radii to ALL atoms, including fixed background
+and nonrestrained ligands, exactly as in v0.1.0-a. The unscaled contact is the radius
+sum; there is no cap, environment-dependent atom type, hydrogen-bond/metal/dummy
+correction, or dictionary radius override. Dictionaries and source graphs still
+supply covalent topology. Optional VdW ESD is uniformly 0.2 A. `scale` defaults to
+0.75 and multiplies the radius sum. Covalent 1-2/1-3/1-4
 exclusions survive disabled geometry terms and apply to dynamic polymer contacts too.
 `energy/_nonbonded.py` gathers common contact,
 inverse-variance and eligibility tables for BOTH neighbor ranking and energy scoring.

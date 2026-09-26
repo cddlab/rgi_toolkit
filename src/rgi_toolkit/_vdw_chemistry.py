@@ -1,207 +1,50 @@
-"""Host-side chemical typing and sparse topology for all VdW paths.
+"""RDKit elemental VdW radii and sparse covalent topology for all paths.
 
-Contact formulas follow Servalcat's Geometry::set_vdw_values. A configured CCP4
-library supplies exact energy types; otherwise RDKit supplies approximate local
-chemistry, with built-in elemental parameters and no dictionary download.
+The unscaled contact is the sum of the two elemental radii, as in v0.1.0-a.
+Source graphs and optional dictionaries supply topology, never radius overrides.
 """
 
 from __future__ import annotations
 
 import itertools
 import logging
-import math
-import os
 from dataclasses import dataclass
-from functools import lru_cache
 
 import numpy as np
-from rdkit import Chem, RDConfig
+from rdkit import Chem
 
 from rgi_toolkit._config_util import conformer_use_esd
 from rgi_toolkit._moltype import polymer_type
 from rgi_toolkit._polymer_torsions import atom_name, standard_residue
 
 logger = logging.getLogger(__name__)
-# CCP4 ener_lib elemental defaults: hydrogen-inclusive VdW radius, ionic radius,
-# hydrogen-bond type (N none, A acceptor, D donor, B both, H donor hydrogen).
-# These constants are the offline approximation, not a generated monomer database.
-_ELEMENTS = {
-    "H": (1.2, 0, "N"),
-    "C": (1.75, 0, "N"),
-    "N": (1.6, 1.32, "N"),
-    "O": (1.52, 1.28, "A"),
-    "S": (1.88, 1.7, "A"),
-    "P": (1.88, 1.79, "N"),
-    "F": (1.47, 1.19, "B"),
-    "CL": (1.75, 1.67, "A"),
-    "BR": (1.85, 0.73, "N"),
-    "I": (1.98, 0.56, "N"),
-    "B": (0.85, 0.25, "N"),
-    "SI": (2.1, 0.4, "N"),
-    "SE": (1.9, 0.42, "N"),
-    "LI": (1.82, 0.73, "N"),
-    "NA": (2.27, 1.13, "N"),
-    "K": (2.75, 1.51, "N"),
-    "RB": (2.0, 1.48, "N"),
-    "CS": (2.98, 1.81, "N"),
-    "MG": (1.73, 0.71, "N"),
-    "CA": (1.94, 1.14, "N"),
-    "SR": (2.19, 1.32, "N"),
-    "BA": (2.53, 1.49, "N"),
-    "MN": (1.4, 0.46, "N"),
-    "FE": (1.4, 0.68, "N"),
-    "CO": (1.35, 0.54, "N"),
-    "NI": (1.63, 0.63, "N"),
-    "CU": (1.4, 0.71, "N"),
-    "ZN": (1.39, 0.74, "N"),
-    "CD": (1.58, 0.92, "N"),
-    "HG": (1.55, 1.1, "N"),
-    "AL": (1.25, 0.53, "N"),
-}
-_NONMETALS = {
-    0,
-    1,
-    2,
-    5,
-    6,
-    7,
-    8,
-    9,
-    10,
-    14,
-    15,
-    16,
-    17,
-    18,
-    32,
-    33,
-    34,
-    35,
-    36,
-    51,
-    52,
-    53,
-    54,
-    85,
-    86,
-    117,
-    118,
-}
 
 
 @dataclass(frozen=True)
 class AtomType:
     radius: float
-    ion: float
-    hb: str
     element: int
-    dummy: bool = False
 
 
-def elemental_type(element, dummy=False):
-    if element <= 0:
-        return AtomType(0, 0, "N", 0, dummy)
-    table = Chem.GetPeriodicTable()
-    symbol = table.GetElementSymbol(int(element)).upper()
-    radius, ion, hb = _ELEMENTS.get(symbol, (table.GetRvdw(int(element)), 0, "N"))
-    return AtomType(min(2.0, radius), ion, hb, int(element), dummy)
+def elemental_type(element):
+    """Use the same atomic-number lookup and invalid-element rule as v0.1.0-a."""
+    if element is None or element < 1 or element > 118:
+        return AtomType(0.0, 0)
+    return AtomType(float(Chem.GetPeriodicTable().GetRvdw(int(element))), int(element))
 
 
-def library_type(atom, element, dummy=False):
-    radius = atom.vdwh_radius if math.isfinite(atom.vdwh_radius) else atom.vdw_radius
-    if not math.isfinite(radius) or radius <= 0:
-        return None
-    ion = atom.ion_radius if math.isfinite(atom.ion_radius) else 0.0
-    return AtomType(min(2.0, radius), ion, atom.hb_type, int(element), dummy)
+def pair_contact(first, second):
+    """Return the unscaled elemental radius sum and optional normalization ESD."""
+    return first.radius + second.radius, 0.2
 
 
-def pair_contact(first, second, one_four=False):
-    """Return critical distance and ESD using Servalcat's contact-type priority."""
-    r1, r2 = first.radius, second.radius
-    if r1 <= 0 or r2 <= 0:
-        return 0.0, 0.2
-    if one_four:
-        return r1 + r2 - sum(
-            0.1 if a.element in (7, 8) else 0.15 for a in (first, second)
-        ), 0.2
-    a, b = first.hb, second.hb
-    if (a in ("A", "B") and b in ("D", "B")) or (b in ("A", "B") and a in ("D", "B")):
-        return r1 + r2 - 0.3, 0.2
-    if a in ("A", "B") and b == "H":
-        return r1 + 0.1, 0.2
-    if b in ("A", "B") and a == "H":
-        return r2 + 0.1, 0.2
-    if (
-        any(a.element not in _NONMETALS for a in (first, second))
-        and first.ion > 0
-        and second.ion > 0
-    ):
-        return first.ion + second.ion, 0.2
-    if first.dummy != second.dummy:
-        return max(0.7, r1 + r2 - 0.7), 0.3
-    if first.dummy and second.dummy:
-        return r1 + r2, 0.3
-    return r1 + r2, 0.2
-
-
-@lru_cache(maxsize=1)
-def _feature_factory():
-    from rdkit.Chem import ChemicalFeatures
-
-    return ChemicalFeatures.BuildFeatureFactory(
-        os.path.join(RDConfig.RDDataDir, "BaseFeatures.fdef")
-    )
-
-
-def molecule_types(mol, mapping, elements, records):
-    """Infer chemistry without changing source charge, hydrogen count or stereo."""
+def molecule_types(mol, mapping, elements):
+    """Validate source elements without inferring environment-dependent radii."""
     result = {}
     for i, g in mapping.items():
         if mol.GetAtomWithIdx(i).GetAtomicNum() != int(elements[g]):
             raise ValueError(f"VdW element mismatch at atom {g}")
-    try:
-        features = _feature_factory().GetFeaturesForMol(mol)
-        donors = {
-            i for f in features if f.GetFamily() == "Donor" for i in f.GetAtomIds()
-        }
-        acceptors = {
-            i for f in features if f.GetFamily() == "Acceptor" for i in f.GetAtomIds()
-        }
-        for i, g in mapping.items():
-            a = mol.GetAtomWithIdx(i)
-            base = elemental_type(
-                int(elements[g]),
-                (getattr(records.get(g), "name", "") or "").startswith("DUM"),
-            )
-            radius = base.radius
-            nh = a.GetTotalNumHs()
-            if a.GetAtomicNum() == 6:
-                if a.GetHybridization() == Chem.HybridizationType.SP3 and nh:
-                    radius = {1: 1.95, 2: 1.92, 3: 1.94}.get(nh, 1.94)
-                elif a.GetIsAromatic():
-                    radius = 1.82 if nh else 1.74
-                elif a.GetHybridization() == Chem.HybridizationType.SP2 and nh:
-                    radius = 1.82 if nh == 1 else 1.8
-            elif a.GetAtomicNum() == 16 and nh:
-                radius = 1.95
-            hb = (
-                "B"
-                if i in donors and i in acceptors
-                else "D"
-                if i in donors
-                else "A"
-                if i in acceptors
-                else "N"
-            )
-            if a.GetAtomicNum() == 1:
-                hb = "H" if any(n.GetIdx() in donors for n in a.GetNeighbors()) else "N"
-            result[g] = AtomType(radius, base.ion, hb, base.element, base.dummy)
-    except (RuntimeError, ValueError) as exc:
-        logger.warning(
-            "[rgi_toolkit] VdW chemical graph unavailable (%s); using elemental types",
-            exc,
-        )
-        return {}
+        result[g] = elemental_type(int(elements[g]))
     return result
 
 
@@ -354,7 +197,7 @@ def build_chemistry(
     bonds=(),
     planes=(),
 ):
-    """Build chemical parameters for moving atoms and the entire fixed background."""
+    """Build elemental contacts and topology for moving and background atoms."""
     from rgi_toolkit import monlib_geom
 
     use_esd = conformer_use_esd(config)
@@ -367,17 +210,10 @@ def build_chemistry(
     records = [
         r for r in records if 0 <= r.index < len(elements) and elements[r.index] > 0
     ]
-    by_index = {int(r.index): r for r in records}
-    atom_types = {
-        i: elemental_type(
-            int(z), (getattr(by_index.get(i), "name", "") or "").startswith("DUM")
-        )
-        for i, z in enumerate(elements)
-    }
+    atom_types = {i: elemental_type(int(z)) for i, z in enumerate(elements)}
     all_bonds = {tuple(sorted((int(a), int(b)))) for a, b, *_ in bonds}
     all_planes = {tuple(sorted(p)) for p in planes}
     molecules = np.arange(len(elements), dtype=np.int64)
-    approximate, dictionary = set(), set()
     metas = _residue_groups(records, reference_uids)
     chain_groups = {}
     for meta in metas:
@@ -400,9 +236,8 @@ def build_chemistry(
                 mapping = {
                     i: meta["names"][n] for n, i in names.items() if n in meta["names"]
                 }
-                inferred = molecule_types(mol, mapping, elements, by_index)
+                inferred = molecule_types(mol, mapping, elements)
                 atom_types.update(inferred)
-                approximate.update(inferred)
                 _add_graph(mol, mapping, all_bonds, all_planes)
         for previous, current in zip(group, group[1:]):
             connections.append((previous, current))
@@ -419,9 +254,8 @@ def build_chemistry(
     for lc in ligands:
         mol = lc.stereo_mol if lc.stereo_mol is not None else lc.mol
         mapping = {i: int(g) for i, g in enumerate(lc.global_indices)}
-        inferred = molecule_types(mol, mapping, elements, by_index)
+        inferred = molecule_types(mol, mapping, elements)
         atom_types.update(inferred)
-        approximate.update(inferred)
         _add_graph(mol, mapping, all_bonds, all_planes)
         if mapping:
             molecules[list(mapping.values())] = min(mapping.values())
@@ -456,46 +290,6 @@ def build_chemistry(
             )
         }
         all_planes.update(topology.plane_groups)
-        missing_types = {}
-        for g, name in topology.atom_types.items():
-            atom = library._monlib.ener_lib.atoms.get(name)
-            value = (
-                library_type(atom, elements[g], atom_types[g].dummy)
-                if atom is not None
-                else None
-            )
-            if value is None:
-                missing_types[name] = missing_types.get(name, 0) + 1
-                symbol = (
-                    Chem.GetPeriodicTable().GetElementSymbol(int(elements[g])).upper()
-                )
-                atom = library._monlib.ener_lib.atoms.get(symbol)
-                value = (
-                    library_type(atom, elements[g], atom_types[g].dummy)
-                    if atom is not None
-                    else None
-                ) or elemental_type(int(elements[g]), atom_types[g].dummy)
-                approximate.discard(g)
-            else:
-                dictionary.add(g)
-            atom_types[g] = value
-        if missing_types:
-            logger.warning(
-                "[rgi_toolkit] unknown VdW chemical types %s; using elemental types",
-                missing_types,
-            )
-    # Explicit donor hydrogens take their parent's chemical class, as in Servalcat.
-    for a, b in all_bonds:
-        for h, parent in ((a, b), (b, a)):
-            if elements[h] == 1:
-                old = atom_types[h]
-                atom_types[h] = AtomType(
-                    old.radius,
-                    old.ion,
-                    "H" if atom_types[parent].hb in ("D", "B") else "N",
-                    1,
-                    old.dummy,
-                )
     planes_by_atom = {}
     for index, group in enumerate(sorted(all_planes)):
         for g in group:
@@ -528,21 +322,12 @@ def build_chemistry(
     for i, j in itertools.product(range(len(types)), repeat=2):
         contact[i, j], sigma = pair_contact(types[i], types[j])
         inverse[i, j] = 1 / sigma**2 if use_esd else 1.0
-        one_four[i, j] = pair_contact(types[i], types[j], True)[0]
-    fallback = {i for i, z in enumerate(elements) if z > 0} - approximate - dictionary
+        one_four[i, j] = contact[i, j]
     logger.info(
-        "[rgi_toolkit] VdW typing: dictionary=%d approximate=%d elemental=%d; use_esd=%s",
-        len(dictionary),
-        len(approximate - dictionary),
-        len(fallback),
+        "[rgi_toolkit] VdW typing: RDKit elemental radii, %d atom types; use_esd=%s",
+        len(types),
         use_esd,
     )
-    if fallback:
-        logger.warning(
-            "[rgi_toolkit] VdW elemental fallback for %d atoms (indices %s)",
-            len(fallback),
-            sorted(fallback)[:8],
-        )
     return VdwChemistry(
         types,
         type_ids,

@@ -1,4 +1,4 @@
-"""Linear-angle stability, polymer torsions, and chemical VdW parity."""
+"""Linear-angle stability, polymer torsions, and elemental VdW parity."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 
 from rgi_toolkit._array_ops import get_ops
-from rgi_toolkit._vdw_chemistry import AtomType, build_chemistry, pair_contact
+from rgi_toolkit._vdw_chemistry import build_chemistry, elemental_type, pair_contact
 from rgi_toolkit.atom_context import AtomRecord, LigandConf
 from rgi_toolkit.energy import numpy_energy
 from rgi_toolkit.energy._kernels import angle_energy
@@ -231,31 +231,36 @@ def test_ligand_sp2_uses_relaxed_coords_and_preserves_double_bond_ez(monkeypatch
     )
 
 
+@pytest.mark.parametrize("element", range(1, 119))
+def test_vdw_radii_match_release_rdkit_elements_without_clipping(element):
+    expected = Chem.GetPeriodicTable().GetRvdw(element)
+    assert elemental_type(element).radius == expected
+    for partner in (1, 6, 7, 8, 30, 55):
+        contact = expected + Chem.GetPeriodicTable().GetRvdw(partner)
+        assert pair_contact(elemental_type(element), elemental_type(partner)) == (
+            contact,
+            0.2,
+        )
+
+
+@pytest.mark.parametrize("element", [None, -1, 0, 119])
+def test_invalid_vdw_element_matches_release_zero_radius(element):
+    assert elemental_type(element).radius == 0
+    assert pair_contact(elemental_type(element), elemental_type(6))[
+        0
+    ] == Chem.GetPeriodicTable().GetRvdw(6)
+
+
 @pytest.mark.parametrize(
-    "first,second,one_four,expected",
-    [
-        (AtomType(1.75, 0, "N", 6), AtomType(1.75, 0, "N", 6), False, (3.5, 0.2)),
-        (AtomType(1.52, 1.28, "A", 8), AtomType(1.6, 1.32, "D", 7), False, (2.82, 0.2)),
-        (AtomType(1.52, 1.28, "A", 8), AtomType(1.2, 0, "H", 1), False, (1.62, 0.2)),
-        (
-            AtomType(1.39, 0.74, "N", 30),
-            AtomType(1.52, 1.28, "A", 8),
-            False,
-            (2.02, 0.2),
-        ),
-        (AtomType(1.75, 0, "N", 6, True), AtomType(1.75, 0, "N", 6), False, (2.8, 0.3)),
-        (
-            AtomType(1.75, 0, "N", 6, True),
-            AtomType(1.75, 0, "N", 6, True),
-            False,
-            (3.5, 0.3),
-        ),
-        (AtomType(1.52, 1.28, "A", 8), AtomType(1.6, 1.32, "D", 7), True, (2.92, 0.2)),
-    ],
+    "smiles", ["CCCCC", "C=C", "C#N", "c1ccccc1", "CO", "[NH4+]", "[Zn+2]", "[H][H]"]
 )
-def test_servalcat_contact_rules(first, second, one_four, expected):
-    assert pair_contact(first, second, one_four) == pytest.approx(expected)
-    assert pair_contact(second, first, one_four) == pytest.approx(expected)
+def test_source_chemistry_does_not_override_elemental_radii(smiles):
+    ligand = _ligand(smiles)
+    chemistry = build_chemistry([ligand], None)
+    expected = [
+        Chem.GetPeriodicTable().GetRvdw(a.GetAtomicNum()) for a in ligand.mol.GetAtoms()
+    ]
+    np.testing.assert_array_equal(chemistry.radii, expected)
 
 
 @pytest.mark.parametrize("use_esd", [True, False])
@@ -270,7 +275,7 @@ def test_one_four_exclusions_survive_disabled_geometry_blocks(use_esd, geometry_
     plain = build_spec([chain], conformer_config=config)
     np.testing.assert_array_equal(plain.vdw.idx, [[0, 4]])
     assert np.all(plain.vdw.weight == pytest.approx(25 if use_esd else 1))
-    np.testing.assert_allclose(plain.vdw.r_min, [3.88])
+    np.testing.assert_allclose(plain.vdw.r_min, [3.4])
     aromatic = _ligand("c1ccccc1")
     assert build_spec([aromatic], conformer_config=config).vdw is None
     explicit = build_spec([aromatic], conformer_config=dict(config, plane={}))
@@ -284,13 +289,8 @@ def test_background_residue_and_ligand_chemistry_are_typed_without_opt_in():
     ligand = _ligand("C[NH3+]", len(elements), enabled=False)
     full_elements = np.r_[elements, [a.GetAtomicNum() for a in ligand.mol.GetAtoms()]]
     chemistry = build_chemistry([ligand], full_elements, records)
-    by_name = {
-        (r.resid, r.name): chemistry.types[chemistry.type_ids[r.index]] for r in records
-    }
-    assert by_name[1, "OG"].hb == "B"
-    assert by_name[2, "N"].hb == "D"
-    assert by_name[1, "O"].hb == "A"
-    assert chemistry.types[chemistry.type_ids[-1]].hb == "D"
+    expected = [Chem.GetPeriodicTable().GetRvdw(int(z)) for z in full_elements]
+    np.testing.assert_array_equal(chemistry.radii, expected)
     assert chemistry.molecules[0] != chemistry.molecules[-1]
 
 
@@ -301,7 +301,7 @@ def test_esd_switch_preserves_vdw_contacts_and_exclusions_in_every_packing_path(
     records = [AtomRecord("D", 1, 5, "DUM", "ligand", "UNK")]
     enabled = build_chemistry([ligand], elements, records, {"use_esd": True})
     disabled = build_chemistry([ligand], elements, records, option)
-    for other, sigma in ((4, 0.2), (5, 0.3)):
+    for other, sigma in ((4, 0.2), (5, 0.2)):
         contact, inverse = enabled.pair(0, other)
         assert inverse == pytest.approx(1 / sigma**2)
         assert disabled.pair(0, other) == pytest.approx((contact, 1))
@@ -340,8 +340,8 @@ def test_one_four_exclusions_cross_peptide_links_in_dynamic_paths(backend, activ
     np.testing.assert_array_equal(np.asarray(allowed), [False, False, True])
 
 
-def test_dictionary_vdw_types_cover_ligands_and_fixed_background(tmp_path, caplog):
-    # Deliberately nonstandard radii prove that type_energy and ener_lib are used.
+def test_dictionary_energy_types_do_not_override_elemental_vdw_radii(tmp_path):
+    # Deliberately nonstandard library radii must not change elemental contacts.
     from tests.test_monlib_dictionary import _loop
 
     (tmp_path / "list").mkdir()
@@ -378,21 +378,34 @@ def test_dictionary_vdw_types_cover_ligands_and_fixed_background(tmp_path, caplo
         records,
         {"monomer_library": str(tmp_path), "use_esd": True},
     )
-    assert chemistry.pair(0, 1) == pytest.approx((2.42, 25))
-    assert chemistry.radii[2] == pytest.approx(1.71)
-    assert "MISSING" in caplog.text
-    assert "using elemental types" in caplog.text
+    table = Chem.GetPeriodicTable()
+    assert chemistry.pair(0, 1) == pytest.approx(
+        (table.GetRvdw(7) + table.GetRvdw(8), 25)
+    )
+    np.testing.assert_array_equal(
+        chemistry.radii, [table.GetRvdw(z) for z in (7, 8, 6)]
+    )
 
-    # Even a known source-graph donor must become elemental when its dictionary
-    # energy type is unknown and ener_lib has no elemental N entry.
+    # Unknown dictionary energy types and donor charge do not change the radii.
     (tmp_path / "l/LIG.cif").write_text(component.replace("SPECIAL_D", "UNKNOWN_N"))
     donor = LigandConf(Chem.MolFromSmiles("[NH4+]"), np.zeros((1, 3)), np.array([0]))
     fallback = build_chemistry(
         [donor], np.array([7, 8, 6]), records, {"monomer_library": str(tmp_path)}
     )
-    nitrogen = fallback.types[fallback.type_ids[0]]
-    assert nitrogen.radius == pytest.approx(1.6)
-    assert nitrogen.hb == "N"
+    np.testing.assert_array_equal(fallback.radii, chemistry.radii)
+
+    # Dictionary bonds still control exclusions even with nonstandard energy types.
+    component += _loop(
+        "chem_comp_bond",
+        "comp_id atom_id_1 atom_id_2 type value_dist value_dist_esd",
+        [("LIG", "N1", "O1", "single", 1.4, 0.02)],
+    )
+    (tmp_path / "l/LIG.cif").write_text(component)
+    bonded = build_chemistry(
+        [], np.array([7, 8, 6]), records, {"monomer_library": str(tmp_path)}
+    )
+    assert bonded.pair(0, 1) is None
+    np.testing.assert_array_equal(bonded.radii, chemistry.radii)
 
 
 @pytest.mark.parametrize("backend", ["numpy", "torch", "jax"])
@@ -411,7 +424,8 @@ def test_static_vdw_energy_and_gradient_use_contact_esd(backend, use_esd):
         ligands, conformer_config={"vdw": {"scale": 1.0}, "use_esd": use_esd}
     )
     sigma = 0.2 if use_esd else 1
-    assert spec.vdw.r_min[0] == pytest.approx(2.02)
+    contact = sum(Chem.GetPeriodicTable().GetRvdw(z) for z in (30, 8))
+    assert spec.vdw.r_min[0] == pytest.approx(contact)
     assert spec.vdw.weight[0] == pytest.approx(1 / sigma**2)
     ops = get_ops(backend)
     from rgi_toolkit.energy._kernels import vdw_energy
@@ -428,11 +442,12 @@ def test_static_vdw_energy_and_gradient_use_contact_esd(backend, use_esd):
 
     coords = np.array([[0.0, 0, 0], [1.7, 0, 0]])
     value, grad = _value_grad(energy, coords, backend)
-    assert value == pytest.approx((0.32 / sigma) ** 2, abs=1e-9)
+    overlap = contact - 1.7
+    assert value == pytest.approx((overlap / sigma) ** 2, abs=1e-9)
     quarter, quarter_grad = _value_grad(lambda x: energy(x, 2), coords, backend)
     assert quarter == pytest.approx(value / 4)
     if grad is not None:
-        expected = np.array([[0.64, 0, 0], [-0.64, 0, 0]]) / sigma**2
+        expected = np.array([[2 * overlap, 0, 0], [-2 * overlap, 0, 0]]) / sigma**2
         np.testing.assert_allclose(grad, expected, atol=1e-8)
         np.testing.assert_allclose(quarter_grad, grad / 4, atol=1e-10)
 
@@ -504,22 +519,14 @@ def test_typed_cell_lists_match_dense_contacts_in_collapsed_batches(backend, act
 @pytest.mark.parametrize("backend", ["torch", "jax"])
 @pytest.mark.parametrize("active", [False, True])
 def test_typed_dynamic_ranking_energy_gradient_and_esd_scaling(backend, active):
-    # The nearer donor has a shorter hydrogen-bond contact than the farther carbon.
-    # K=1 must retain the carbon, which has the larger true overlap.
+    # The farther carbon has the larger overlap despite its larger elemental radius.
+    # K=1 must retain that carbon. Active scoring must include both eligible contacts.
     elements = np.array([8, 7, 6])
     chemical = build_chemistry([], elements, config={"use_esd": True})
-    chemical.types = [
-        AtomType(1.52, 1.28, "A", 8),
-        AtomType(1.6, 1.32, "D", 7),
-        AtomType(1.75, 0, "N", 6),
-    ]
-    chemical.type_ids = np.arange(3)
-    for i in range(3):
-        for j in range(3):
-            contact, sigma = pair_contact(chemical.types[i], chemical.types[j])
-            chemical.contact_table[i, j] = contact
-            chemical.inv_variance_table[i, j] = 1 / sigma**2
-    coords = np.array([[0.0, 0, 0], [2.7, 0, 0], [3.0, 0, 0]])
+    radii = np.array([Chem.GetPeriodicTable().GetRvdw(int(z)) for z in elements])
+    distances = radii[0] + radii[1:] - [0.10, 0.15]
+    assert distances[1] > distances[0]
+    coords = np.array([[0.0, 0, 0], [distances[0], 0, 0], [distances[1], 0, 0]])
     query = np.arange(3) if active else np.array([0])
     target = np.arange(3) if active else np.array([1, 2])
     host = chemical.subset(query, target, {0}, set(), active=active)
@@ -533,7 +540,7 @@ def test_typed_dynamic_ranking_energy_gradient_and_esd_scaling(backend, active):
                 "inv_variances": typed["inv_variances"] / 4,
                 "one_four_inv_variances": typed["one_four_inv_variances"] / 4,
             }
-        radii = ops.const_like([1.52, 1.6, 1.75], x)
+        radii = ops.const_like(chemical.radii, x)
         if backend == "torch":
             from rgi_toolkit.optim._torch_cg_gpu import _vdw_pair_energy as fixed_energy
             from rgi_toolkit.optim._torch_cg_gpu import (
@@ -578,7 +585,7 @@ def test_typed_dynamic_ranking_energy_gradient_and_esd_scaling(backend, active):
         )
 
     value, grad = _value_grad(evaluate, coords, backend)
-    expected = (0.27**2 + (0.12**2 if active else 0)) / 0.2**2
+    expected = (0.15**2 + (0.10**2 if active else 0)) / 0.2**2
     assert value == pytest.approx(expected, abs=1e-9)
     assert np.isfinite(grad).all()
     assert np.linalg.norm(grad[2]) > 0
@@ -684,6 +691,8 @@ def test_typed_jax_jit_matches_dense_fixed_and_active_contacts(dtype, use_esd):
     result = jax.jit(make_minimizer(spec, max_iter=50))(coords, 0.0, 0)
     distances = np.linalg.norm(np.asarray(result[0] - result[1:]), axis=-1)
     sigma = 0.2 if use_esd else 1
-    expected = np.square(np.minimum(distances - [2.02, 3.14], 0) / sigma).sum()
+    table = Chem.GetPeriodicTable()
+    contacts = np.array([table.GetRvdw(30) + table.GetRvdw(z) for z in (8, 6)])
+    expected = np.square(np.minimum(distances - contacts, 0) / sigma).sum()
     assert dynamic_vdw_energy(spec, result) == pytest.approx(expected, abs=2e-6)
     np.testing.assert_array_equal(result[1], coords[1])

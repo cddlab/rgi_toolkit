@@ -174,7 +174,7 @@ the exact constants and branch rules live in `_geometry.py` and `_kernels.py`.
 | `plane` | RMS distance from the group's own least-squares plane; target zero | Angstrom; `max(q - slack, 0)` | Shared conformer |
 | `cistrans` | Ligand acyclic double-bond E/Z; reference target, period 1 | Radians; `wrap(phi - target)`, then symmetric slack | Shared conformer |
 | `torsion` | Ordered chi/omega/sp2 torsion and periodicity `n`; reference/dictionary target | Radians; `wrap(n * (phi - target)) / n`, then symmetric slack | Shared conformer |
-| `vdw` | Pair distance relative to a chemical contact | Angstrom; repulsive overlap, optionally divided by pair ESD | Shared conformer |
+| `vdw` | Pair distance relative to the elemental radius sum | Angstrom; repulsive overlap, optionally divided by pair ESD | Shared conformer |
 | `distance` | Distance between two geometric centroids; user target/bounds | Angstrom; four shared shapes | Per entry |
 | `rmsd` | Proper-rotation Kabsch fit followed by RMS measurement; reference structure and user target/bounds | Angstrom; four shared shapes | Per entry |
 | `group_angle` | Three centroids, vertex at group 2; user target/bounds | Radians internally; config defaults to degrees; four shared shapes | Per entry |
@@ -376,12 +376,11 @@ so its energy reports are not necessarily the objective of the last denoising st
 VdW is an opt-in conformer term. `mode` selects intramolecular, intermolecular, or
 both categories. For an eligible pair, its contribution is
 `weight * min(d - scale * contact, 0)**2` by default. With `use_esd: true`,
-divide the residual by the pair ESD before squaring. Chemical contact priority is
-hydrogen bond, metal, dummy, then ordinary radius sum. Pair ESD is 0.2 Angstrom
-except dummy contacts at 0.3 Angstrom; hydrogen-inclusive radii are capped at
-2 Angstrom. Dictionary energy types take priority over approximate source/template
-chemistry, with a warning and elemental fallback when unavailable. All atoms,
-including fixed background and nonrestrained ligands, are typed.
+divide the residual by the pair ESD before squaring. The unscaled contact is the sum of RDKit elemental `GetRvdw` radii,
+as in v0.1.0-a. Radii are not capped or adjusted for chemical environment, hydrogen
+bonding, ionic radii, dummy names or dictionary energy types. All atoms, including
+fixed background and nonrestrained ligands, use this lookup. Optional pair ESD is
+uniformly 0.2 Angstrom. Source graphs and dictionaries still supply covalent topology.
 
 | Pair path | Construction and movement |
 | --- | --- |

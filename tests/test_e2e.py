@@ -648,8 +648,8 @@ def test_intramolecular_vdw_matches_dense_scipy(solver, capsys, scale_config, sc
         },
         solver,
     )
-    # Only terminal carbons form a nonexcluded 1-5 pair: 1.94 * 2 = 3.88 A.
-    contact = 3.88 * scale
+    # Only terminal carbons form a nonexcluded 1-5 pair: 1.7 * 2 = 3.4 A.
+    contact = 3.4 * scale
     np.testing.assert_array_equal(cr.spec.vdw.idx, [[0, 4]])
     assert cr.spec.vdw_config is None
 
@@ -725,7 +725,7 @@ def test_dynamic_vdw_new_contacts_match_dense_scipy(
 
     # Both atoms of an ordinary carbon contact have a 1.94 A radius. The chosen
     # weight cancels ESD**2 = .2**2; score EVERY background on every reference call.
-    contact = 3.88 * scale
+    contact = 3.4 * scale
     assert np.linalg.norm(coords[1] - coords[3]) > contact
 
     def objective(point):

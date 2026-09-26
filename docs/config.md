@@ -942,7 +942,7 @@ The original plane membership remains available for VdW topology exclusions. Sta
 | `plane` | `weight` (0.0), `slack` (0.0 Å) | **best-fit-plane** flatness of whole planar atom groups ([servalcat](https://github.com/keitaroyam/servalcat)-style) — penalises each group's out-of-plane RMS deviation toward 0. Fires on (a) aromatic/conjugated rings (whole ring) and (b) non-ring sp2 groups (an acyclic double-bond centre + its heavy neighbors: carbonyl / amide / ester / carboxyl / trisubstituted alkene). Group membership is confirmed by the reference conformer being coplanar (not the RDKit aromaticity flag). Set `plane: {weight: 1}` to activate |
 | `cistrans` | `weight` (1.0), `slack` (0.0 rad) | ligand acyclic double-bond E/Z geometry; period 1 preserves the stereoisomer. Cumulated double bonds (e.g. azides and allenes) are excluded because their linear endpoint does not define this dihedral |
 | `torsion` | `weight` (0.0), `slack` (0.0 rad) | protein side-chain χ, peptide ω and acyclic sp2 torsions, with explicit periodicity; enable with `torsion: {weight: 1}` |
-| `vdw` | `weight` (1.0), `mode` (`"both"`), `scale` (0.75), `dmax` (5.0 Å), `max_neighbors` (32), `neighbor_skin` (2.0 Å) | chemical contact distances and optional ESD-based clash penalties, with unrestricted CG steps and exact Verlet caches validated at every trial |
+| `vdw` | `weight` (1.0), `mode` (`"both"`), `scale` (0.75), `dmax` (5.0 Å), `max_neighbors` (32), `neighbor_skin` (2.0 Å) | elemental radius sums and optional ESD-based clash penalties, with unrestricted CG steps and exact Verlet caches validated at every trial |
 
 ### ESD normalization of conformer geometry
 
@@ -1245,25 +1245,20 @@ custom angle functions are unchanged.
 E = w \sum_{(i,j)} \left[\frac{\min(0,\;d_{ij}-\text{scale}\cdot R_{ij})}{\sigma_{ij}}\right]^2,
 ```
 
-where $d_{ij}$ is the pair distance and $R_{ij}$ is the chemical contact distance.
-The ESD denominator applies with `use_esd: true`; the default `false` omits it. With a
-configured dictionary, `type_energy` and `ener_lib.cif` provide atom radii and hydrogen-bond
-classes; otherwise standard-residue/source-molecule RDKit chemistry provides an offline
-approximation. Unavailable chemistry or unknown energy types warn and fall back to elemental
-parameters. Background atoms and nonrestrained ligands are typed too. Hydrogens participate
-only when already present; typing never changes protonation, formal charges or stereochemistry.
+where $d_{ij}$ is the pair distance and $R_{ij} = r_i + r_j$ is the sum of
+RDKit elemental VdW radii (`Chem.GetPeriodicTable().GetRvdw(atomic_number)`), as in
+v0.1.0-a. Thus the distance lower bound is `scale * (r_i + r_j)`.
+The ESD denominator applies only with `use_esd: true`; the default `false` omits it.
+Optional VdW ESD is uniformly 0.2 Å.
 
-The contact rules follow [Servalcat's geometry implementation](https://github.com/keitaroyam/servalcat/blob/75813905c2d02d9892e52b11a701e36eab931e41/src/refine/geom.hpp):
+Atom typing depends only on atomic number, including for fixed background atoms and
+nonrestrained ligands. There is no radius cap, hydrogen-inclusive radius, or
+hydrogen-bond, ionic or dummy-atom correction. Dictionary `type_energy` and
+`ener_lib.cif` radii do not override this lookup. Source graphs and configured
+dictionaries still supply covalent topology. Hydrogens participate only when already
+present; this lookup never changes protonation, formal charges or stereochemistry.
 
-| Contact, in priority order | $R_{ij}$ | ESD $\sigma_{ij}$ |
-|---|---|---|
-| Donor–acceptor, including atoms of both classes | radius sum minus 0.3 Å | 0.2 Å |
-| Donor hydrogen–acceptor | acceptor radius plus 0.1 Å | 0.2 Å |
-| Metal contact with both ionic radii available | ionic radius sum | 0.2 Å |
-| One dummy atom / two dummy atoms | `max(0.7, radius sum - 0.7)` / radius sum | 0.3 Å |
-| Other | radius sum | 0.2 Å |
-
-Hydrogen-inclusive radii are preferred and capped at 2 Å. All covalent 1–2, 1–3 and 1–4 pairs
+All covalent 1–2, 1–3 and 1–4 pairs
 are excluded, regardless of plane membership. These exclusions use chemical topology even
 when bond, angle or plane energy blocks are disabled, including paths across polymer links.
 The same rule applies to static ligand pairs and dynamic contacts. Static pairs are enumerated from
@@ -1271,8 +1266,7 @@ topology; `dmax` is the baseline cutoff for dynamic neighbor searches.
 The verbose `finalize` `vdw=` value includes these static rows and both optimizer-only dynamic
 halves on Torch and JAX.
 
-`scale` defaults to 0.75 and multiplies the chemical contact
-distance. ESD normalization is off by default. With `use_esd: true`, ESD 0.2 Å
+`scale` defaults to 0.75 and multiplies the elemental radius sum. ESD normalization is off by default. With `use_esd: true`, ESD 0.2 Å
 multiplies the unnormalized VdW energy and gradient by 25 at the same distance and
 contact threshold. Reference geometry terms use the same switch. `weight` remains a
 linear multiplier; with normalization enabled, doubling an ESD divides both energy
@@ -1292,8 +1286,8 @@ and gradient by four.
   backends).
 
 So to make two restrained ligands avoid each other, just keep the default `mode: both` (or set
-`intermolecular`) and give both a `vdw` block — no extra key. `scale` multiplies the chemical
-contact threshold. `dmax` is the baseline dynamic-search cutoff; CG expands it
+`intermolecular`) and give both a `vdw` block — no extra key. `scale` multiplies the elemental
+radius sum. `dmax` is the baseline dynamic-search cutoff; CG expands it
 with a safe movement skin. Eligible intramolecular pairs and all inter-ligand
 pairs are enumerated regardless of their reference-conformer distance, because either can clash in
 the predicted coordinates. An explicit empty or partial conformer block enables VdW at weight 1.0. Set

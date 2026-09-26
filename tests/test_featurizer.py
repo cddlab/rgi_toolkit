@@ -189,7 +189,7 @@ def test_intramolecular_vdw_static_arrays():
     # Nonplanar 1-4 contacts are excluded, just like planar 1-4 contacts.
     np.testing.assert_array_equal(spec.vdw.idx, [[0, 4]])
     np.testing.assert_allclose(spec.vdw.weight, 1.0)
-    np.testing.assert_allclose(spec.vdw.r_min, np.array([3.88]) * 0.75)
+    np.testing.assert_allclose(spec.vdw.r_min, np.array([3.4]) * 0.75)
     assert int(spec.vdw.idx.max()) < spec.n_active
 
     # explicit mode=intermolecular keeps ONLY the dynamic/inter paths (no static intra);
