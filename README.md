@@ -53,7 +53,7 @@ Nine **built-in** restraint types, all minimized during the denoising loop to gu
   ([servalcat](https://github.com/keitaroyam/servalcat)-style best-fit-plane flatness of aromatic rings + sp2 groups)
   toward an ideal RDKit geometry, plus **VdW**
   non-bonded clash avoidance (intramolecular and/or intermolecular; `mode`
-  defaults to `both`; chemical contact distances and optional ESD weighting). Near-linear conformer
+  defaults to `both`; RDKit elemental radius sums and optional ESD weighting). Near-linear conformer
   angles use a stable cosine residual. For polymers the targets can instead come from a **CCP4 monomer
   library** (`monomer_library: true` downloads and caches it) — dictionary targets and
   optional ESD-based weights, with a local-path option for an existing snapshot.

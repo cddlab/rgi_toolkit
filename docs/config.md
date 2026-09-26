@@ -931,7 +931,7 @@ When an enabled cistrans or torsion tuple's four atoms all belong to a conformer
 the plane group is suppressed and the torsion is retained. Nonoverlapping plane groups
 remain active. Reference-derived and dictionary-derived geometry follow this same rule;
 local peptide conditions suppress the plane only in states where the torsion is active.
-The original plane membership remains available for VdW topology exclusions. Standalone
+Covalent topology remains available for VdW exclusions regardless of geometry weights. Standalone
 `plane_restraints_config`, base-pair planes and custom energies are independent.
 
 | term | keys (default) | meaning |
@@ -1030,9 +1030,10 @@ failed minimization; also examine convergence diagnostics and geometric deviatio
 
 `monomer_library` sits alongside the term blocks but builds nothing of its own: it changes
 where the **polymer** `bond` / `angle` / `chiral` / `plane` / `torsion` and inter-residue
-link targets and uncertainties come from. It also supplies VdW `type_energy` assignments and
-`ener_lib.cif` parameters for any covered atoms, including ligands and fixed background. Each
-desired energy term and moving entity still needs its normal opt-in.
+link targets and uncertainties come from. It also supplies covalent topology for
+VdW exclusions, including covered ligands and fixed background atoms. VdW radii
+remain the RDKit elemental values. Each desired energy term and moving entity
+still needs its normal opt-in.
 
 By default they are **measured from the predictor's per-residue reference conformer**, which is
 not refinement geometry — AF3 fills `ref_pos` by RDKit **ETKDG-embedding the free CCD component**.
@@ -1266,7 +1267,8 @@ topology; `dmax` is the baseline cutoff for dynamic neighbor searches.
 The verbose `finalize` `vdw=` value includes these static rows and both optimizer-only dynamic
 halves on Torch and JAX.
 
-`scale` defaults to 0.75 and multiplies the elemental radius sum. ESD normalization is off by default. With `use_esd: true`, ESD 0.2 Å
+`scale` defaults to 0.75 and multiplies the elemental radius sum. ESD normalization
+is off by default. With `use_esd: true`, ESD 0.2 Å
 multiplies the unnormalized VdW energy and gradient by 25 at the same distance and
 contact threshold. Reference geometry terms use the same switch. `weight` remains a
 linear multiplier; with normalization enabled, doubling an ESD divides both energy
@@ -1342,7 +1344,7 @@ cutoff (never smaller than `dmax`). Hash collisions are checked against the full
 and each bucket is traversed completely in fixed-width chunks. Chemical topology exclusions,
 molecule mode and moving-atom participation are filtered **before** the K cap. Remaining
 candidates are ranked by clearance `distance - scale * R_ij`, so the most severe clashes
-win even when hydrogen bonds and metal contacts have different thresholds. Small type-pair
+win even when elemental radii give different contact thresholds. Small type-pair
 tables and sparse topology codes avoid a dense atom-pair parameter matrix. At ordinary density the build remains
 `O(B log B + L log B)` / `O(N log N)`, with linear fixed-width working memory; a collapsed
 structure degrades to `O(LB)` / `O(N^2)` time without allocating a dense distance matrix.
