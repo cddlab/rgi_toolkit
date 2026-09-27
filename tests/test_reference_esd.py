@@ -169,7 +169,7 @@ def test_default_esd_is_disabled_and_toggle_changes_only_weights():
 
     ligand = make_ligand("C[C@H](O)CC/C=C/c1ccccc1")
     config = {key: {"weight": 2, "slack": 0.01} for key in TERMS[:-1]}
-    config["vdw"] = {"weight": 3}
+    config["vdw"] = {"weight": 3, "mode": "both"}
     default = build_spec([ligand], conformer_config=config)
     enabled = build_spec([ligand], conformer_config=dict(config, use_esd=True))
     disabled = build_spec([ligand], conformer_config=dict(config, use_esd=False))

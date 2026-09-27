@@ -478,7 +478,7 @@ def test_multiligand_conformer_setup():
 
 
 def test_multiligand_interligand_vdw_setup():
-    """Two restrained ligands + vdw on (default mode='both') build inter-ligand VdW pairs
+    """Two restrained ligands + vdw on (default mode='intermolecular') build inter-ligand VdW pairs
     in spec.vdw (the cross product). Heavy-only ethane has no intramolecular pair, so the
     count is purely inter (n*n)."""
     cr = CombinedRestraints()

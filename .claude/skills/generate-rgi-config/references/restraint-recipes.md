@@ -117,7 +117,9 @@ conformer_restraints_config:
   # plane: {weight: 1.0}  # OFF by default; add it to flatten aromatic rings + sp2 groups (best-fit plane)
 ```
 
-An empty conformer block enables bond/angle/chiral/cistrans/vdw at weight 1. Omit their
+An empty conformer block enables bond/angle/chiral/cistrans/vdw at weight 1.
+VdW defaults to `mode: intermolecular` in version 0.3.0; set `mode: both` to include
+intramolecular contacts or `mode: intramolecular` to use only those contacts. Omit their
 sub-blocks unless overriding values; disable unwanted terms explicitly with weight 0.
 Plane and torsion stay off even with empty sub-blocks and require explicit positive weights.
 Overlapping conformer planes yield to enabled cistrans/torsion tuples; unrelated planes remain active.

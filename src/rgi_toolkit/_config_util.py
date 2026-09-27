@@ -15,6 +15,7 @@ from typing import Iterable
 _TRUE_STRINGS = ("1", "true", "yes", "on")
 
 
+VDW_MODE_DEFAULT = "intermolecular"
 VDW_SCALE_DEFAULT = 0.75
 # Verlet skin in Angstroms: extra search radius and displacement budget for rebuilds.
 # Zero skin requires rebuilding after any movement.
@@ -90,7 +91,7 @@ def validate_vdw_config(conformer_config: dict | None) -> None:
             f"Known keys: {sorted(known)}"
         )
 
-    mode = raw.get("mode", "both")
+    mode = raw.get("mode", VDW_MODE_DEFAULT)
     if mode == "ligand_protein":
         raise ValueError(
             "conformer vdw mode 'ligand_protein' was renamed to 'intermolecular'"

@@ -491,7 +491,7 @@ below). All tools share sigma_data=16, so the value transfers.
 
 VdW is **not a separate restraint type** — it is the non-bonded term of the **conformer**
 restraint, configured under `conformer_restraints_config.vdw` (one of bond/angle/chiral/
-plane/cistrans/torsion/vdw). `mode` picks **two categories** (default `both` = both):
+plane/cistrans/torsion/vdw). `mode` selects the contact category (default `intermolecular`):
 
 - **Intramolecular** (`mode: intramolecular`): clashes WITHIN one ligand or polymer chain. Static
   ligand pairs exclude all covalent 1-2/1-3/1-4 pairs, regardless of plane membership.
@@ -536,8 +536,8 @@ the query dtype before its cell-list carry. Active pairs include a conformer-res
 against an atom moved by another restraint, while static ligand pairs are never counted twice.
 The fixed-background half scores the
 neighbour list it rebuilds on measured displacement (see the Verlet-skin paragraph below —
-NOT once per diffusion step); restrained-ligand pairs remain statically enumerated. `mode` defaults to **`both`**
-(intramolecular + intermolecular); the explicit values pick one category. **The old
+NOT once per diffusion step); restrained-ligand pairs remain statically enumerated. `mode` defaults to **`intermolecular`**. Set `both` to include intramolecular
+contacts, or `intramolecular` to select only that category. **The old
 `mode: ligand_protein` is REMOVED** — it was only the fixed-background half; it now raises a
 migration hint pointing to `intermolecular` (which additionally repels other restrained
 ligands), mirroring the rejected `backend:` key. An unknown mode raises. VdW defaults to

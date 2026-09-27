@@ -942,7 +942,7 @@ Covalent topology remains available for VdW exclusions regardless of geometry we
 | `plane` | `weight` (0.0), `slack` (0.0 Å) | **best-fit-plane** flatness of whole planar atom groups ([servalcat](https://github.com/keitaroyam/servalcat)-style) — penalises each group's out-of-plane RMS deviation toward 0. Fires on (a) aromatic/conjugated rings (whole ring) and (b) non-ring sp2 groups (an acyclic double-bond centre + its heavy neighbors: carbonyl / amide / ester / carboxyl / trisubstituted alkene). Group membership is confirmed by the reference conformer being coplanar (not the RDKit aromaticity flag). Set `plane: {weight: 1}` to activate |
 | `cistrans` | `weight` (1.0), `slack` (0.0 rad) | ligand acyclic double-bond E/Z geometry; period 1 preserves the stereoisomer. Cumulated double bonds (e.g. azides and allenes) are excluded because their linear endpoint does not define this dihedral |
 | `torsion` | `weight` (0.0), `slack` (0.0 rad) | protein side-chain χ, peptide ω and acyclic sp2 torsions, with explicit periodicity; enable with `torsion: {weight: 1}` |
-| `vdw` | `weight` (1.0), `mode` (`"both"`), `scale` (0.75), `dmax` (5.0 Å), `max_neighbors` (32), `neighbor_skin` (2.0 Å) | elemental radius sums and optional ESD-based clash penalties, with unrestricted CG steps and exact Verlet caches validated at every trial |
+| `vdw` | `weight` (1.0), `mode` (`"intermolecular"`), `scale` (0.75), `dmax` (5.0 Å), `max_neighbors` (32), `neighbor_skin` (2.0 Å) | elemental radius sums and optional ESD-based clash penalties, with unrestricted CG steps and exact Verlet caches validated at every trial |
 
 ### ESD normalization of conformer geometry
 
@@ -1276,7 +1276,7 @@ and gradient by four.
 
 ### Van der Waals modes
 
-`vdw.mode` picks **two categories** (default `"both"` = both):
+`vdw.mode` selects the contact category (default `"intermolecular"`):
 
 - `"intramolecular"` — clashes **within** one ligand or polymer chain, with the covalent
   exclusions above. Ligand pairs are static; polymer contacts use dynamic lists.
@@ -1287,8 +1287,26 @@ and gradient by four.
   cross-molecule atom pair gets the same one-sided penalty, scored in the energy layer on all
   backends).
 
-So to make two restrained ligands avoid each other, just keep the default `mode: both` (or set
-`intermolecular`) and give both a `vdw` block — no extra key. `scale` multiplies the elemental
+Since version 0.3.0, omitting `mode` applies only intermolecular repulsion. This
+includes an empty conformer block (`conformer_restraints_config: {}`), an omitted
+`vdw` block, and an empty `vdw: {}` block. The following settings are the defaults:
+
+```yaml
+restraints_config:
+  conformer_restraints_config:
+    vdw:
+      mode: intermolecular  # Default; use both to include intramolecular contacts.
+      weight: 1.0
+      scale: 0.75
+```
+
+To retain the earlier default contact categories, set `mode: both` explicitly.
+Use `mode: intramolecular` for intramolecular repulsion alone. The mode changes
+contact eligibility; the radius lookup, distance lower bound, covalent exclusions,
+weights, and optimizer settings are unchanged.
+
+`"both"` enables both categories. To make two restrained ligands avoid each other,
+keep the default `mode: intermolecular` and give both a `vdw` block — no extra key. `scale` multiplies the elemental
 radius sum. `dmax` is the baseline dynamic-search cutoff; CG expands it
 with a safe movement skin. Eligible intramolecular pairs and all inter-ligand
 pairs are enumerated regardless of their reference-conformer distance, because either can clash in

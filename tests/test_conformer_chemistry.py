@@ -309,8 +309,12 @@ def test_esd_switch_preserves_vdw_contacts_and_exclusions_in_every_packing_path(
         assert enabled.pair(0, other) is disabled.pair(0, other) is None
     for active in (False, True):
         query, target = np.arange(5), np.arange(6)
-        on = enabled.subset(query, target, set(query), set(), active=active)
-        off = disabled.subset(query, target, set(query), set(), active=active)
+        on = enabled.subset(
+            query, target, set(query), set(), mode="both", active=active
+        )
+        off = disabled.subset(
+            query, target, set(query), set(), mode="both", active=active
+        )
         assert 3 in off["excluded"] and 3 * len(target) in off["excluded"]
         assert len(off["one_four"]) == 0
         for key in on:
@@ -333,7 +337,7 @@ def test_one_four_exclusions_cross_peptide_links_in_dynamic_paths(backend, activ
     # CB1-CA1-C1-N2-CA2: the last target is 1-5, across the peptide link.
     target = np.array([lookup[1, "C"], lookup[2, "N"], lookup[2, "CA"]])
     moving = set(query) | set(target) if active else set(query)
-    host = chemistry.subset(query, target, moving, set(), active=active)
+    host = chemistry.subset(query, target, moving, set(), mode="both", active=active)
     ops = get_ops(backend)
     prepared = prepare_chemistry(ops, host, ops.prepare_constant(coords))
     _, _, allowed = pair_parameters(ops, prepared, 0, ops.asint(np.arange(3)))
@@ -465,7 +469,7 @@ def test_typed_cell_lists_match_dense_contacts_in_collapsed_batches(backend, act
     moving, static = set(query), set(range(5)) if active else set()
     coords = np.random.default_rng(519).normal(scale=0.03, size=(2, n, 3))
     coords[0] = 0
-    host = chemistry.subset(query, target, moving, static, active=active)
+    host = chemistry.subset(query, target, moving, static, mode="both", active=active)
     k = 7
     expected = np.zeros((2, len(query), k), dtype=int)
     valid = np.zeros_like(expected, dtype=bool)
@@ -529,7 +533,7 @@ def test_typed_dynamic_ranking_energy_gradient_and_esd_scaling(backend, active):
     coords = np.array([[0.0, 0, 0], [distances[0], 0, 0], [distances[1], 0, 0]])
     query = np.arange(3) if active else np.array([0])
     target = np.arange(3) if active else np.array([1, 2])
-    host = chemical.subset(query, target, {0}, set(), active=active)
+    host = chemical.subset(query, target, {0}, set(), mode="both", active=active)
     ops = get_ops(backend)
 
     def evaluate(x, wider=False):

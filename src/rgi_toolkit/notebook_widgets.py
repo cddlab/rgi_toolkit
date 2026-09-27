@@ -12,6 +12,7 @@ import ipywidgets as W
 import yaml
 from IPython.display import display
 
+from rgi_toolkit._config_util import VDW_MODE_DEFAULT
 from rgi_toolkit.notebook import FORM_SECTIONS, compose_config, make_config
 
 PENALTIES = ("harmonic", "flat-bottomed", "flat-bottomed1", "flat-bottomed2")
@@ -218,8 +219,8 @@ class RestraintCard:
                 if term == "vdw":
                     self._choice(
                         "vdw.mode",
-                        ("both", "intramolecular", "intermolecular"),
-                        native.pop("mode", "both"),
+                        ("intermolecular", "intramolecular", "both"),
+                        native.pop("mode", VDW_MODE_DEFAULT),
                     )
                     self._number("vdw.scale", native.pop("scale", 0.75))
                 else:

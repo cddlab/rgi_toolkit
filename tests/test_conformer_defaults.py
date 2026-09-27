@@ -44,11 +44,23 @@ def test_real_ligand_defaults_and_optin():
     from tests.test_featurizer import _lig_heavy
 
     ligand = _lig_heavy("C[C@H](O)/C=C/C")
-    spec = build_spec([ligand], conformer_config={})
+    elements = np.array([atom.GetAtomicNum() for atom in ligand.mol.GetAtoms()] + [6])
+    spec = build_spec([ligand], conformer_config={}, elements=elements)
     assert all(
         getattr(spec, key) is not None
         for key in TERMS
-        if key not in ("plane", "torsion")
+        if key not in ("plane", "torsion", "vdw")
+    )
+    assert spec.vdw is None
+    assert spec.vdw_config is not None
+    np.testing.assert_array_equal(
+        spec.vdw_config.background_global, [len(elements) - 1]
+    )
+    assert (
+        build_spec(
+            [ligand], conformer_config={"vdw": {"mode": "both"}}, elements=elements
+        ).vdw
+        is not None
     )
     assert spec.plane is None and spec.torsion is None
     assert not build_spec([ligand], conformer_config=None).is_active()

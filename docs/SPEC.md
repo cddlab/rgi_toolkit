@@ -373,7 +373,8 @@ so its energy reports are not necessarily the objective of the last denoising st
 
 ## VdW execution
 
-VdW is an opt-in conformer term. `mode` selects intramolecular, intermolecular, or
+VdW is enabled at weight 1 when a conformer block is present. `mode` defaults to
+`intermolecular` in version 0.3.0 and selects intramolecular, intermolecular, or
 both categories. For an eligible pair, its contribution is
 `weight * min(d - scale * contact, 0)**2` by default. With `use_esd: true`,
 divide the residual by the pair ESD before squaring. The unscaled contact is the sum of RDKit elemental `GetRvdw` radii,

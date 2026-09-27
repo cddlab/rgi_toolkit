@@ -22,6 +22,7 @@ import numpy as np
 from rdkit import Chem
 
 from rgi_toolkit._config_util import (
+    VDW_MODE_DEFAULT,
     VDW_NEIGHBOR_SKIN_DEFAULT,
     VDW_SCALE_DEFAULT,
     conformer_use_esd,
@@ -541,7 +542,7 @@ def _build_vdw_config(
             background_global,
             set(ligand_global),
             set(),
-            vcfg.get("mode", "both"),
+            vcfg.get("mode", VDW_MODE_DEFAULT),
         )
     max_neighbors = int(vcfg.get("max_neighbors", 32))
     if max_neighbors < 1:
@@ -644,7 +645,7 @@ def _build_active_vdw_config(
             active_sites,
             moving,
             static_ligands,
-            (conformer_config.get("vdw") or {}).get("mode", "both"),
+            (conformer_config.get("vdw") or {}).get("mode", VDW_MODE_DEFAULT),
             active=True,
         )
 
@@ -677,8 +678,8 @@ def _build_intramolecular_vdw(
     Reference distance is deliberately not a build filter. Unlike the
     dynamic fixed-background ``VdwConfig``, the pair list is fixed, so this term also
     works in the jax/numpy backends via ``VdwArrays``. Enabled when
-    ``conformer_config['vdw']['mode']`` is ``'intramolecular'`` or ``'both'`` (the
-    DEFAULT); ``'intermolecular'`` leaves it off.
+    ``conformer_config['vdw']['mode']`` is explicitly ``'intramolecular'`` or
+    ``'both'``; the default ``'intermolecular'`` leaves it off.
     """
     vcfg = (conformer_config or {}).get("vdw", {}) or {}
     weight = _conf_weight(conformer_config, "vdw")
@@ -1005,7 +1006,7 @@ def build_spec(
     custom_specs = [cr.build_spec(g2l) for cr in custom_restraints]
     # Intramolecular and inter-ligand pairs use static energy arrays.
     # Intermolecular contacts against fixed background use dynamic optimizer lists.
-    vdw_mode = (cfg.get("vdw", {}) or {}).get("mode", "both")
+    vdw_mode = (cfg.get("vdw", {}) or {}).get("mode", VDW_MODE_DEFAULT)
     if vdw_mode == "ligand_protein":
         raise ValueError(
             "conformer vdw mode 'ligand_protein' was renamed to 'intermolecular', which "

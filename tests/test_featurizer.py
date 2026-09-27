@@ -329,8 +329,8 @@ def _lig_heavy_at(smi: str, base: int, seed: int = 1) -> tuple[LigandConf, int]:
     return lc, n
 
 
-def test_interligand_vdw_default_both():
-    """Two restrained ligands + the DEFAULT mode='both' add inter-ligand VdW pairs to
+def test_interligand_vdw_default_intermolecular():
+    """Two restrained ligands + the default mode add inter-ligand VdW pairs to
     spec.vdw: the cross product of the two ligands' atoms (ethane has no intramolecular
     pair — its two carbons are bonded — so spec.vdw is purely inter). Every pair crosses
     the two ligands' atom sets, and no protein background means vdw_config is None."""
@@ -355,12 +355,14 @@ def test_interligand_vdw_composes_with_intra():
     spec.vdw: two pentanes give 2 intra (one 1-5 pair each) + n*n inter."""
     lcA, n = _lig_heavy_at("CCCCC", base=0, seed=1)  # pentane: 1 intra pair
     lcB, _ = _lig_heavy_at("CCCCC", base=100, seed=2)
-    spec = build_spec([lcA, lcB], [], {"vdw": {"weight": 1.0, "dmax": 10.0}})
+    spec = build_spec(
+        [lcA, lcB], [], {"vdw": {"weight": 1.0, "dmax": 10.0, "mode": "both"}}
+    )
     assert spec.vdw.idx.shape == (2 + n * n, 2)
 
 
-def test_interligand_vdw_only_in_both_mode():
-    """Inter-ligand pairs ride the default 'both' only: explicit 'intramolecular' and the
+def test_interligand_vdw_absent_in_intramolecular_mode():
+    """Inter-ligand pairs require intermolecular mode: explicit 'intramolecular' and the
     single-ligand case never produce them (ethane intra=0 -> spec.vdw stays None)."""
     lcA, _ = _lig_heavy_at("CC", base=0)
     lcB, _ = _lig_heavy_at("CC", base=100)
@@ -369,11 +371,12 @@ def test_interligand_vdw_only_in_both_mode():
         [lcA, lcB], [], {"vdw": {"weight": 1.0, "mode": "intramolecular"}}
     )
     assert spec_intra.vdw is None
-    # single ligand under 'both': inter needs >=2 ligands -> none built
+    # A single ligand under the default mode has no inter-ligand pairs.
     assert build_spec([lcA], [], {"vdw": {"weight": 1.0}}).vdw is None
 
 
-def test_vdw_mode_intermolecular_excludes_intra():
+@pytest.mark.parametrize("vdw", [None, {}, {"weight": 1.0}, {"mode": "intermolecular"}])
+def test_vdw_mode_intermolecular_excludes_intra(vdw):
     """mode='intermolecular' = fixed background + inter-ligand, but NO intramolecular: two
     pentanes (each would add 1 intra C1-C5 pair under 'both') give ONLY the n*n inter cross
     pairs in spec.vdw, plus a fixed-background vdw_config from a non-active heavy atom."""
@@ -385,7 +388,7 @@ def test_vdw_mode_intermolecular_excludes_intra():
     spec = build_spec(
         [lcA, lcB],
         [],
-        {"vdw": {"weight": 1.0, "mode": "intermolecular"}},
+        {"vdw": vdw},
         elements=elements,
     )
     assert spec.vdw is not None

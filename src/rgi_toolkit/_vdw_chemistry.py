@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import numpy as np
 from rdkit import Chem
 
-from rgi_toolkit._config_util import conformer_use_esd
+from rgi_toolkit._config_util import VDW_MODE_DEFAULT, conformer_use_esd
 from rgi_toolkit._moltype import polymer_type
 from rgi_toolkit._polymer_torsions import atom_name, standard_residue
 
@@ -142,7 +142,9 @@ class VdwChemistry:
         )
         return r, 1 / sigma**2 if self.use_esd else 1.0
 
-    def subset(self, query, target, moving, static_ligands, mode="both", active=False):
+    def subset(
+        self, query, target, moving, static_ligands, mode=VDW_MODE_DEFAULT, active=False
+    ):
         """Pack O(N + sparse topology + T^2) constants, never a dense atom-pair matrix."""
         query, target = np.asarray(query), np.asarray(target)
         qmap = {int(g): i for i, g in enumerate(query)}

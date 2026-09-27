@@ -72,6 +72,7 @@ def test_five_types_repeated_entries_and_conformer_defaults():
     assert result["conformer_restraints_config"]["plane"]["weight"] == 0
     assert result["conformer_restraints_config"]["torsion"]["weight"] == 0
     assert result["conformer_restraints_config"]["bond"]["weight"] == 1
+    assert result["conformer_restraints_config"]["vdw"]["mode"] == "intermolecular"
     assert editor.get_conformer_chains() == "A,C"
     with pytest.raises(ValueError, match="existing conformer"):
         editor.add("conformer")
