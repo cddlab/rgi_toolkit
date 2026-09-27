@@ -13,7 +13,7 @@ from scipy.optimize import minimize
 from scipy.optimize._dcsrch import dcstep as scipy_dcstep
 from scipy.optimize._optimize import _line_search_wolfe12
 
-from rgi_toolkit.optim._cg import JaxCG, TorchCG, jax_cg, torch_cg
+from rgi_toolkit.optim._cg import JaxCG, TorchCG, jax_cg, run_cg, torch_cg
 from rgi_toolkit.optim._cg_linesearch import dcstep, strong_wolfe
 from rgi_toolkit.optim._cg_scalar import HostScalars, JaxScalars
 from rgi_toolkit.optim.info import CGStatus
@@ -42,6 +42,39 @@ def solve(backend, energy, initial, max_iter=100, state=None, **kwargs):
 
 def array(x):
     return x.detach().cpu().numpy() if isinstance(x, torch.Tensor) else np.asarray(x)
+
+
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+@pytest.mark.parametrize("line_search", ["strong-wolfe", "armijo"])
+def test_torch_trial_direction_is_reused_without_changing_minimum(device, line_search):
+    from rgi_toolkit.optim._torch_fused import direction
+
+    initial = torch.tensor([1.5, -1.25, 1.25], dtype=torch.float64, device=device)
+    target = initial.new_tensor([0.5, -0.25, 0.75])
+    diagonal = initial.new_tensor([16.0, 1.0, 4.0])
+    calls = []
+
+    def energy(x):
+        return 0.5 * ((x - target).square() * diagonal).sum()
+
+    def counted(g, old_g, old_d, denominator):
+        # Retain tensors to prevent object-id reuse between distinct trials.
+        assert not any(g is a and old_g is b and old_d is c for a, b, c in calls)
+        calls.append((g, old_g, old_d))
+        return direction(g, old_g, old_d, denominator)
+
+    backend = TorchCG(initial)
+    backend.fused_direction = counted
+    out, state = run_cg(
+        backend,
+        torch.func.grad_and_value(energy),
+        initial,
+        100,
+        line_search=line_search,
+    )
+    assert calls
+    assert int(state.info.status) in (CGStatus.CONVERGED, CGStatus.FUNCTION_TOLERANCE)
+    np.testing.assert_allclose(array(out), array(target), atol=1e-4, rtol=0)
 
 
 @pytest.mark.parametrize(

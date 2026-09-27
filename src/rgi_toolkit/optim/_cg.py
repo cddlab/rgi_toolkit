@@ -258,15 +258,27 @@ def run_cg(
                 None,
             )
 
+        # A trial is checked during search, after search, and on acceptance.
+        # Torch can reuse its direction and host scalar within this iteration.
+        # Keep JAX branches pure so no traced values escape their scope.
+        direction_cache = None
+
         def next_direction(t):
+            nonlocal direction_cache
+            if direction_cache is not None and direction_cache[0] is t.g:
+                return direction_cache[1]
             denominator = st.gg + ARMIJO_BETA_EPS if is_armijo else st.gg
             if backend.fused_direction is not None:
                 d, dg = backend.fused_direction(t.g, st.g, st.d, denominator)
-                return d, s.scalar(dg)
-            numerator = backend.dot(t.g, t.g - st.g)
-            beta = xp.maximum(0.0, numerator / denominator)
-            d = -t.g + backend.cast(beta, t.g) * st.d
-            return d, backend.dot(d, t.g)
+                result = d, s.scalar(dg)
+            else:
+                numerator = backend.dot(t.g, t.g - st.g)
+                beta = xp.maximum(0.0, numerator / denominator)
+                d = -t.g + backend.cast(beta, t.g) * st.d
+                result = d, backend.dot(d, t.g)
+            if isinstance(backend, TorchCG):
+                direction_cache = t.g, result
+            return result
 
         def extra(t):
             def descent(t):
