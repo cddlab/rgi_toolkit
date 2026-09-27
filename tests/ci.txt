@@ -19,6 +19,7 @@ tests/test_selection.py
 tests/test_window_params.py
 tests/test_backend_parity.py
 tests/test_cg_linesearch.py
+tests/test_cuda_graphs.py::test_graph_failure_keeps_default_compilation
 tests/test_vdw_runtime.py
 tests/test_torch_fused.py::test_combined_trial_checks_preserve_cache_boundaries_and_invalid_points
 tests/test_torch_fused.py::test_combined_trial_preparation_preserves_duplicates_and_overflow

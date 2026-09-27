@@ -6,8 +6,9 @@ fuses the small energy kernels. The compilation cache specializes static shapes;
 prepared masks and dynamic neighbor arrays are inputs, so artifacts can be reused
 across denoising steps. This execution choice does not change PR+ or its line search.
 
-Default Inductor mode avoids repeated CUDA-graph recording for fresh trial-coordinate
-allocations.
+The fixed-background VdW objective uses CUDA Graph replay. Its gradient and value
+are copied out of replay-owned buffers because optimizers retain previous trials.
+Other objectives use default Inductor mode to avoid graph overhead on small kernels.
 
 ``_ENERGY_BY_MODE`` combines fixed-background and active-active VdW with mode bits
 0 and 1. Custom restraints wrap the same base energies in per-optimizer artifacts
@@ -20,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+from functools import wraps
 
 import torch
 
@@ -499,6 +501,38 @@ def _failure_flags(device_type):
     return _cpu_compile_failed if device_type == "cpu" else _compile_failed
 
 
+def _compile_value_gradient(energy, *, cuda_graphs=False):
+    value_gradient = torch.func.grad_and_value(energy, argnums=0)
+    options = dict(fullgraph=False, dynamic=False)
+    if not cuda_graphs:
+        return torch.compile(value_gradient, **options)
+    try:
+        compiled = torch.compile(value_gradient, mode="reduce-overhead", **options)
+    except Exception as exc:
+        logger.warning("CUDA graph compilation failed (%s); default compilation", exc)
+        return torch.compile(value_gradient, **options)
+    graph_enabled = True
+
+    @wraps(value_gradient)
+    def evaluate(*args):
+        nonlocal compiled, graph_enabled
+        if not graph_enabled:
+            return compiled(*args)
+        try:
+            gradient, value = compiled(*args)
+            # CG and L-BFGS retain prior gradients across objective evaluations.
+            return gradient.clone(), value.clone()
+        except Exception as exc:
+            logger.warning(
+                "CUDA graph evaluation failed (%s); default compilation", exc
+            )
+            compiled = torch.compile(value_gradient, **options)
+            graph_enabled = False
+            return compiled(*args)
+
+    return evaluate
+
+
 def _get_cvg(mode=0, *, device_type="cuda"):
     """Return the compiled grad/value artifact for the requested VdW mode."""
 
@@ -508,10 +542,8 @@ def _get_cvg(mode=0, *, device_type="cuda"):
         return None
     try:
         if mode not in artifacts:
-            artifacts[mode] = torch.compile(
-                torch.func.grad_and_value(_ENERGY_BY_MODE[mode], argnums=0),
-                fullgraph=False,
-                dynamic=False,  # specs and neighbor capacities have static shapes
+            artifacts[mode] = _compile_value_gradient(
+                _ENERGY_BY_MODE[mode], cuda_graphs=device_type == "cuda" and mode == 1
             )
         return artifacts[mode]
     except Exception as exc:

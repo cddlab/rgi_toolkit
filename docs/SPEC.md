@@ -424,6 +424,12 @@ Torch energy compilation explicitly uses `dynamic=False`: each artifact speciali
 the spec and neighbor-list shapes. This also avoids automatic symbolic-shape
 generalization across different structures or VdW modes.
 
+The CUDA fixed-background VdW objective (mode 1) replays a CUDA Graph and copies
+its gradient/value outputs into independently owned tensors. CG and L-BFGS may
+retain these tensors across subsequent evaluations. Graph-specific failures retry
+default Inductor compilation before the existing eager fallback. Other modes,
+custom closures, and CPU execution retain default compilation.
+
 Torch minimization disables the enclosing predictor's autocast locally and restores
 it on exit. Small geometry matrix products use explicit reductions in the input
 precision, so TF32 settings do not corrupt Kabsch rotations or plane fits. The

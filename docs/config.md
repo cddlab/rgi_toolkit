@@ -127,6 +127,12 @@ or stopping criteria.
 Compilation failures fall back to eager evaluation. The JAX solver retains its
 existing JIT path.
 
+Since version 0.3.8, the CUDA objective with fixed-background VdW uses CUDA Graph
+replay. Returned gradients and energies retain their own storage so CG and L-BFGS
+history cannot be overwritten by a later replay. Unsupported graph compilation
+or replay retries default Inductor compilation. CPU, custom-energy, and other
+VdW-mode artifacts keep their existing compilation path.
+
 Version 0.3.2 also fuses CUDA neighbor-cache validity checks and PR+ direction
 updates. Every trial retains its displacement and finite-value checks. Reduction
 order can change floating-point optimization trajectories.

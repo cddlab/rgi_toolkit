@@ -149,8 +149,10 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
    conformer windows. `CGInfo.grad_norm` is the gradient in optimizer coordinates.
    No runtime `pure_callback` or SciPy. On CUDA the Torch objective
    runs through `optim/_torch_cg_gpu.py` — the same early-exit CG but with a `torch.compile`
-   (inductor-fused, NOT cudagraph) energy+grad, so conformer/RMSD optimization is GPU-faster
-   than eager. CUDA trial statistics (slope, gradient norms, finite/movement checks)
+   energy+grad. The fixed-background VdW objective (mode 1) uses CUDA Graph replay,
+   copying returned gradients and values to preserve optimizer history. Graph
+   failures retry default Inductor compilation; other modes and custom closures
+   use their existing compilation path. CUDA trial statistics (slope, gradient norms, finite/movement checks)
    are fused in `optim/_torch_fused.py`, with eager fallback on compile failure.
    Torch caches the overflow predicate with each immutable pair-cache object and
    skips dense zero contributions when no row overflows; every trial still checks
