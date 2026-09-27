@@ -561,12 +561,17 @@ class CombinedRestraints:
 
         if isinstance(coords, torch.Tensor):
             if not self.config.gpu and coords.device.type != "cpu":
+                from rgi_toolkit.optim._gates import active_windows, window_on
+                from rgi_toolkit.optim.info import inactive_info
+
+                sigma = None if sigma is None else float(sigma)
+                step = None if step is None else int(step)
+                if not window_on(active_windows(self.spec), sigma, step):
+                    return (coords, inactive_info()) if return_info else coords
                 cpu_coords = coords.detach().to("cpu")
                 run(cpu_coords)
                 with torch.no_grad():
-                    coords.copy_(
-                        cpu_coords.to(device=coords.device, dtype=coords.dtype)
-                    )
+                    coords.copy_(cpu_coords)
             else:
                 run(coords)
             return (coords, info) if return_info else coords

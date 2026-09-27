@@ -44,6 +44,61 @@ def array(x):
     return x.detach().cpu().numpy() if isinstance(x, torch.Tensor) else np.asarray(x)
 
 
+@pytest.mark.gpu
+@pytest.mark.parametrize("line_search", ["strong-wolfe", "armijo"])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_device_norm_preserves_solver_and_resumption(dtype, line_search):
+    from rgi_toolkit.optim._torch_fused import direction
+
+    initial = torch.tensor([-1.2, 1.0, -1.2, 1.0], device="cuda", dtype=dtype)
+
+    def energy(x):
+        return (100 * (x[1::2] - x[::2] ** 2) ** 2 + (1 - x[::2]) ** 2).sum()
+
+    results = []
+    for batched in (False, True):
+        x, state = initial.clone(), None
+        for count in (7, 13):
+            backend = TorchCG(x)
+            if not batched:
+                # Retain the original compiled direction with separate host reads.
+                backend.fused_direction = lambda *a: direction(*a)
+            x, state = run_cg(
+                backend,
+                torch.func.grad_and_value(energy),
+                x,
+                count,
+                line_search=line_search,
+                state=state,
+            )
+        results.append((x, state))
+    torch.testing.assert_close(results[0][0], results[1][0], rtol=0, atol=0)
+    assert results[0][1].info == results[1][1].info
+
+
+def test_identical_host_step_skips_coordinate_read():
+    reads = []
+
+    class CountCoordinateReads(TorchCG):
+        def same_point(self, a, b):
+            reads.append(True)
+            return super().same_point(a, b)
+
+    # Force Wolfe1 to exhaust its final FG request and retry that same step.
+    initial = torch.tensor([2.0], dtype=torch.float64)
+    result, state = run_cg(
+        CountCoordinateReads(initial),
+        torch.func.grad_and_value(lambda x: (x * x).sum()),
+        initial,
+        1,
+        more_maxiter=1,
+        wolfe_maxiter=0,
+    )
+    assert torch.isfinite(result).all()
+    assert state.info.nfev == 2
+    assert len(reads) == 1
+
+
 @pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
 @pytest.mark.parametrize("line_search", ["strong-wolfe", "armijo"])
 def test_torch_trial_direction_is_reused_without_changing_minimum(device, line_search):

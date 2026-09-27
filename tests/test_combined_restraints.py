@@ -985,6 +985,71 @@ def test_gpu_false_cuda_coords_compute_on_cpu():
     assert abs(d - 5.0) < 1e-4
 
 
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", ["float32", "float64", "float16", "bfloat16"])
+@pytest.mark.parametrize("strided", [False, True])
+def test_cpu_bridge_preserves_batched_leaf_storage_and_dtype(dtype, strided):
+    import torch
+
+    cr = CombinedRestraints()
+    cr.set_config(_dist_config(gpu=False))
+    cr.setup(MockAdapter(_dist_atoms()))
+    shape = (2, 3, 6) if strided else (2, 6, 3)
+    coords = torch.zeros(shape, device="cuda", dtype=getattr(torch, dtype))
+    if strided:
+        coords = coords.transpose(-1, -2)
+    coords[:, 2:4, 0] = 20
+    coords[:, 4:] = 37
+    coords.requires_grad_()
+    pointer = coords.data_ptr()
+    result, info = cr.minimize(coords, sigma=0.0, return_info=True)
+    assert result is coords and result.data_ptr() == pointer
+    assert result.is_leaf and result.requires_grad
+    assert result.dtype == getattr(torch, dtype)
+    assert torch.equal(result[:, 4:], torch.full_like(result[:, 4:], 37))
+    distance = torch.linalg.vector_norm(
+        (result[:, 2:4].mean(1) - result[:, :2].mean(1)).float(), dim=-1
+    )
+    torch.testing.assert_close(
+        distance, torch.full_like(distance, 5), atol=1e-4, rtol=0
+    )
+    assert info.nit > 0
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("axis", ["sigma", "step"])
+def test_inactive_cpu_bridge_does_not_transfer_coordinates(axis):
+    import torch
+    from torch.utils._python_dispatch import TorchDispatchMode
+
+    from rgi_toolkit import CGStatus
+
+    config = _dist_config(gpu=False)
+    gate = (
+        {"start_sigma": 2.0, "stop_sigma": 1.0}
+        if axis == "sigma"
+        else {"start_step": 2, "stop_step": 3}
+    )
+    config["distance_restraints_config"][0].pop("start_sigma", None)
+    config["distance_restraints_config"][0].update(gate)
+    cr = CombinedRestraints()
+    cr.setup(MockAdapter(_dist_atoms()), config=config)
+    coords = torch.zeros((2, 4, 3), device="cuda")
+
+    class NoCopy(TorchDispatchMode):
+        def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+            assert func not in (
+                torch.ops.aten._to_copy.default,
+                torch.ops.aten.copy_.default,
+            )
+            return func(*args, **(kwargs or {}))
+
+    with NoCopy():
+        result, info = cr.minimize(coords, istep=0, sigma=0.0, return_info=True)
+    assert result is coords and info.status == CGStatus.INACTIVE
+    assert info.nfev == info.njev == info.nit == 0
+
+
 def test_backend_inferred_torch_from_numpy():
     """backend is inferred at minimize time: a numpy coords array -> the torch path.
     setup leaves _backend None (lazy); the first minimize resolves it."""

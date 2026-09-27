@@ -8,6 +8,27 @@ from rgi_toolkit.optim import _torch_fused as fused
 from rgi_toolkit.optim._vdw_runtime import VdwRuntime
 
 
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("epsilon", [0.0, 1e-10])
+def test_device_norm_preserves_direction_and_reduction(dtype, epsilon):
+    generator = torch.Generator(device="cuda").manual_seed(920)
+    shape = (2, 1762, 3)
+    g, old_g, d, x = (
+        torch.randn(shape, generator=generator, device="cuda", dtype=dtype)
+        for _ in range(4)
+    )
+    f = g.new_tensor(3.25)
+    old_stats = fused.trial_values(f, old_g, d, x, x)
+    old_gg = float(old_stats[3])
+    expected_d, expected_dg = fused.direction(g, old_g, d, old_gg + epsilon)
+    actual_d, actual_dg = fused.direction_from_statistics(
+        g, old_g, d, old_stats, epsilon
+    )
+    torch.testing.assert_close(actual_d, expected_d, rtol=0, atol=0)
+    torch.testing.assert_close(actual_dg, expected_dg, rtol=0, atol=0)
+
+
 @pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
 @pytest.mark.parametrize("mode", [1, 2, 3])
 def test_combined_trial_checks_preserve_cache_boundaries_and_invalid_points(

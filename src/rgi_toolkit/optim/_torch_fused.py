@@ -10,6 +10,7 @@ from rgi_toolkit.optim._torch_cg_gpu import _COMPILE_DISABLED
 
 logger = logging.getLogger(__name__)
 _COMPILED = {}
+_CPU_COMPILED = {}
 
 
 def _trial_values(f, g, d, x, xbase):
@@ -45,6 +46,22 @@ def trial_values(f, g, d, x, xbase):
     return _run(_trial_values, g, f, g, d, x, xbase)
 
 
+def cpu_trial_values(f, g, d, x, xbase):
+    if not _COMPILE_DISABLED:
+        try:
+            if _trial_values not in _CPU_COMPILED:
+                _CPU_COMPILED[_trial_values] = torch.compile(
+                    _trial_values, fullgraph=True, dynamic=False
+                )
+            compiled = _CPU_COMPILED[_trial_values]
+            if compiled is not None:
+                return compiled(f, g, d, x, xbase)
+        except Exception as exc:
+            logger.warning("compiled CPU trial statistics failed (%s); eager", exc)
+            _CPU_COMPILED[_trial_values] = None
+    return _trial_values(f, g, d, x, xbase)
+
+
 def _direction(g, old_g, old_d, denominator):
     numerator = torch.sum(g * (g - old_g)).to(torch.float64)
     beta = torch.clamp(numerator / denominator, min=0).to(g.dtype)
@@ -56,6 +73,15 @@ def direction(g, old_g, old_d, denominator):
     """Use host-equivalent float64 scalar division for the PR+ coefficient."""
     denominator = g.new_tensor(float(denominator), dtype=torch.float64)
     return _run(_direction, g, g, old_g, old_d, denominator)
+
+
+def _direction_from_statistics(g, old_g, old_d, statistics, epsilon):
+    return _direction(g, old_g, old_d, statistics[3].to(torch.float64) + epsilon)
+
+
+def direction_from_statistics(g, old_g, old_d, statistics, epsilon):
+    """Keep the previous norm on device instead of uploading the host copy."""
+    return _run(_direction_from_statistics, g, g, old_g, old_d, statistics, epsilon)
 
 
 def _cache_needed(a, reference, lig_local, valid, threshold_squared, enabled):

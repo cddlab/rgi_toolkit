@@ -559,16 +559,22 @@ RGI's sometimes modified-gradient molecular objective.
 
 ### L-BFGS
 
-L-BFGS is delegated to existing libraries rather than reimplemented. The method
+L-BFGS follows the backend libraries, with a CUDA adapter for PyTorch. The method
 is described by [Liu and Nocedal (1989)](https://link.springer.com/article/10.1007/BF01589116).
 
 | Backend | Delegation and explicit RGI options | Other stopping/history settings |
 | --- | --- | --- |
-| Torch | [`torch.optim.LBFGS`](https://github.com/pytorch/pytorch/blob/v2.6.0/torch/optim/lbfgs.py), `max_iter`, `tolerance_grad=gtol`, `line_search_fn="strong_wolfe"` | Upstream defaults; the locked Torch 2.6 uses change tolerance `1e-9`, history size 100 |
+| Torch | `torch.optim.LBFGS` on CPU; CUDA adapter based on [PyTorch 2.8.0](https://github.com/pytorch/pytorch/blob/v2.8.0/torch/optim/lbfgs.py). Both set `max_iter`, `tolerance_grad=gtol`, `line_search_fn="strong_wolfe"` | Change tolerance `1e-9`, history size 100, default `max_eval = max_iter * 5 // 4` |
 | JAX | [`jaxopt.LBFGS`](https://jaxopt.github.io/stable/_autosummary/jaxopt.LBFGS.html), `maxiter`, `tol=gtol`, `linesearch="zoom"`, `implicit_diff=False` | Standard zoom search; upstream history size 10 and maximum 30 line-search steps |
 
 CG and both L-BFGS adapters use the configured `gtol`, which defaults to `1e-5`. Torch uses
 an infinity norm; JAXopt uses a Euclidean norm. Their other stopping rules differ.
+The CUDA adapter batches loss/slope transfers and evaluates the upstream scalar line
+search on the CPU. Coordinates and history vectors stay on the GPU. Triton fuses the
+two-loop recursion for at most 8192 variables and accepts device scalars for vector
+updates. Larger problems or compiler failures use the ordinary recursion. History
+updates, line-search conditions and stopping rules are preserved; parallel reductions
+can change rounding and the trajectory of a nonconvex optimization.
 JAX's former backtracking override could fail a search without moving; its library
 tolerance of `1e-3` could then stop large centroid restraints far from their targets.
 The shared gradient threshold does not guarantee a particular coordinate residual:

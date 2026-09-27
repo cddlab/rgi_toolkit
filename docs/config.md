@@ -113,7 +113,7 @@ and [one section](../examples/distance/boltz-2/qbp_25.00.yaml).
 |---|---|---|---|
 | `verbose` | bool | `false` | Log the built spec (per-restraint counts) at setup and per-term energies at finalize. Strongly recommended — it is how you confirm a restraint was actually built. |
 | `gpu` | bool | `true` | Torch **device**: `true` = accelerator (default), `false` = CPU. It does **not** change the backend. (Inert for AF3, which always runs the JAX minimizer on the model's device.) Accepts `true/false` and the strings `1/0/yes/no/on/off`. |
-| `compile_cpu` | bool | `true` | Compile the PyTorch CPU objective and gradient. Set `false` to use eager evaluation. The first call can be slower; repeated calls with the same shapes can amortize compilation. Does not change the device or JAX execution. |
+| `compile_cpu` | bool | `true` | Compile the PyTorch CPU objective, gradient, and CG trial statistics. Set `false` to use eager evaluation. The first call can be slower; repeated calls with the same shapes can amortize compilation. Does not change the device or JAX execution. |
 | `method` | str | `"CG"` | Optimizer: `"CG"` (nonlinear conjugate gradient) or `"l-bfgs"` (opt-in). |
 | `line_search` | str | `"strong-wolfe"` | CG only: `"armijo"` or `"strong-wolfe"`. Omit this key with L-BFGS. |
 | `max_iter` | int | `100` | Nonnegative maximum optimizer iterations per denoising step, shared by all methods. |
@@ -124,8 +124,8 @@ statistics are also fused to reduce kernel launches. VdW overflow predicates are
 reused until the neighbor cache changes; cache validity is still checked at every
 trial. These optimizations do not change the configured objective, line search,
 or stopping criteria.
-Compilation failures fall back to eager evaluation. CPU trial statistics remain
-eager, and the JAX solver retains its existing JIT path.
+Compilation failures fall back to eager evaluation. The JAX solver retains its
+existing JIT path.
 
 Version 0.3.2 also fuses CUDA neighbor-cache validity checks and PR+ direction
 updates. Every trial retains its displacement and finite-value checks. Reduction
@@ -140,6 +140,16 @@ when compilation startup outweighs the savings. A missing compiler or
 a compilation failure falls back to eager evaluation; CPU failures do not disable
 CUDA compilation. `RGI_DISABLE_COMPILE=1` disables both. Dense VdW overflow sums
 and CPU solver control remain eager.
+
+Version 0.3.7 also compiles CPU CG trial statistics and avoids retransferring the
+CG gradient norm to CUDA. Armijo reuses the direction slope until the direction
+changes. CUDA L-BFGS batches scalar reads for its line search and fuses its
+two-loop recursion for up to 8192 variables. Larger problems retain the ordinary
+recursion; unavailable or failed compilation uses the native operations.
+The objective, tolerances, iteration limits, and neighbor checks are unchanged.
+Reduction order can introduce small floating-point differences. With `gpu: false`,
+inactive restraint windows skip coordinate transfers and results copy directly
+back to the predictor's coordinate buffer.
 
 Choose one of these three configurations inside `restraints_config`:
 

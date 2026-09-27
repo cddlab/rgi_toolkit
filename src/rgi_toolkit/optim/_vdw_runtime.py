@@ -73,6 +73,7 @@ class VdwRuntime:
             )
 
             self.array = lambda v: torch.as_tensor(v, device=like.device)
+            self.arange = lambda n: torch.arange(n, device=like.device)
             self.grad_value = torch.func.grad_and_value
         else:
             import jax
@@ -91,6 +92,7 @@ class VdwRuntime:
             )
 
             self.array = self.xp.asarray
+            self.arange = self.xp.arange
 
             def grad_value(fun):
                 vg = jax.value_and_grad(fun)
@@ -107,7 +109,6 @@ class VdwRuntime:
             build_fixed_vdw_pairs,
             build_active_vdw_pairs,
         )
-        self.chunk_indices = self.array(list(range(self.chunk_size)))
         self._compiled_dense = {}
         self._torch_overflow = {}
 
@@ -212,8 +213,8 @@ class VdwRuntime:
             else self.background.reshape(-1, self.background.shape[-2], 3)
         )
         query = batch if moving else batch[:, v["lig_local"], :]
-        batch_idx = self.array(list(range(batch.shape[0]))).reshape(-1, 1, 1)
-        source = self.array(list(range(query.shape[-2]))).reshape(1, -1, 1)
+        batch_idx = self.arange(batch.shape[0]).reshape(-1, 1, 1)
+        source = self.arange(query.shape[-2]).reshape(1, -1, 1)
         diff = query[:, :, None, :] - target[batch_idx, neighbours]
         distance = self.xp.sqrt(self.ops.sum(diff * diff, axis=-1) + EPS)
         parameters = None
@@ -346,20 +347,20 @@ class VdwRuntime:
         if moving:
             # Pack overflow queries once at rebuild time. A chunk now visits only
             # those rows, against every target, with the same O(N * chunk) memory.
-            positions = self.chunk_indices + offset
+            positions = self.arange(self.chunk_size) + offset
             valid = positions < n_target
             positions = self.xp.minimum(positions, self.array(n_target - 1))
             source = order[:, positions][..., None]
-            batch = self.array(list(range(order.shape[0]))).reshape(-1, 1, 1)
+            batch = self.arange(order.shape[0]).reshape(-1, 1, 1)
             selected = overflow[batch, source] & valid.reshape(1, -1, 1)
-            target = self.array(list(range(n_target))).reshape(1, 1, -1)
+            target = self.arange(n_target).reshape(1, 1, -1)
             neighbours = source * 0 + target
             mask = selected
         else:
-            target = self.chunk_indices + offset
+            target = self.arange(self.chunk_size) + offset
             valid = target < n_target
             target = self.xp.minimum(target, self.array(n_target - 1))
-            source = self.array(list(range(v["lig_local"].shape[0]))).reshape(1, -1, 1)
+            source = self.arange(v["lig_local"].shape[0]).reshape(1, -1, 1)
             neighbours = source * 0 + target.reshape(1, 1, -1)
             neighbours = neighbours + self.ops.asint(overflow[..., None]) * 0
             mask = overflow[..., None] & valid

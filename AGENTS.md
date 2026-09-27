@@ -155,10 +155,21 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
    Torch caches the overflow predicate with each immutable pair-cache object and
    skips dense zero contributions when no row overflows; every trial still checks
    neighbor validity, and replacing a pair cache invalidates the host predicate.
-   CPU statistics and the shared CG/line-search transitions remain unchanged.
+   The shared CG/line-search transitions retain the same acceptance criteria.
    CUDA neighbour validity checks and PR+ direction updates are also fused.
    The PR+ scalar division retains host-equivalent float64 arithmetic before
    conversion to the coordinate dtype. Compiler failures retain eager fallback.
+   CG keeps the previous squared gradient norm on the device and reuses identical
+   step lengths before coordinate checks. Armijo rechecks the direction slope
+   only when its direction changes. CPU compilation also covers trial statistics.
+   CUDA L-BFGS retains PyTorch's history, search and stopping rules. Its scalar
+   line search runs on the CPU after batched value/slope reads; coordinate arrays
+   stay on the GPU. Triton fuses the two-loop recursion for up to 8192 variables,
+   and device scalar axpy updates preserve native multiply-add rounding. Larger
+   problems or failed compilation retain the ordinary recursion and native fallback.
+   Fused reductions can introduce small floating-point differences; validate final
+   energy and coordinates as well as speed. Do not remove convergence or neighbour
+   checks to avoid synchronization.
    `compile_cpu: true` enables CPU objective/gradient compilation for CG and
    L-BFGS by default. Use `compile_cpu: false` when compilation startup dominates
    short CPU runs. CPU artifact/failure caches are separate from CUDA, and custom

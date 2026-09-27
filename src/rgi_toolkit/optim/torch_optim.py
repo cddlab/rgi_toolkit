@@ -468,6 +468,7 @@ class TorchRestraintOptimizer:
                     mi,
                     line_search=self.line_search,
                     gtol=self.gtol,
+                    compile_cpu=self.compile_cpu,
                     cache=cache,
                     prepare=lambda u, c: runtime.prepare(physical(u), c),
                     prepare_trial=(
@@ -480,7 +481,10 @@ class TorchRestraintOptimizer:
                 info = state.info
             else:
                 active.requires_grad_(True)
-                opt = torch.optim.LBFGS(
+                from rgi_toolkit.optim._torch_lbfgs import CudaLBFGS
+
+                optimizer = CudaLBFGS if active.is_cuda else torch.optim.LBFGS
+                opt = optimizer(
                     [active],
                     max_iter=mi,
                     tolerance_grad=self.gtol,

@@ -66,13 +66,16 @@ class Trial(NamedTuple):
 class TorchCG:
     prepare = None
 
-    def __init__(self, like):
+    def __init__(self, like, compile_cpu=False):
         import torch
 
         self.t = torch
         self.s = HostScalars()
         self.finfo = torch.finfo(like.dtype)
+        self.compile_cpu = compile_cpu and like.device.type == "cpu"
         self.fused_direction = None
+        self.device_statistics = None
+        self.direction_statistics = None
         if like.is_cuda:
             from rgi_toolkit.optim._torch_fused import direction
 
@@ -88,7 +91,7 @@ class TorchCG:
         return self.t.equal(a, b)
 
     def evaluate(self, vg, x, xbase, d, alpha, count, cache=None, *, prepared=False):
-        from rgi_toolkit.optim._torch_fused import trial_values
+        from rgi_toolkit.optim._torch_fused import cpu_trial_values, trial_values
 
         if self.prepare is None:
             g, f = vg(x)
@@ -97,7 +100,11 @@ class TorchCG:
                 cache = self.prepare(x, cache)
             g, f = vg(x, cache)
         g, f = g.detach(), f.detach()
-        values = trial_values(f, g, d, x, xbase).tolist()
+        statistics = (cpu_trial_values if self.compile_cpu else trial_values)(
+            f, g, d, x, xbase
+        )
+        self.device_statistics = g, statistics
+        values = statistics.tolist()
         f, slope, gnorm, gg, finite, moved = values
         return Trial(
             alpha,
@@ -223,8 +230,19 @@ def run_cg(
 
     def body(loop):
         x, st, iteration = loop
+        if isinstance(backend, TorchCG):
+            backend.direction_statistics = (
+                backend.device_statistics[1]
+                if backend.device_statistics is not None
+                and backend.device_statistics[0] is st.g
+                else None
+            )
         slope = backend.dot(st.g, st.d)
-        if is_armijo:
+        if is_armijo and isinstance(backend, TorchCG):
+            if slope >= 0:
+                st = st._replace(d=-st.g)
+                slope = backend.dot(st.g, st.d)
+        elif is_armijo:
             st = s.cond(
                 slope >= 0,
                 lambda st: st._replace(d=-st.g),
@@ -250,7 +268,7 @@ def run_cg(
         def evaluate(alpha, cached):
             # A Torch trial may read coordinate equality and cache validity together.
             # Keep coordinate-based reuse before any objective evaluation.
-            if prepare_trial is not None and alpha == cached.alpha:
+            if isinstance(backend, TorchCG) and alpha == cached.alpha:
                 return cached
             xt = x + backend.cast(alpha, x) * st.d
             if prepare_trial is not None:
@@ -282,7 +300,24 @@ def run_cg(
                 return direction_cache[1]
             denominator = st.gg + ARMIJO_BETA_EPS if is_armijo else st.gg
             if backend.fused_direction is not None:
-                d, dg = backend.fused_direction(t.g, st.g, st.d, denominator)
+                from rgi_toolkit.optim._torch_fused import (
+                    direction,
+                    direction_from_statistics,
+                )
+
+                if (
+                    backend.fused_direction is direction
+                    and backend.direction_statistics is not None
+                ):
+                    d, dg = direction_from_statistics(
+                        t.g,
+                        st.g,
+                        st.d,
+                        backend.direction_statistics,
+                        ARMIJO_BETA_EPS if is_armijo else 0.0,
+                    )
+                else:
+                    d, dg = backend.fused_direction(t.g, st.g, st.d, denominator)
                 result = d, s.scalar(dg)
             else:
                 numerator = backend.dot(t.g, t.g - st.g)
@@ -415,10 +450,10 @@ def run_cg(
     return xf, result
 
 
-def torch_cg(vg, x0, max_iter, **kwargs):
+def torch_cg(vg, x0, max_iter, *, compile_cpu=False, **kwargs):
     """Use the shared solver with a Torch ``(gradient, value)`` callback."""
     x0 = x0.detach().clone()
-    return run_cg(TorchCG(x0), vg, x0, max_iter, **kwargs)
+    return run_cg(TorchCG(x0, compile_cpu), vg, x0, max_iter, **kwargs)
 
 
 def jax_cg(energy_fn, x0, max_iter, **kwargs):

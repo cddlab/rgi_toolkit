@@ -62,6 +62,8 @@ def test_cpu_compile_can_be_disabled(monkeypatch, setting):
 
 
 def test_cpu_compile_failure_falls_back_without_disabling_cuda(monkeypatch):
+    from rgi_toolkit.optim import _torch_fused as fused
+
     calls = []
 
     def fail(*args):
@@ -82,6 +84,20 @@ def test_cpu_compile_failure_falls_back_without_disabling_cuda(monkeypatch):
     assert calls == [True]
     assert compiled._cpu_compile_failed[0]
     assert compiled._compile_failed == cuda_flags
+
+    calls.clear()
+    monkeypatch.setattr(fused, "_COMPILE_DISABLED", False)
+    monkeypatch.setattr(fused, "_CPU_COMPILED", {fused._trial_values: fail})
+    cuda_functions = fused._COMPILED.copy()
+    x = torch.ones((2, 3))
+    for _ in range(2):
+        result = fused.cpu_trial_values(x.new_tensor(1), x, x, x, x)
+        torch.testing.assert_close(
+            result, fused._trial_values(x.new_tensor(1), x, x, x, x)
+        )
+    assert calls == [True]
+    assert fused._CPU_COMPILED[fused._trial_values] is None
+    assert fused._COMPILED == cuda_functions
 
 
 @pytest.mark.parametrize("case", ["geometry", "rmsd"])
@@ -135,3 +151,31 @@ def test_public_cpu_compile_preserves_target_dtype_and_custom_gate(custom, metho
             )
         else:
             assert not compiled._cpu_compile_failed[0]
+
+
+@pytest.mark.cpu_compile
+def test_compiled_cpu_trial_statistics_preserve_finite_and_movement_checks():
+    from rgi_toolkit.optim import _torch_fused as fused
+    from tests.test_optim import _require_python_dev_headers
+
+    _require_python_dev_headers()
+    x = torch.arange(12, dtype=torch.float64).reshape(4, 3)
+    g = x * 0.125 - 1
+    expected = torch.tensor(
+        [
+            2.0,
+            float((g * x).sum()),
+            float(g.abs().max()),
+            float((g * g).sum()),
+            1.0,
+            0.0,
+        ],
+        dtype=x.dtype,
+    )
+    result = fused.cpu_trial_values(x.new_tensor(2), g, x, x, x.clone())
+    torch.testing.assert_close(result, expected, rtol=1e-12, atol=1e-12)
+    assert fused._CPU_COMPILED[fused._trial_values] is not None
+    bad = x.clone()
+    bad[0, 0] = float("nan")
+    result = fused.cpu_trial_values(x.new_tensor(2), g, x, bad, x)
+    assert result[-2:].tolist() == [0.0, 1.0]
