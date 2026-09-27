@@ -157,7 +157,10 @@ def test_solver_objective_tracks_new_contacts(
         assert np.linalg.norm(out[0] - out[1]) == pytest.approx(2.0, abs=1e-5)
 
 
-@pytest.mark.parametrize("backend", ["torch", "jax", "torch_compiled"])
+@pytest.mark.parametrize(
+    "backend",
+    ["torch", "jax", pytest.param("torch_compiled", marks=pytest.mark.cpu_compile)],
+)
 @pytest.mark.parametrize(
     "disabled", [{"start_sigma": 0.0}, {"start_step": 5}, {"weight": 0.0}]
 )
@@ -1597,6 +1600,7 @@ def test_gated_prepared_reads_host_spec_gate_arrays():
     assert float(opt._gated_prepared(3.0, 5)["distance"]["mask"].sum()) == 0.0
 
 
+@pytest.mark.cpu_compile
 def test_compiled_energy_matches_eager():
     """torch.compile of the GPU energy+grad must equal eager grad_and_value (compiling
     fuses kernels; it must NOT change the maths), incl. the detached Kabsch SVD in the
@@ -2010,6 +2014,7 @@ def _mode_args(opt, coords):
     )
 
 
+@pytest.mark.cpu_compile
 @pytest.mark.parametrize("mode", [1, 2, 3])
 def test_compiled_vdw_energy_matches_eager(mode):
     """Every ``_ENERGY_BY_MODE`` variant must compile to the same maths as eager — not
@@ -2038,6 +2043,7 @@ def test_compiled_vdw_energy_matches_eager(mode):
     assert abs(float(ve) - float(vc)) < 1e-8
 
 
+@pytest.mark.cpu_compile
 @pytest.mark.parametrize("mode", [0, 1, 2, 3])
 def test_custom_compiled_energy_includes_vdw(mode):
     """The per-optimizer custom-inclusive compiled energy must equal the eager CG's own

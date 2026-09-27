@@ -3,8 +3,14 @@ name: CI
 on:
   push:
     branches: ["main"]
+    paths-ignore: ["**/*.md"]
   pull_request:
     branches: ["main"]
+    paths-ignore: ["**/*.md"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint:
@@ -23,6 +29,15 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [eager, compiled]
+    env:
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      TORCHINDUCTOR_COMPILE_THREADS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -33,5 +48,13 @@ jobs:
         # pyproject.toml): the torch backend is the primary one (boltz / protenix /
         # chai / esmfold2). Install JAX too so AF3 and backend parity tests run.
         run: uv sync --frozen --extra torch --extra jax --extra notebook
-      - name: Test
-        run: uv run pytest -m "not gpu"
+      - name: Test eager execution
+        if: matrix.mode == 'eager'
+        env:
+          RGI_DISABLE_COMPILE: "1"
+        run: uv run --no-sync pytest -m "not gpu and not cpu_compile" -n 2 --dist loadfile --durations=15
+      - name: Test CPU compilation
+        if: matrix.mode == 'compiled'
+        env:
+          RGI_DISABLE_COMPILE: "0"
+        run: uv run --no-sync pytest -m "not gpu and cpu_compile" --durations=15

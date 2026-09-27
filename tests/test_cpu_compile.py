@@ -1,4 +1,4 @@
-"""Opt-in CPU compilation, public configuration, and isolated fallback state."""
+"""Default CPU compilation, explicit opt-out, and isolated fallback state."""
 
 from types import SimpleNamespace
 
@@ -10,10 +10,14 @@ from rgi_toolkit.config import RestraintsConfig
 from rgi_toolkit.optim import _torch_cg_gpu as compiled
 from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
 
+pytestmark = pytest.mark.cpu_compile
 
-def _distance_restraint(compile_cpu=False, custom=False, method="CG"):
+
+def _distance_restraint(compile_cpu=None, custom=False, method="CG"):
     atoms = [AtomRecord("A", i + 1, i) for i in range(2)]
-    config = {"compile_cpu": compile_cpu, "gpu": False, "method": method}
+    config = {"gpu": False, "method": method}
+    if compile_cpu is not None:
+        config["compile_cpu"] = compile_cpu
     if custom:
         config["custom_restraints_config"] = [
             {
@@ -35,17 +39,25 @@ def _distance_restraint(compile_cpu=False, custom=False, method="CG"):
     return restraint
 
 
-def test_cpu_compile_is_opt_in_and_coerces_false_strings(monkeypatch):
-    assert not RestraintsConfig.from_dict({}).compile_cpu
+def test_cpu_compile_defaults_on_and_coerces_false_strings():
+    assert RestraintsConfig().compile_cpu
+    assert RestraintsConfig.from_dict(None).compile_cpu
+    assert RestraintsConfig.from_dict({}).compile_cpu
+    assert not RestraintsConfig.from_dict({"compile_cpu": False}).compile_cpu
     assert not RestraintsConfig.from_dict({"compile_cpu": "false"}).compile_cpu
     assert RestraintsConfig.from_dict({"compile_cpu": "true"}).compile_cpu
 
+
+@pytest.mark.parametrize("setting", [False, "false"])
+def test_cpu_compile_can_be_disabled(monkeypatch, setting):
     def unexpected(*args, **kwargs):
-        pytest.fail("CPU compilation must be opt-in")
+        pytest.fail("An explicit opt-out must bypass CPU compilation")
 
     monkeypatch.setattr(compiled, "_get_cvg", unexpected)
     coords = torch.tensor([[0.0, 0, 0], [7.0, 0, 0]])
-    _distance_restraint().minimize(coords, 0, 0.0)
+    restraint = _distance_restraint(compile_cpu=setting)
+    restraint.minimize(coords, 0, 0.0)
+    assert not restraint._optimizer.compile_cpu
     assert float(torch.linalg.norm(coords[0] - coords[1])) == pytest.approx(2, abs=1e-5)
 
 
@@ -61,7 +73,7 @@ def test_cpu_compile_failure_falls_back_without_disabling_cuda(monkeypatch):
     cuda_flags = compiled._compile_failed.copy()
     for _ in range(2):
         coords = torch.tensor([[0.0, 0, 0], [7.0, 0, 0]])
-        _distance_restraint(compile_cpu=True).minimize(coords, 0, 0.0)
+        _distance_restraint().minimize(coords, 0, 0.0)
         assert float(torch.linalg.norm(coords[0] - coords[1])) == pytest.approx(
             2, abs=1e-5
         )
@@ -80,7 +92,8 @@ def test_cpu_compiled_objective_matches_eager_gradient(case):
         (_make_spec(), _positions()) if case == "geometry" else _rmsd_spec()
     )
     x = torch.tensor(positions, dtype=torch.float64)
-    optimizer = TorchRestraintOptimizer(spec, compile_cpu=True)
+    optimizer = TorchRestraintOptimizer(spec)
+    assert optimizer.compile_cpu
     optimizer._ensure(x.device, x.dtype)
     prepared = optimizer._gated_prepared(0.0)
     eager = torch.func.grad_and_value(compiled._energy)
@@ -102,7 +115,7 @@ def test_public_cpu_compile_preserves_target_dtype_and_custom_gate(custom, metho
     from tests.test_optim import _require_python_dev_headers
 
     _require_python_dev_headers()
-    restraint = _distance_restraint(compile_cpu=True, custom=custom, method=method)
+    restraint = _distance_restraint(custom=custom, method=method)
     for dtype in (torch.float32, torch.float64):
         coords = torch.tensor([[0.0, 0, 0], [7.0, 0, 0]], dtype=dtype)
         if custom:

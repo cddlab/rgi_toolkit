@@ -1,6 +1,6 @@
 [project]
 name = "rgi-toolkit"
-version = "0.3.2"
+version = "0.3.3"
 description = "Restraint-Guided Inference toolkit for PyTorch/JAX-based structure prediction models"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -37,6 +37,7 @@ notebook = [
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
+    "pytest-xdist>=3.8",
     "scipy==1.17.1",
     "ruff>=0.15.7",
 ]
@@ -76,4 +77,5 @@ max-line-length = 120
 testpaths = ["tests"]
 markers = [
     "gpu: requires a GPU (deselect with '-m \"not gpu\"')",
+    "cpu_compile: verifies real Torch CPU compilation, defaults, and fallback",
 ]

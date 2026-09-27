@@ -11,7 +11,7 @@ allocations.
 
 ``_ENERGY_BY_MODE`` combines fixed-background and active-active VdW with mode bits
 0 and 1. Custom restraints wrap the same base energies in per-optimizer artifacts
-because their closures are spec-specific. CPU objective compilation is opt-in and
+because their closures are spec-specific. CPU objective compilation defaults on and
 uses an independent artifact/failure cache. Compilation failures use eager
 evaluation with the same convergence contract.
 """

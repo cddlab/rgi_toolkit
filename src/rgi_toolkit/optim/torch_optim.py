@@ -50,7 +50,7 @@ class TorchRestraintOptimizer:
         *,
         line_search=None,
         gtol=GTOL,
-        compile_cpu=False,
+        compile_cpu=True,
     ):
         self.spec = spec
         self.max_iter = max_iter

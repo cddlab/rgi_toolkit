@@ -42,6 +42,13 @@ uvx ruff check src tests && uvx ruff format --check src tests
 GPU paths (real CUDA torch / jax devices) are exercised by the host tools via
 `sbatch`, not on the login node.
 
+CI runs ordinary non-GPU tests with `RGI_DISABLE_COMPILE=1` in two file-grouped
+pytest-xdist workers. Tests marked `cpu_compile` run separately with compilation
+enabled, covering the public default, opt-out, fallback, and compiled numerical
+parity. Keep every non-GPU test in one of these two jobs; mark new tests that
+require Torch compilation with `cpu_compile`. Markdown-only changes skip CI,
+and a newer run cancels an older run for the same branch or pull request.
+
 ## Architecture
 
 **rgi_toolkit** — Restraint-Guided Inference (RGI): inject distance + ligand
@@ -139,9 +146,9 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
    CUDA neighbour validity checks and PR+ direction updates are also fused.
    The PR+ scalar division retains host-equivalent float64 arithmetic before
    conversion to the coordinate dtype. Compiler failures retain eager fallback.
-   `compile_cpu: true` opts into CPU objective/gradient compilation for CG and
-   L-BFGS; it defaults to false because compilation startup can dominate short
-   CPU runs. CPU artifact/failure caches are separate from CUDA, and custom
+   `compile_cpu: true` enables CPU objective/gradient compilation for CG and
+   L-BFGS by default. Use `compile_cpu: false` when compilation startup dominates
+   short CPU runs. CPU artifact/failure caches are separate from CUDA, and custom
    closures retain their per-optimizer device/dtype invalidation. CPU solver
    control and dense overflow sums remain eager. `RGI_DISABLE_COMPILE=1`
    disables both CPU and CUDA compilation. JAX ignores this Torch-only setting.
