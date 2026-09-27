@@ -451,6 +451,7 @@ class CombinedRestraints:
                 method=self.config.method,
                 line_search=self.config.line_search,
                 gtol=self.config.gtol,
+                compile_cpu=self.config.compile_cpu,
             )
         elif b == "jax":
             from rgi_toolkit.optim.jax_optim import make_minimizer

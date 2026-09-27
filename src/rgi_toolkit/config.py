@@ -131,6 +131,7 @@ class RestraintsConfig:
         default_factory=list
     )  # nucleic-acid base-pair restraints (expand to distance + plane)
     chiral_data: list = field(default_factory=list)
+    compile_cpu: bool = False
 
     def iter_resolvable_data(self):
         """Yield every ordinary built-in entry that resolves against an adapter."""
@@ -146,6 +147,7 @@ class RestraintsConfig:
         _KNOWN_TOP_LEVEL = {
             "verbose",
             "gpu",
+            "compile_cpu",
             "method",
             "line_search",
             "max_iter",
@@ -278,6 +280,7 @@ class RestraintsConfig:
         cfg = cls(
             verbose=coerce_bool(config.get("verbose", False)),
             gpu=gpu,
+            compile_cpu=coerce_bool(config.get("compile_cpu", False)),
             method=method,
             line_search=line_search,
             max_iter=int(max_iter),

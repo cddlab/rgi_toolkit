@@ -122,6 +122,15 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
    skips dense zero contributions when no row overflows; every trial still checks
    neighbor validity, and replacing a pair cache invalidates the host predicate.
    CPU statistics and the shared CG/line-search transitions remain unchanged.
+   CUDA neighbour validity checks and PR+ direction updates are also fused.
+   The PR+ scalar division retains host-equivalent float64 arithmetic before
+   conversion to the coordinate dtype. Compiler failures retain eager fallback.
+   `compile_cpu: true` opts into CPU objective/gradient compilation for CG and
+   L-BFGS; it defaults to false because compilation startup can dominate short
+   CPU runs. CPU artifact/failure caches are separate from CUDA, and custom
+   closures retain their per-optimizer device/dtype invalidation. CPU solver
+   control and dense overflow sums remain eager. `RGI_DISABLE_COMPILE=1`
+   disables both CPU and CUDA compilation. JAX ignores this Torch-only setting.
    JAX wraps the pure minimizer with `sequential_vmap`: an outer predictor
    `vmap` must not turn conditional neighbour rebuilds and dense overflow sums into
    unconditional work. Sample solves remain device-side loops with independent exits.

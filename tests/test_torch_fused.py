@@ -10,6 +10,45 @@ from rgi_toolkit.optim._vdw_runtime import VdwRuntime
 
 @pytest.mark.gpu
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("restart", [False, True])
+def test_fused_direction_matches_host_pr_plus(dtype, restart):
+    generator = torch.Generator(device="cuda").manual_seed(409)
+    g = torch.randn((2, 137, 3), generator=generator, device="cuda", dtype=dtype)
+    old_g = g * (2 if restart else 0.5)
+    old_d = torch.randn(g.shape, generator=generator, device="cuda", dtype=dtype)
+    denominator = float((old_g * old_g).sum())
+    numerator = float((g * (g - old_g)).sum())
+    expected = -g + max(0.0, numerator / denominator) * old_d
+    actual, slope = fused.direction(g, old_g, old_d, denominator)
+    torch.testing.assert_close(actual, expected)
+    torch.testing.assert_close(slope, (expected * g).sum())
+    if restart:
+        torch.testing.assert_close(actual, -g, rtol=0, atol=0)
+    assert fused._COMPILED[fused._direction] is not None
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("moving", [False, True])
+def test_fused_cache_predicate_preserves_skin_boundary_and_invalid_trials(moving):
+    a = torch.zeros((2, 3, 3), device="cuda")
+    indices = None if moving else torch.tensor([0, 2], device="cuda")
+    reference = a.clone() if moving else a[..., indices, :].clone()
+    valid = torch.tensor(True, device="cuda")
+    threshold = 0.25
+    assert not bool(fused.cache_needed(a, reference, indices, valid, threshold, True))
+    # At the skin boundary a contact cannot have crossed the protected shell.
+    a[1, 0, 0] = 0.5
+    assert not bool(fused.cache_needed(a, reference, indices, valid, threshold, True))
+    a[1, 0, 0] = torch.nextafter(a[1, 0, 0], a.new_tensor(1.0))
+    assert bool(fused.cache_needed(a, reference, indices, valid, threshold, True))
+    assert not bool(fused.cache_needed(a, reference, indices, valid, threshold, False))
+    a[0, 1, 1] = float("nan")
+    assert not bool(fused.cache_needed(a, reference, indices, valid, threshold, True))
+    assert fused._COMPILED[fused._cache_needed] is not None
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 @pytest.mark.parametrize("condition", ["finite", "stationary", "nan", "inf"])
 def test_trial_statistics_preserve_values_and_invalid_point_checks(dtype, condition):
     generator = torch.Generator(device="cuda").manual_seed(72)

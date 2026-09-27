@@ -254,12 +254,24 @@ class VdwRuntime:
         def update(old, moving):
             if old is None:
                 return None
-            delta = self._reference(a, moving) - old.reference
             threshold = self.skin * (0.5 if moving else 1.0)
-            stale = (~old.valid) | self.xp.any(
-                self.ops.sum(delta * delta, axis=-1) > threshold**2
-            )
-            need = enabled & stale & self.xp.all(self.xp.isfinite(a))
+            if self.backend == "torch" and a.is_cuda:
+                from rgi_toolkit.optim._torch_fused import cache_needed
+
+                need = cache_needed(
+                    a,
+                    old.reference,
+                    None if moving else self.fixed["lig_local"],
+                    old.valid,
+                    threshold**2,
+                    enabled,
+                )
+            else:
+                delta = self._reference(a, moving) - old.reference
+                stale = (~old.valid) | self.xp.any(
+                    self.ops.sum(delta * delta, axis=-1) > threshold**2
+                )
+                need = enabled & stale & self.xp.all(self.xp.isfinite(a))
             return self.cond(
                 need, lambda _: self._build(a, moving), lambda _: old, None
             )

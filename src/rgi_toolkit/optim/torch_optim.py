@@ -22,6 +22,7 @@ import os
 
 import torch
 
+from rgi_toolkit._config_util import coerce_bool
 from rgi_toolkit.energy import torch_energy
 from rgi_toolkit.energy._terms import CONF_KEYS, PER_ENTRY_KEYS, TERM_BY_KEY
 from rgi_toolkit.optim._cg_config import GTOL
@@ -49,12 +50,14 @@ class TorchRestraintOptimizer:
         *,
         line_search=None,
         gtol=GTOL,
+        compile_cpu=False,
     ):
         self.spec = spec
         self.max_iter = max_iter
         self.method = method
         self.line_search = resolve_line_search(method, line_search)
         self.gtol = resolve_gtol(gtol)
+        self.compile_cpu = coerce_bool(compile_cpu)
         self._prepared = None
         self._prepared_g = {}  # cache {gate-state -> stable pre-gated prepared} (GPU CG)
         self._active_idx = None
@@ -129,7 +132,7 @@ class TorchRestraintOptimizer:
             )
         except Exception as exc:
             logger.warning(
-                "torch.compile of the custom GPU energy failed (%s); eager", exc
+                "torch.compile of the custom restraint energy failed (%s); eager", exc
             )
             self._custom_cvg[key] = False
             return None
@@ -162,8 +165,8 @@ class TorchRestraintOptimizer:
         self._dtype = dtype
         if self._custom_terms:
             logger.info(
-                "%d custom restraint(s): on CUDA they run inside a per-optimizer "
-                "torch.compile'd energy+grad (eager on CPU / on a compile fallback)",
+                "%d custom restraint(s): compiled on CUDA or with compile_cpu=True "
+                "on CPU; eager on a compile fallback",
                 len(self._custom_terms),
             )
 
@@ -417,11 +420,11 @@ class TorchRestraintOptimizer:
 
             eager = torch.func.grad_and_value(sparse_energy)
             compiled = None
-            if active.is_cuda:
+            if active.is_cuda or (self.compile_cpu and active.device.type == "cpu"):
                 compiled = (
                     self._get_custom_cvg(runtime.mode, active_terms)
                     if active_terms
-                    else gpu._get_cvg(runtime.mode)
+                    else gpu._get_cvg(runtime.mode, device_type=active.device.type)
                 )
 
             def value_grad(a, cache):
@@ -435,7 +438,7 @@ class TorchRestraintOptimizer:
                         if active_terms:
                             self._custom_cvg[(runtime.mode, active_terms)] = False
                         else:
-                            gpu._compile_failed[runtime.mode] = True
+                            gpu._failure_flags(active.device.type)[runtime.mode] = True
                         compiled = None
                         g, f = eager(a, prepared, *args)
                 else:

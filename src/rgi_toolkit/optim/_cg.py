@@ -72,6 +72,11 @@ class TorchCG:
         self.t = torch
         self.s = HostScalars()
         self.finfo = torch.finfo(like.dtype)
+        self.fused_direction = None
+        if like.is_cuda:
+            from rgi_toolkit.optim._torch_fused import direction
+
+            self.fused_direction = direction
 
     def cast(self, scalar, like):
         return float(scalar)
@@ -110,6 +115,7 @@ class TorchCG:
 
 class JaxCG:
     prepare = None
+    fused_direction = None
 
     def __init__(self, like, energy_fn):
         import jax
@@ -253,8 +259,11 @@ def run_cg(
             )
 
         def next_direction(t):
-            numerator = backend.dot(t.g, t.g - st.g)
             denominator = st.gg + ARMIJO_BETA_EPS if is_armijo else st.gg
+            if backend.fused_direction is not None:
+                d, dg = backend.fused_direction(t.g, st.g, st.d, denominator)
+                return d, s.scalar(dg)
+            numerator = backend.dot(t.g, t.g - st.g)
             beta = xp.maximum(0.0, numerator / denominator)
             d = -t.g + backend.cast(beta, t.g) * st.d
             return d, backend.dot(d, t.g)

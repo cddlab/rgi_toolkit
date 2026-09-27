@@ -38,6 +38,7 @@ restraints_config:
   # --- top-level knobs ---
   verbose: ...        # bool
   gpu: ...            # bool
+  compile_cpu: ...    # bool, optional PyTorch CPU compilation (default false)
   method: ...         # "CG" | "l-bfgs"
   line_search: ...    # CG only: "strong-wolfe" (default) | "armijo"
   max_iter: ...       # int
@@ -112,6 +113,7 @@ and [one section](../examples/distance/boltz-2/qbp_25.00.yaml).
 |---|---|---|---|
 | `verbose` | bool | `false` | Log the built spec (per-restraint counts) at setup and per-term energies at finalize. Strongly recommended — it is how you confirm a restraint was actually built. |
 | `gpu` | bool | `true` | Torch **device**: `true` = accelerator (default), `false` = CPU. It does **not** change the backend. (Inert for AF3, which always runs the JAX minimizer on the model's device.) Accepts `true/false` and the strings `1/0/yes/no/on/off`. |
+| `compile_cpu` | bool | `false` | Opt in to compiling the PyTorch CPU objective and gradient. The first call can be slower; repeated calls with the same shapes can amortize compilation. Does not change the device or JAX execution. |
 | `method` | str | `"CG"` | Optimizer: `"CG"` (nonlinear conjugate gradient) or `"l-bfgs"` (opt-in). |
 | `line_search` | str | `"strong-wolfe"` | CG only: `"armijo"` or `"strong-wolfe"`. Omit this key with L-BFGS. |
 | `max_iter` | int | `100` | Nonnegative maximum optimizer iterations per denoising step, shared by all methods. |
@@ -124,6 +126,19 @@ trial. These optimizations do not change the configured objective, line search,
 or stopping criteria.
 Compilation failures fall back to eager evaluation. CPU trial statistics remain
 eager, and the JAX solver retains its existing JIT path.
+
+Version 0.3.2 also fuses CUDA neighbor-cache validity checks and PR+ direction
+updates. Every trial retains its displacement and finite-value checks. Reduction
+order can change floating-point optimization trajectories.
+
+For repeated CPU restraint minimizations, set `compile_cpu: true`. Combine it with
+`gpu: false` to run the restraints on CPU when the predictor uses CUDA. It works
+with CG and L-BFGS and leaves weights, gates, tolerances, and iteration limits
+unchanged. CPU compilation is disabled by default because startup can outweigh
+the savings for short runs or frequently changing shapes. A missing compiler or
+a compilation failure falls back to eager evaluation; CPU failures do not disable
+CUDA compilation. `RGI_DISABLE_COMPILE=1` disables both. Dense VdW overflow sums
+and CPU solver control remain eager.
 
 Choose one of these three configurations inside `restraints_config`:
 

@@ -11,8 +11,9 @@ allocations.
 
 ``_ENERGY_BY_MODE`` combines fixed-background and active-active VdW with mode bits
 0 and 1. Custom restraints wrap the same base energies in per-optimizer artifacts
-because their closures are spec-specific. CPU execution and compile failures use
-the eager CG with the same convergence contract.
+because their closures are spec-specific. CPU objective compilation is opt-in and
+uses an independent artifact/failure cache. Compilation failures use eager
+evaluation with the same convergence contract.
 """
 
 from __future__ import annotations
@@ -41,6 +42,8 @@ _COMPILE_DISABLED = os.environ.get("RGI_DISABLE_COMPILE", "") not in ("", "0", "
 # artifact failing must not disable the independent modes for the rest of the batch.
 _compile_failed = {0: False, 1: False, 2: False, 3: False}
 _CVG_BY_MODE = {}
+_CPU_CVG_BY_MODE = {}
+_cpu_compile_failed = {0: False, 1: False, 2: False, 3: False}
 
 # Allow value-specialized recompilations across structures without permanently
 # falling back to eager. Keep Python scalar leaves out of the compiled pytree.
@@ -492,22 +495,30 @@ _ENERGY_BY_MODE = {
 }
 
 
-def _get_cvg(mode=0):
+def _failure_flags(device_type):
+    return _cpu_compile_failed if device_type == "cpu" else _compile_failed
+
+
+def _get_cvg(mode=0, *, device_type="cuda"):
     """Return the compiled grad/value artifact for the requested VdW mode."""
 
-    if _COMPILE_DISABLED or _compile_failed[mode]:
+    failures = _failure_flags(device_type)
+    artifacts = _CPU_CVG_BY_MODE if device_type == "cpu" else _CVG_BY_MODE
+    if _COMPILE_DISABLED or failures[mode]:
         return None
     try:
-        if mode not in _CVG_BY_MODE:
-            _CVG_BY_MODE[mode] = torch.compile(
+        if mode not in artifacts:
+            artifacts[mode] = torch.compile(
                 torch.func.grad_and_value(_ENERGY_BY_MODE[mode], argnums=0),
                 fullgraph=False,
                 dynamic=False,  # specs and neighbor capacities have static shapes
             )
-        return _CVG_BY_MODE[mode]
+        return artifacts[mode]
     except Exception as exc:
-        logger.warning("torch.compile of the GPU CG energy failed (%s); eager", exc)
-        _compile_failed[mode] = True
+        logger.warning(
+            "torch.compile of the %s energy failed (%s); eager", device_type, exc
+        )
+        failures[mode] = True
         return None
 
 
