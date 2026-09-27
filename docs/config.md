@@ -117,10 +117,11 @@ and [one section](../examples/distance/boltz-2/qbp_25.00.yaml).
 | `max_iter` | int | `100` | Nonnegative maximum optimizer iterations per denoising step, shared by all methods. |
 | `gtol` | float | `1e-5` | Nonnegative finite gradient tolerance for CG and L-BFGS on both backends. Smaller values request tighter optimization. |
 
-On CUDA, PyTorch compiles the energy/gradient and fuses CG trial statistics to
-reduce kernel launches. VdW overflow predicates are reused until the neighbor
-cache changes; cache validity is still checked at every trial. These optimizations
-do not change the configured objective, line search, or stopping criteria.
+On CUDA, PyTorch compiles the energy/gradient. Since version 0.3.1, CG trial
+statistics are also fused to reduce kernel launches. VdW overflow predicates are
+reused until the neighbor cache changes; cache validity is still checked at every
+trial. These optimizations do not change the configured objective, line search,
+or stopping criteria.
 Compilation failures fall back to eager evaluation. CPU trial statistics remain
 eager, and the JAX solver retains its existing JIT path.
 
