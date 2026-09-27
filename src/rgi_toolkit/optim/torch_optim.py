@@ -440,8 +440,10 @@ class TorchRestraintOptimizer:
                         g, f = eager(a, prepared, *args)
                 else:
                     g, f = eager(a, prepared, *args)
-                dg, df = runtime.dense_value_grad(a, cache)
-                return g + dg, f + df
+                if runtime.has_overflow(cache):
+                    dg, df = runtime.dense_value_grad(a, cache)
+                    return g + dg, f + df
+                return g, f
 
             cache = runtime.empty(active)
             if self._is_cg():

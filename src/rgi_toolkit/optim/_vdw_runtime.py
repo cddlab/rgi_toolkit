@@ -109,6 +109,22 @@ class VdwRuntime:
         )
         self.chunk_indices = self.array(list(range(self.chunk_size)))
         self._compiled_dense = {}
+        self._torch_overflow = {}
+
+    def has_overflow(self, cache):
+        """Cache Torch host predicates until the immutable pair cache changes."""
+        if self.backend != "torch":
+            raise ValueError("host overflow predicates are Torch-only")
+        result = False
+        for moving, current in enumerate(cache):
+            if current is None:
+                continue
+            previous = self._torch_overflow.get(moving)
+            if previous is None or previous[0] is not current:
+                previous = (current, bool(self.xp.any(current.overflow)))
+                self._torch_overflow[moving] = previous
+            result = result or previous[1]
+        return result
 
     def cond(self, predicate, yes, no, operand):
         if self.backend == "torch":

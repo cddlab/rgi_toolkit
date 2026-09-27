@@ -116,7 +116,13 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
    No runtime `pure_callback` or SciPy. On CUDA the Torch objective
    runs through `optim/_torch_cg_gpu.py` — the same early-exit CG but with a `torch.compile`
    (inductor-fused, NOT cudagraph) energy+grad, so conformer/RMSD optimization is GPU-faster
-   than eager. JAX wraps the pure minimizer with `sequential_vmap`: an outer predictor
+   than eager. CUDA trial statistics (slope, gradient norms, finite/movement checks)
+   are fused in `optim/_torch_fused.py`, with eager fallback on compile failure.
+   Torch caches the overflow predicate with each immutable pair-cache object and
+   skips dense zero contributions when no row overflows; every trial still checks
+   neighbor validity, and replacing a pair cache invalidates the host predicate.
+   CPU statistics and the shared CG/line-search transitions remain unchanged.
+   JAX wraps the pure minimizer with `sequential_vmap`: an outer predictor
    `vmap` must not turn conditional neighbour rebuilds and dense overflow sums into
    unconditional work. Sample solves remain device-side loops with independent exits.
    JAX fuses cheap scalar line-search transitions with pointwise selection; objective

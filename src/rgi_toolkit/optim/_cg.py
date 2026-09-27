@@ -83,24 +83,15 @@ class TorchCG:
         return self.t.equal(a, b)
 
     def evaluate(self, vg, x, xbase, d, alpha, count, cache=None):
+        from rgi_toolkit.optim._torch_fused import trial_values
+
         if self.prepare is None:
             g, f = vg(x)
         else:
             cache = self.prepare(x, cache)
             g, f = vg(x, cache)
         g, f = g.detach(), f.detach()
-        values = self.t.stack(
-            (
-                f,
-                self.t.sum(g * d),
-                g.abs().max(),
-                self.t.sum(g * g),
-                self.t.isfinite(f)
-                & self.t.isfinite(g).all()
-                & self.t.isfinite(x).all(),
-                self.t.any(x != xbase),
-            )
-        ).tolist()
+        values = trial_values(f, g, d, x, xbase).tolist()
         f, slope, gnorm, gg, finite, moved = values
         return Trial(
             alpha,
