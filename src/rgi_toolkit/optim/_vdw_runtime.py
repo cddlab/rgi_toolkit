@@ -278,6 +278,31 @@ class VdwRuntime:
 
         return update(cache[0], False), update(cache[1], True)
 
+    def prepare_trial(self, a, previous, cache):
+        """Read coordinate equality and both cache predicates together on CUDA."""
+        from rgi_toolkit.optim._torch_fused import trial_checks
+
+        entries = tuple(
+            None
+            if old is None
+            else (
+                old.reference,
+                None if moving else self.fixed["lig_local"],
+                old.valid,
+                (self.skin * (0.5 if moving else 1.0)) ** 2,
+            )
+            for moving, old in enumerate(cache)
+        )
+        same, fixed, moving = trial_checks(a, previous, *entries)
+        if same:
+            return True, cache
+        return False, tuple(
+            self._build(a, bool(index)) if needed else old
+            for index, (old, needed) in enumerate(
+                zip(cache, (fixed, moving), strict=True)
+            )
+        )
+
     def args(self, cache):
         args = ()
         if self.fixed is not None:

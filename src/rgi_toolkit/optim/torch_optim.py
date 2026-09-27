@@ -470,6 +470,11 @@ class TorchRestraintOptimizer:
                     gtol=self.gtol,
                     cache=cache,
                     prepare=lambda u, c: runtime.prepare(physical(u), c),
+                    prepare_trial=(
+                        runtime.prepare_trial
+                        if active.is_cuda and mapping is None and runtime.mode == 1
+                        else None
+                    ),
                 )
                 active = physical(active)
                 info = state.info

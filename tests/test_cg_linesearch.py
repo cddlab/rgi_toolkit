@@ -77,6 +77,33 @@ def test_torch_trial_direction_is_reused_without_changing_minimum(device, line_s
     np.testing.assert_allclose(array(out), array(target), atol=1e-4, rtol=0)
 
 
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.gpu)])
+def test_combined_trial_preparation_reuses_quantized_coordinates(device):
+    from rgi_toolkit.optim._torch_fused import trial_checks
+
+    calls = []
+
+    def energy(x):
+        calls.append(1)
+        return ((x - 100_000_080.0) ** 2).sum() * 1e-9
+
+    initial = torch.tensor([100_000_000.0], device=device)
+    out, state = torch_cg(
+        lambda x, cache: torch.func.grad_and_value(energy)(x),
+        initial,
+        100,
+        gtol=1e-7,
+        prepare=lambda x, cache: cache,
+        prepare_trial=lambda x, previous, cache: (
+            trial_checks(x, previous, None, None)[0],
+            cache,
+        ),
+    )
+    torch.testing.assert_close(out, initial, rtol=0, atol=0)
+    assert state.info.status == CGStatus.NO_PROGRESS
+    assert state.info.nfev == state.info.njev == len(calls) == 1
+
+
 @pytest.mark.parametrize(
     "fp,dp,bracket",
     [

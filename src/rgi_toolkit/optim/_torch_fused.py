@@ -70,3 +70,20 @@ def cache_needed(a, reference, lig_local, valid, threshold_squared, enabled):
     return _run(
         _cache_needed, a, a, reference, lig_local, valid, threshold_squared, enabled
     )
+
+
+def _trial_checks(a, previous, fixed, moving):
+    same = torch.all(a == previous)
+    flags = [same]
+    for entry in (fixed, moving):
+        flags.append(
+            torch.zeros((), device=a.device, dtype=torch.bool)
+            if entry is None
+            else _cache_needed(a, *entry, True)
+        )
+    return torch.stack(flags)
+
+
+def trial_checks(a, previous, fixed, moving):
+    """Read coordinate equality and neighbour-cache flags with one host transfer."""
+    return _run(_trial_checks, a, a, previous, fixed, moving).tolist()

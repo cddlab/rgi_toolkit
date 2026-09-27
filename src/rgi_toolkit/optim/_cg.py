@@ -87,13 +87,14 @@ class TorchCG:
     def same_point(self, a, b):
         return self.t.equal(a, b)
 
-    def evaluate(self, vg, x, xbase, d, alpha, count, cache=None):
+    def evaluate(self, vg, x, xbase, d, alpha, count, cache=None, *, prepared=False):
         from rgi_toolkit.optim._torch_fused import trial_values
 
         if self.prepare is None:
             g, f = vg(x)
         else:
-            cache = self.prepare(x, cache)
+            if not prepared:
+                cache = self.prepare(x, cache)
             g, f = vg(x, cache)
         g, f = g.detach(), f.detach()
         values = trial_values(f, g, d, x, xbase).tolist()
@@ -170,6 +171,7 @@ def run_cg(
     state=None,
     cache=None,
     prepare=None,
+    prepare_trial=None,
     more_maxiter=WOLFE1_MAX_ITER,
     wolfe_maxiter=WOLFE2_MAX_ITER,
     zoom_maxiter=ZOOM_MAX_ITER,
@@ -246,7 +248,18 @@ def run_cg(
         )
 
         def evaluate(alpha, cached):
+            # A Torch trial may read coordinate equality and cache validity together.
+            # Keep coordinate-based reuse before any objective evaluation.
+            if prepare_trial is not None and alpha == cached.alpha:
+                return cached
             xt = x + backend.cast(alpha, x) * st.d
+            if prepare_trial is not None:
+                same, updated = prepare_trial(xt, cached.x, cached.cache)
+                if same:
+                    return cached._replace(alpha=alpha)
+                return backend.evaluate(
+                    vg, xt, x, st.d, alpha, cached.nfev, updated, prepared=True
+                )
             # Different step lengths can round to identical coordinates.
             # Match ScalarFunction's coordinate-based value/gradient cache.
             return s.cond(
