@@ -1,5 +1,12 @@
 version: "3"
 
+env:
+  PYTHONPATH: src
+  OMP_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+  TORCHINDUCTOR_COMPILE_THREADS: "1"
+
 tasks:
   lint:
     desc: Run ruff linter and formatter check
@@ -14,11 +21,31 @@ tasks:
       - uv run --no-sync ruff check --fix .
 
   test:
-    desc: Run pytest using /venv Python (preserves existing torch ecosystem)
+    desc: Run the comprehensive local CPU suite (alias for test-local)
     cmds:
-      - PYTHONPATH=src /venv/bin/python3 -m pytest
+      - task: test-local
 
   test-ci:
-    desc: Run only non-GPU tests (mirrors CI environment)
+    desc: Run short, representative correctness tests used by CI
+    env:
+      JAX_PLATFORMS: cpu
+      JAX_ENABLE_X64: "1"
+      RGI_DISABLE_COMPILE: "1"
     cmds:
-      - PYTHONPATH=src /venv/bin/python3 -m pytest -m "not gpu"
+      - uv run --active --no-sync python -m pytest @tests/ci.txt -m "not gpu" -n 2 --dist loadfile --strict-markers --durations=10 {{.CLI_ARGS}}
+
+  test-local:
+    desc: Run every CPU regression and real CPU compilation check
+    env:
+      JAX_PLATFORMS: cpu
+      JAX_ENABLE_X64: "1"
+    cmds:
+      - RGI_DISABLE_COMPILE=1 uv run --active --no-sync python -m pytest -m "not gpu and not cpu_compile" -n 2 --dist loadfile --strict-markers --durations=10 {{.CLI_ARGS}}
+      - RGI_DISABLE_COMPILE=0 uv run --active --no-sync python -m pytest -m "not gpu and cpu_compile" --strict-markers --durations=10 {{.CLI_ARGS}}
+
+  test-gpu:
+    desc: Run all GPU checks in an activated CUDA-enabled predictor environment
+    env:
+      RGI_DISABLE_COMPILE: "0"
+    cmds:
+      - uv run --active --no-sync python -m pytest -m gpu --strict-markers --durations=10 {{.CLI_ARGS}}

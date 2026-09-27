@@ -68,6 +68,8 @@ def test_cpu_compile_failure_falls_back_without_disabling_cuda(monkeypatch):
         calls.append(True)
         raise RuntimeError("CPU compiler unavailable")
 
+    # Exercise dispatch failure without invoking a compiler, even in eager CI.
+    monkeypatch.setattr(compiled, "_COMPILE_DISABLED", False)
     monkeypatch.setattr(compiled, "_CPU_CVG_BY_MODE", {0: fail})
     monkeypatch.setattr(compiled, "_cpu_compile_failed", dict.fromkeys(range(4), False))
     cuda_flags = compiled._compile_failed.copy()

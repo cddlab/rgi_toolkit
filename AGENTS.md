@@ -29,25 +29,38 @@ working with code in this repository. `CLAUDE.md` is a symlink to this file.
 ```bash
 task lint        # ruff check + format validation
 task format      # ruff format + auto-fix lint
-task test        # run all tests (uses /venv Python; in docker images)
-task test-ci     # run non-GPU tests only (-m "not gpu")
+task test-ci     # short CI selection, including critical numerical contracts
+task test-local  # complete CPU regressions and actual compiler checks
+task test-gpu    # complete GPU checks in a CUDA-enabled environment
+task test        # alias for test-local
 ```
 
-Local dev (this checkout) uses `.venv`:
+Local dev uses `.venv`; test tasks respect an activated predictor environment:
 ```bash
-.venv/bin/python -m pytest -m "not gpu" -q          # full non-GPU suite
-.venv/bin/python -m pytest tests/test_optim.py -v   # single file
+uv sync --extra torch --extra jax --extra notebook
+task test-local
+uv run --active --no-sync python -m pytest tests/test_optim.py -v
 uvx ruff check src tests && uvx ruff format --check src tests
 ```
 GPU paths (real CUDA torch / jax devices) are exercised by the host tools via
 `sbatch`, not on the login node.
 
-CI runs ordinary non-GPU tests with `RGI_DISABLE_COMPILE=1` in two file-grouped
-pytest-xdist workers. Tests marked `cpu_compile` run separately with compilation
-enabled, covering the public default, opt-out, fallback, and compiled numerical
-parity. Keep every non-GPU test in one of these two jobs; mark new tests that
-require Torch compilation with `cpu_compile`. Markdown-only changes skip CI,
-and a newer run cancels an older run for the same branch or pull request.
+CI runs the explicit short selection in `tests/ci.txt` in two file-grouped workers
+with `RGI_DISABLE_COMPILE=1`. Retain critical energy/gradient parity, small public-API
+minimization cases, VdW/topology checks, solver failure guards, selection, and
+configuration validation. Prefer a small representative regression in CI for a
+correctness fix; keep exhaustive parameter combinations and large cases local.
+Do not delete assertions or loosen tolerances to shorten CI. The target is about
+one minute of test execution; inspect `--durations` when adding cases.
+
+`task test-local` retains every non-GPU test: eager regressions run in two
+file-grouped workers, then all `cpu_compile` tests run with real compilation.
+`task test-gpu` retains the complete GPU selection. Run the comprehensive local
+suite before delivering code changes, and GPU checks when GPU behavior changes.
+Compiler checks need Python development headers and a C++ compiler; a skip is
+not evidence that compilation passed. See `docs/testing.md` for the coverage
+split and environment setup. Markdown-only changes skip CI, and a newer run
+cancels an older run for the same branch or pull request.
 
 ## Architecture
 

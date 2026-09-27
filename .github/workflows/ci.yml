@@ -15,6 +15,7 @@ concurrency:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -29,11 +30,12 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        mode: [eager, compiled]
+    timeout-minutes: 5
     env:
+      PYTHONPATH: src
+      JAX_PLATFORMS: cpu
+      JAX_ENABLE_X64: "1"
+      RGI_DISABLE_COMPILE: "1"
       OMP_NUM_THREADS: "1"
       OPENBLAS_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"
@@ -48,13 +50,5 @@ jobs:
         # pyproject.toml): the torch backend is the primary one (boltz / protenix /
         # chai / esmfold2). Install JAX too so AF3 and backend parity tests run.
         run: uv sync --frozen --extra torch --extra jax --extra notebook
-      - name: Test eager execution
-        if: matrix.mode == 'eager'
-        env:
-          RGI_DISABLE_COMPILE: "1"
-        run: uv run --no-sync pytest -m "not gpu and not cpu_compile" -n 2 --dist loadfile --durations=15
-      - name: Test CPU compilation
-        if: matrix.mode == 'compiled'
-        env:
-          RGI_DISABLE_COMPILE: "0"
-        run: uv run --no-sync pytest -m "not gpu and cpu_compile" --durations=15
+      - name: Test important CPU contracts
+        run: uv run --active --no-sync python -m pytest @tests/ci.txt -m "not gpu" -n 2 --dist loadfile --strict-markers --durations=10

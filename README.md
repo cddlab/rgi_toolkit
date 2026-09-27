@@ -418,11 +418,19 @@ for worked examples, and the shared `implement-rgi` skill under `.claude/skills/
 ```bash
 task lint       # check style
 task format     # auto-fix style
-task test       # run all tests
-task test-ci    # run non-GPU tests only
+task test-ci    # short CI selection with critical correctness checks
+task test-local # comprehensive CPU regressions and real compilation checks
+task test-gpu   # complete GPU tests in a CUDA-enabled environment
+task test       # alias for test-local
 ```
 
-GPU tests are marked `@pytest.mark.gpu` and excluded in CI.
+Prepare the development environment with
+`uv sync --extra torch --extra jax --extra notebook`. Test tasks use an activated
+environment when present and otherwise use the project environment, without
+resolving or replacing its dependencies. The short CI selection includes numerical
+parity and representative public-API minimization tests; exhaustive combinations,
+compiler checks, and GPU tests remain in the local suites. See
+[testing](docs/testing.md) for coverage and GPU environment setup.
 
 ## References
 

@@ -53,7 +53,10 @@ def isolate_verbose_logging(monkeypatch):
     monkeypatch.setattr(logger, "level", logger.level)
 
 
-@pytest.fixture(params=itertools.product(("torch", "jax"), ("CG", "l-bfgs")))
+@pytest.fixture(
+    params=itertools.product(("torch", "jax"), ("CG", "l-bfgs")),
+    ids=("torch-cg", "torch-lbfgs", "jax-cg", "jax-lbfgs"),
+)
 def solver(request):
     jax.config.update("jax_enable_x64", True)
     return request.param
