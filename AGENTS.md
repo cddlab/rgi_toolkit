@@ -10,6 +10,20 @@ working with code in this repository. `CLAUDE.md` is a symlink to this file.
 - Consider runtime, memory usage, and convergence together when implementing or
   changing RGI. Preserve numerical correctness and avoid regressions in these areas.
 
+## Version management
+
+- Manage package versions for all future development. Assign a new version to each
+  delivered set of functional changes, including features, bug fixes, performance
+  improvements, and configuration-default changes.
+- Update `project.version` in `pyproject.toml` and the `rgi-toolkit` package version
+  in `uv.lock` together. Use patch increments for backward-compatible fixes and
+  performance improvements, minor increments for backward-compatible features,
+  and major increments for breaking changes.
+- Record the package version and Git commit in performance and benchmark reports
+  so results can be traced to the tested implementation.
+- Documentation-only changes do not require a package version bump. Create tags
+  or publish releases only when requested by the user.
+
 ## Commands
 
 ```bash
