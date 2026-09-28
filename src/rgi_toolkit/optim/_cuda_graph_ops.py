@@ -138,11 +138,25 @@ class DeviceScalars:
 
 class DeviceCG:
     prepare = None
-    fused_direction = None
 
     def __init__(self, builder, like):
         self.s = DeviceScalars(builder, like)
         self.finfo = torch.finfo(like.dtype)
+
+    def point(self, x, alpha, direction):
+        # Native CG rounds the multiplication before adding it to coordinates.
+        return self.s.builder.call(
+            lambda a, t, d: a + t.to(a.dtype) * d,
+            x,
+            alpha,
+            direction,
+            native=True,
+        )
+
+    def fused_direction(self, g, old_g, old_d, denominator):
+        from rgi_toolkit.optim._torch_fused import _direction
+
+        return self.s.builder.call(_direction, g, old_g, old_d, denominator)
 
     def cast(self, value, like):
         return value.to(dtype=like.dtype)
@@ -159,18 +173,19 @@ class DeviceCG:
         assert self.prepare is None
         gradient, value = vg(x)
         gradient, value = gradient.detach(), value.detach()
+        from rgi_toolkit.optim._torch_fused import _trial_values
+
+        statistics = self.s.builder.call(_trial_values, value, gradient, d, x, xbase)
         return Trial(
             alpha,
             x,
-            self.s.scalar(value),
+            self.s.scalar(statistics[0]),
             gradient,
-            self.dot(gradient, d),
-            self.s.scalar(gradient.abs().max()),
-            self.dot(gradient, gradient),
-            torch.isfinite(value)
-            & torch.isfinite(gradient).all()
-            & torch.isfinite(x).all(),
-            (x != xbase).any(),
+            self.s.scalar(statistics[1]),
+            self.s.scalar(statistics[2]),
+            self.s.scalar(statistics[3]),
+            statistics[4].to(torch.bool),
+            statistics[5].to(torch.bool),
             count + 1,
             cache,
         )

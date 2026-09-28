@@ -40,6 +40,8 @@ class Tape(TorchDispatchMode):
         self.tensors = {}
         self.inputs = []
         self.created = []
+        self.objective = False
+        self.native = False
 
     def argument(self, value):
         if not isinstance(value, torch.Tensor):
@@ -171,6 +173,17 @@ class FusedConditionalGraph:
         self.tapes.append(self.tape)
         self.tape = None
 
+    def call(self, function, *args, native=False):
+        """Keep library rounding boundaries separate from solver bookkeeping."""
+        self.flush()
+        self.begin()
+        self.tape.native = native
+        self.tape.objective = not native
+        result = function(*args)
+        self.flush()
+        self.begin()
+        return result
+
     def cond(self, predicate, yes, no, operand):
         self.flush()
         parent = self.region
@@ -274,7 +287,15 @@ class FusedConditionalGraph:
                 module, arguments = operation.module(required)
                 if not any(node.op == "call_function" for node in module.graph.nodes):
                     continue
-                compiled = torch.compile(module, dynamic=False, fullgraph=True)
+                if operation.native:
+                    compiled = module
+                else:
+                    # Inductor's pointless_convert pass removes fp64 -> fp32 ->
+                    # fp64 rounding. Native L-BFGS needs these scalar round trips.
+                    options = {} if operation.objective else {"pattern_matcher": False}
+                    compiled = torch.compile(
+                        module, dynamic=False, fullgraph=True, options=options
+                    )
                 child(self.capture(compiled, *arguments))
                 continue
             predicate, kind, *bodies = operation

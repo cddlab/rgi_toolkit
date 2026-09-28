@@ -172,6 +172,10 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
    Fused reductions can introduce small floating-point differences; validate final
    energy and coordinates as well as speed. Do not remove convergence or neighbour
    checks to avoid synchronization.
+   Preserve Python-number versus Tensor-scalar precision in captured L-BFGS.
+   Inductor can erase fp64 -> fp32 -> fp64 conversion chains; disable that pass
+   for scalar-control regions and test rounding under actual capture. Keep native
+   CG trial-coordinate arithmetic and existing compiled statistic/PR+ boundaries.
    Version 0.3.9 additionally captures complete CG/Armijo/L-BFGS control flow on
    CUDA for bounded problems across all restraint families. The shared CG state
    machine and native L-BFGS rules are unchanged. Native graphs refresh coordinates,

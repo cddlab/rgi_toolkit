@@ -11,6 +11,8 @@ import triton
 import triton.language as tl
 from torch.utils import _pytree
 
+from rgi_toolkit.optim._cuda_lbfgs_scalars import LibraryScalars
+
 
 @triton.jit
 def _direction(
@@ -98,8 +100,19 @@ def cubic(first, second, bounds=None):
 
 def wolfe(s, vg, x, direction, value, gradient, slope, step):
     def evaluate(t):
-        g, f = vg(x + t.to(x.dtype) * direction)
-        return Trial(t, s.scalar(f), g, s.scalar((g * direction).sum()))
+        g, f = vg(
+            s.builder.call(torch.addcmul, x, direction, t.to(x.dtype), native=True)
+        )
+        return Trial(
+            t,
+            s.host_value(f),
+            g,
+            s.scalar(
+                s.builder.call(
+                    torch.dot, g.reshape(-1), direction.reshape(-1), native=True
+                )
+            ),
+        )
 
     initial = Trial(s.scalar(0), value, gradient, slope)
     trial = evaluate(step)
@@ -210,9 +223,10 @@ class State(NamedTuple):
 
 
 def run_lbfgs(s, vg, x, max_iter=100, gtol=1e-5):
+    s = LibraryScalars(s.builder, x)
     history_size = 100
     g, f = vg(x)
-    f = s.scalar(f)
+    f = s.host_value(f)
     empty = torch.zeros((history_size, x.numel()), dtype=x.dtype, device=x.device)
     state = State(
         x,
@@ -245,7 +259,9 @@ def run_lbfgs(s, vg, x, max_iter=100, gtol=1e-5):
         def update(_):
             y = (state.g - state.previous_g).reshape(-1)
             step = (state.d * state.t.to(x.dtype)).reshape(-1)
-            ys = (y * step).sum()
+            ys, yy = s.builder.call(
+                lambda a, b: (a.dot(b), a.dot(a)), y, step, native=True
+            )
             accepted = ys > 1e-10
             shift = state.count == history_size
             indices = torch.arange(history_size, device=x.device)
@@ -262,7 +278,7 @@ def run_lbfgs(s, vg, x, max_iter=100, gtol=1e-5):
             new_y = torch.where(accepted, candidate_y, state.ys)
             new_s = torch.where(accepted, candidate_s, state.ss)
             new_rho = torch.where(accepted, candidate_rho, state.rho)
-            new_h = torch.where(accepted, ys / (y * y).sum(), state.hdiag)
+            new_h = torch.where(accepted, ys / yy, state.hdiag)
             new_count = torch.where(accepted, position + 1, state.count)
             d = history_direction(
                 state.g.reshape(-1), new_y, new_s, new_rho, new_h, new_count
@@ -284,14 +300,24 @@ def run_lbfgs(s, vg, x, max_iter=100, gtol=1e-5):
         )
         t = torch.where(
             state.iteration == 0,
-            torch.minimum(s.scalar(1), 1 / s.scalar(state.g.abs().sum())),
+            torch.minimum(
+                s.scalar(1),
+                1
+                / s.scalar(
+                    s.builder.call(lambda g: g.abs().sum(), state.g, native=True)
+                ),
+            ),
             s.scalar(1),
         )
-        slope = s.scalar((state.g * d).sum())
+        slope = s.scalar(
+            s.builder.call(torch.dot, state.g.reshape(-1), d.reshape(-1), native=True)
+        )
 
         def search(_):
             result, evaluations = wolfe(s, vg, state.x, d, state.f, state.g, slope, t)
-            updated = state.x + result.t.to(x.dtype) * d
+            updated = s.builder.call(
+                torch.addcmul, state.x, d, result.t.to(x.dtype), native=True
+            )
             running = (
                 ~(result.g.abs().max() <= gtol)
                 & ~((d * result.t.to(x.dtype)).abs().max() <= 1e-9)

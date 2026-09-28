@@ -409,6 +409,16 @@ fixed throughout one invocation. Diagnostics and L-BFGS use the same complete su
 
 ## Optimizers
 
+
+Version 0.3.10 preserves the native scalar precision in captured L-BFGS:
+Python-number arithmetic stays float64, while Tensor scalar operations round to
+the coordinate dtype, including reciprocal-then-multiply reverse division.
+Scalar bookkeeping is compiled separately from objective evaluations, with
+Inductor conversion-chain removal disabled in those regions. CG trial coordinate
+updates retain their original multiplication/addition rounding; gradient statistics
+and PR+ directions retain the existing compiled reductions. Native CUDA branches
+still control every trial and convergence check without per-trial host reads.
+
 Since version 0.3.9, eligible PyTorch CUDA solves use native CUDA conditional
 IF/WHILE graphs for CG (Strong Wolfe or Armijo) and L-BFGS, including line search
 and convergence decisions. All restraint families share this path: conformer,

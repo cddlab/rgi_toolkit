@@ -168,7 +168,11 @@ class GraphSolve:
                     value = value + optimizer._custom_terms[index][-1](x)
                 return value
 
-            vg = torch.func.grad_and_value(energy)
+            raw_vg = torch.func.grad_and_value(energy)
+
+            def vg(u):
+                return graph.call(raw_vg, u)
+
             if optimizer._is_cg():
                 result, state = run_cg(
                     DeviceCG(graph, self.active),

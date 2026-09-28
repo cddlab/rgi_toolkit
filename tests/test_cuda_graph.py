@@ -295,6 +295,45 @@ def test_lbfgs_matches_native_limits_and_solution(iterations, objective):
         graph.close()
 
 
+def test_library_scalar_capture_keeps_float32_rounding():
+    from rgi_toolkit.optim._cuda_graph import FusedConditionalGraph
+    from rgi_toolkit.optim._cuda_lbfgs_scalars import LibraryScalars
+
+    x = torch.ones((), device="cuda", dtype=torch.float32)
+    graph = FusedConditionalGraph()
+    try:
+        graph.begin()
+        s = LibraryScalars(graph, x)
+        tensor_value = (s.scalar(x) + 2**-24) - s.scalar(x)
+        python_value = (s.host_value(x) + 2**-24) - s.host_value(x)
+        graph.finish((tensor_value, python_value))
+        tensor_result, python_result = graph.replay()
+        assert float(tensor_result.value) == 0.0
+        assert bool(tensor_result.tensor)
+        assert float(python_result.value) == 2**-24
+        assert not bool(python_result.tensor)
+    finally:
+        graph.close()
+
+
+def test_library_cubic_retains_native_reverse_division():
+    from torch.optim.lbfgs import _cubic_interpolate
+
+    from rgi_toolkit.optim._cuda_lbfgs import Trial, cubic
+    from rgi_toolkit.optim._cuda_lbfgs_scalars import LibraryScalars
+
+    # Near-flat intervals amplify a one-ulp change in reciprocal arithmetic.
+    t = torch.tensor(0.8939066529273987)
+    f1, f2 = 4.556903839111328, 4.556352138519287
+    g1, g2 = torch.tensor(-0.0006160561461001635), torch.tensor(-0.0006160188931971788)
+    expected = _cubic_interpolate(0, f1, g1, t, f2, g2, (t + 0.01 * t, t * 10))
+    s = LibraryScalars(None, t.cuda())
+    first = Trial(s.scalar(0), s.host_value(f1), None, s.scalar(g1.cuda()))
+    second = Trial(s.scalar(t.cuda()), s.host_value(f2), None, s.scalar(g2.cuda()))
+    actual = cubic(first, second, (second.t + 0.01 * second.t, second.t * 10))
+    assert float(actual.value) == float(expected)
+
+
 def _bond_spec():
     from rgi_toolkit.spec import BondArrays, RestraintSpec
 

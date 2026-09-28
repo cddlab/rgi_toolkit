@@ -270,7 +270,12 @@ def run_cg(
             # Keep coordinate-based reuse before any objective evaluation.
             if isinstance(backend, TorchCG) and alpha == cached.alpha:
                 return cached
-            xt = x + backend.cast(alpha, x) * st.d
+            point = getattr(backend, "point", None)
+            xt = (
+                point(x, alpha, st.d)
+                if point is not None
+                else x + backend.cast(alpha, x) * st.d
+            )
             if prepare_trial is not None:
                 same, updated = prepare_trial(xt, cached.x, cached.cache)
                 if same:
