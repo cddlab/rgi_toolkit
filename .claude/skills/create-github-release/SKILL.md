@@ -1,11 +1,13 @@
 ---
 name: create-github-release
 description: >-
-  Safely create and push SemVer Git tags such as v1.0.0, then publish matching
+  Safely create and push SemVer Git tags, then publish matching
   GitHub Releases with curated notes using gh. Use when the user asks to tag a
   version, cut or publish a release, or create a GitHub Release, including a
-  coordinated rgi_toolkit and sibling *_restr release. Discover eligible *_restr
-  repositories and explicitly ask which to include. Always inspect and report
+  coordinated RGI-toolkit and sibling *_restr release. Use vX.Y.Z for
+  RGI-toolkit and independent rgi-vX.Y.Z tags for each *_restr integration.
+  Discover eligible *_restr repositories and explicitly ask which to include.
+  Always inspect and report
   each repository's current version, proposed tag, and target commit, then
   obtain the user's explicit final approval before creating any tag or Release.
   If a current version already has both a tag and a GitHub Release, ask whether
@@ -15,8 +17,32 @@ description: >-
 # Create a GitHub Release
 
 Create one immutable version tag and its matching GitHub Release, or a
-user-selected coordinated set of them. Treat the version declared by each
-repository, its Git tag, and its Release tag as one version.
+user-selected coordinated set of them. Match each GitHub Release to its exact
+Git tag. Distinguish an integration's RGI release version from its upstream
+Python package version.
+
+## RGI integration versioning
+
+- RGI-toolkit uses its declared package version and a `vX.Y.Z` tag.
+- Each `*_restr` repository has an independent RGI integration version, tagged
+  `rgi-vX.Y.Z`, with a matching GitHub Release. Its version is independent of
+  both the upstream predictor version and RGI-toolkit's version.
+- Coordinate selected integration tags and Releases with RGI-toolkit releases
+  using the companion-selection and approval steps below. Coordinated
+  publication does not require equal version numbers across repositories.
+- Increment an integration's version when releasing changes to its code or
+  pinned dependencies: patch for compatible fixes, minor for compatible
+  features, and major for incompatible changes. Assess upstream updates by
+  their effect on the integration's public behavior.
+- Preserve upstream package version declarations and versioning mechanisms;
+  do not replace them with the RGI integration version. Use a documented
+  RGI-specific version declaration when one exists. Otherwise, show the prior
+  `rgi-v*` release history and ask for the integration version; suggest `0.1.0`
+  for a first release. An upstream `v*` tag is not an RGI integration release.
+- Record the upstream package version and incorporated upstream commit, plus
+  the tested RGI-toolkit version and full commit SHA, in each integration's
+  release notes. Verify that its dependency pin or environment lock identifies
+  that toolkit commit; a moving branch alone does not identify the tested pair.
 
 ## Hard rules
 
@@ -58,7 +84,9 @@ Keep this phase read-only with respect to tags and Releases.
 3. Locate version declarations with `rg`. Prefer a release-specific source
    documented by the repository; otherwise inspect common manifests such as
    `pyproject.toml`, `package.json`, `Cargo.toml`, and package `__version__`
-   declarations. Do not treat the latest tag as the manifest version.
+   declarations. For `*_restr`, distinguish the upstream package version from
+   the RGI-specific declaration or user-selected integration version described
+   above. Do not treat the latest tag as a manifest version.
 4. Inspect existing local and remote tags and GitHub Releases:
 
    ```bash
@@ -69,13 +97,16 @@ Keep this phase read-only with respect to tags and Releases.
    gh release list --limit 20
    ```
 
-5. Normalize a manifest version `X.Y.Z` to tag `vX.Y.Z`. Accept a SemVer
+5. Normalize a package release version `X.Y.Z` to tag `vX.Y.Z`, including for
+   RGI-toolkit. For `*_restr`, instead normalize the independent RGI
+   integration version to `rgi-vX.Y.Z`. Accept a SemVer
    prerelease only when the user explicitly requests it. Reject ambiguous,
-   malformed, or conflicting version declarations and ask the user which
-   source is authoritative.
-6. Require a clean worktree and a pushed target commit. If the manifest version
-   differs from the requested tag, stop and ask whether the manifest should be
-   updated; never perform the bump implicitly.
+   malformed, or conflicting release versions and ask which source is
+   authoritative.
+6. Require a clean worktree and a pushed target commit. If an authoritative
+   release-version declaration differs from the requested tag, stop and ask
+   whether it should be updated; never perform the bump implicitly. A
+   companion's upstream package version need not match its RGI tag.
 
 ## 2. Choose companion `*_restr` repositories
 
@@ -110,10 +141,11 @@ Do you want to increment the version?"**
 
 Wait for the answer. Do not infer whether to make a major, minor, or patch
 increment. If the user wants an increment but did not give the exact new
-version, ask which version to use. Update version declarations only after that
-choice, then restart inspection from Step 1. The later mandatory approval gate
-still applies to the new version; approval to increment is not approval to tag
-or publish it.
+version, ask which version to use. Update any applicable release-version
+declaration only after that choice, preserving upstream package versions for
+`*_restr` integrations, then restart inspection from Step 1. The later
+mandatory approval gate still applies to the new version; approval to increment
+is not approval to tag or publish it.
 
 If only the tag or only the Release exists, report the partial state and ask
 whether to repair the missing artifact or increment the version. Never
@@ -130,15 +162,25 @@ Confirm mechanically that:
 - the exact proposed tag is absent locally and on `origin`;
 - no GitHub Release already uses that tag;
 - the remote branch points at the proposed target commit;
-- the target commit and version declaration contain the intended release
-  contents.
+- the target commit and any release-version declaration contain the intended
+  release contents;
+- each integration's recorded dependency pin or lock agrees with the
+  RGI-toolkit commit being released and tested.
+
+For repositories deriving package versions from Git through `setuptools-scm`
+or `hatch-vcs`, verify that RGI tags cannot be mistaken for upstream package
+versions. Configure Git tag selection to exclude `rgi-v*` as needed; changing
+only a tag-parsing regex is insufficient if Git still selects an RGI tag.
+Prepare required configuration fixes before approval, without creating tags.
 
 ## 5. Write release notes
 
 Before the approval gate, write a complete Markdown release-note draft for each
 repository to a separate temporary path outside every worktree, such as
 `/tmp/<repo>-<tag>-release-notes.md`. Determine the previous published Release
-or version tag and inspect the complete range through the target commit:
+or version tag and inspect the complete range through the target commit. For
+`*_restr`, use the previous `rgi-v*` integration release, not an upstream `v*`
+tag, as the comparison baseline:
 
 - commits and relevant diffs between the previous tag and target commit;
 - merged PR titles, descriptions, links, and contributors when available;
@@ -166,10 +208,13 @@ Present one approval summary for the complete release set in the user's
 language. For every repository, include:
 
 - repository;
-- version found in the authoritative file and that file's path;
-- latest existing version tag, or `none`;
+- authoritative release version and its source: file path or the user's
+  explicit integration-version choice;
+- latest existing release tag in the applicable namespace, or `none`;
 - proposed new tag;
 - full target commit SHA and branch;
+- for integrations, the upstream version and commit, paired RGI-toolkit
+  version and commit, and dependency-pin or lock verification;
 - whether the target is pushed and the worktree is clean;
 - verification results;
 - Release title, the full release-note draft, and stable/prerelease status.
@@ -186,10 +231,10 @@ the summary for the reduced set before publishing.
 
 ## 7. Recheck and publish
 
-After approval, recalculate the version, `HEAD`, branch, worktree state, remote
-branch SHA, and release-note content for every approved repository before
-creating any tag. Continue only if the complete set exactly matches the
-approved summary.
+After approval, recheck the agreed release version, `HEAD`, branch, worktree
+state, remote branch SHA, and release-note content for every approved
+repository before creating any tag. Continue only if the complete set exactly
+matches the approved summary.
 
 Use explicit repository paths and GitHub `owner/name` values. For each
 repository, create an annotated tag and push only that tag:

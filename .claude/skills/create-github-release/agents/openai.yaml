@@ -1,4 +1,4 @@
 interface:
   display_name: "Create GitHub Releases"
   short_description: "Publish verified coordinated GitHub Releases"
-  default_prompt: "Use $create-github-release to verify versions, choose companion *_restr repositories, obtain approval, and publish coordinated GitHub Releases."
+  default_prompt: "Use $create-github-release to verify RGI-toolkit and independent *_restr integration versions, choose companion repositories, obtain approval, and publish coordinated vX.Y.Z and rgi-vX.Y.Z GitHub Releases."
