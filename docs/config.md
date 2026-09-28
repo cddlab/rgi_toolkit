@@ -157,6 +157,37 @@ Reduction order can introduce small floating-point differences. With `gpu: false
 inactive restraint windows skip coordinate transfers and results copy directly
 back to the predictor's coordinate buffer.
 
+Since version 0.3.9, eligible PyTorch CUDA solves use native CUDA conditional
+IF/WHILE graphs for CG (Strong Wolfe or Armijo) and L-BFGS, including line search
+and convergence decisions. All restraint families share this path: conformer,
+distance, RMSD, group geometry, base pairs, torsion, and capturable custom energies.
+Kabsch/plane fits remain part of every objective evaluation; only the existing
+stop-gradient convention is retained. Peptide alternatives are selected once per
+invocation and refreshed at the next call. Batch dimensions and mixed-restraint
+coordinate maps are preserved.
+
+This path currently requires PyTorch 2.8, CUDA 12.8 or later, and the Linux
+`cuda-bindings` dependency installed by the `torch` extra. Existing predictor
+environments can add it with `uv pip install 'cuda-bindings>=12.8,<13'`.
+At most 8192 coordinate variables and 65536 dynamic VdW pairs (including all
+samples) are captured. Complete fixed-background and active-active pairs preserve
+chemistry and exclusions and are evaluated at every trial. Larger problems keep
+the ordinary neighbor-list solver; unsupported frameworks, dtypes, custom
+operations, or failed captures also retain that solver. CPU and JAX are unchanged.
+
+The graph reuses resident buffers within one optimizer and refreshes coordinates
+and fixed partners on every call. Shape, device, dtype, gate state, method,
+iteration limit, or tolerance changes invalidate it. Inductor's compiler cache
+can persist across processes, but native graphs must be constructed per process.
+First-call compilation and graph construction are included in whole-prediction
+timing. `RGI_DISABLE_COMPILE=1` also disables this path. `return_info=True` copies
+CG diagnostics to the host after the solve, never within its line search.
+For Kabsch and plane fits, cuSOLVER convergence status stays on the GPU during
+the solve and is checked once at the end. Failure retries the ordinary optimizer,
+including PyTorch's SVD recovery. The 3 x 3 SVD keeps PyTorch's Jacobi driver;
+plane eigenproblems use batched Jacobi even for one matrix. This can introduce
+small rounding differences from PyTorch's single-matrix eigensolver.
+
 Choose one of these three configurations inside `restraints_config`:
 
 ```yaml

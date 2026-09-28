@@ -674,9 +674,36 @@ def test_typed_vdw_cuda_compilation_and_dtype_cache(mode, custom):
                 assert data["chemistry"]["contacts"].device == x.device
                 assert data["chemistry"]["contacts"].dtype == x.dtype
         assert not _torch_cg_gpu._compile_failed[mode]
-        if custom:
+        if custom and optimizer._device_graph_cache is None:
             assert optimizer._custom_cvg
             assert all(value is not False for value in optimizer._custom_cvg.values())
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "method,search", [("CG", "strong-wolfe"), ("CG", "armijo"), ("l-bfgs", None)]
+)
+def test_native_graph_refreshes_typed_partners_and_gates(method, search, monkeypatch):
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA is unavailable")
+    from rgi_toolkit.optim import _cuda_minimize
+    from rgi_toolkit.optim.torch_optim import TorchRestraintOptimizer
+
+    spec = _typed_optimizer_spec(custom=True)
+    spec.conf_stop_sigma = 1.0
+    optimizer = TorchRestraintOptimizer(spec, method=method, line_search=search)
+    for partner, sigma in ((1.5, 2.0), (-1.5, 2.0), (1.5, 0.5)):
+        x = torch.tensor([[0.0, 0, 0], [partner, 0, 0], [0, 2.0, 0]], device="cuda")
+        result = optimizer.minimize(x.clone(), sigma=sigma)
+        assert optimizer._device_graph_cache is not None
+        with monkeypatch.context() as context:
+            context.setattr(_cuda_minimize, "eligible", lambda *args: False)
+            reference = TorchRestraintOptimizer(spec, method=method, line_search=search)
+            expected = reference.minimize(x.clone(), sigma=sigma)
+        torch.testing.assert_close(result, expected, atol=1e-4, rtol=1e-5)
+        torch.testing.assert_close(result[1], x[1], atol=0, rtol=0)
+    optimizer._device_graph_cache[1].close()
 
 
 @pytest.mark.parametrize("dtype", ["float32", "float64"])

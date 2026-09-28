@@ -172,6 +172,15 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
    Fused reductions can introduce small floating-point differences; validate final
    energy and coordinates as well as speed. Do not remove convergence or neighbour
    checks to avoid synchronization.
+   Version 0.3.9 additionally captures complete CG/Armijo/L-BFGS control flow on
+   CUDA for bounded problems across all restraint families. The shared CG state
+   machine and native L-BFGS rules are unchanged. Native graphs refresh coordinates,
+   fixed partners and peptide states at every invocation. Complete VdW pair sums
+   retain chemistry and exclusions; large pair sets keep the neighbor-list path.
+   Captured 3 x 3 fits accumulate cuSOLVER status on the device, check it once after
+   the solve and retry the ordinary optimizer on failure. Keep energy derivatives
+   autodiff; do not freeze Kabsch fits across objective evaluations. Validate all
+   families, cache invalidation and final coordinates, not just graph construction.
    `compile_cpu: true` enables CPU objective/gradient compilation for CG and
    L-BFGS by default. Use `compile_cpu: false` when compilation startup dominates
    short CPU runs. CPU artifact/failure caches are separate from CUDA, and custom
@@ -198,6 +207,29 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
    optimizer backend** (the old scipy path was removed); `numpy_energy` remains only as
    the pure-numpy energy reference for `tests/test_backend_parity.py`. Optimization
    requires torch or jax.
+
+### Native CUDA solver control
+
+- `_cuda_graph.py` records straight-line ATen regions and compiles them into native
+  CUDA IF/WHILE graphs. `_cuda_graph_ops.py` adapts the existing shared CG algorithm;
+  do not fork Strong Wolfe or Armijo formulas. `_cuda_lbfgs.py` follows PyTorch 2.8
+  L-BFGS, including its evaluation budget and first-iteration boundary cases.
+- `_cuda_minimize.py` supports all restraint families, batches, gates, custom
+  closures, and mixed centroid maps within explicit memory/runtime limits. Complete
+  pair sums must preserve every chemistry/topology exclusion and every new trial
+  contact. Unsupported environments, oversized problems, or failed compilation
+  must keep the existing solver. Never freeze a distance-pruned pair list.
+- Refresh coordinates/background buffers per invocation and retain independent
+  output storage. Rebind peptide alternatives per invocation; evaluate Kabsch/plane
+  fits per objective call. Invalidate graph caches for shape, device, dtype, gates,
+  method, iteration budget, and tolerance. Close partially built graphs and unwind
+  dispatch tracing on every capture failure.
+- Use one allocator cleanup per graph construction and direct capture_begin/end;
+  torch.cuda.graph's repeated full GC previously dominated Strong Wolfe setup.
+  Keep per-region pools separate and materialize broadcast export buffers.
+- Keep CUDA imports lazy. Test both graph execution and existing-path fallback,
+  including nondefault streams and predictor inference/autocast contexts. Solver
+  contract and capture tests are GPU-only and must not lengthen short CPU CI.
 
 ### Supporting modules
 

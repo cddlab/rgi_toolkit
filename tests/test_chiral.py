@@ -438,16 +438,17 @@ def test_public_setup_minimize_finalize(
         np.testing.assert_array_equal(
             restraint.minimize(result, istep=3, sigma=1).cpu().numpy(), after
         )
-        if cuda and kind != "builtin":
-            assert restraint._optimizer._custom_cvg
-            assert all(
-                fn is not False for fn in restraint._optimizer._custom_cvg.values()
-            )
-        elif cuda:
-            from rgi_toolkit.optim import _torch_cg_gpu
+        if cuda and restraint._optimizer._device_graph_cache is None:
+            if kind != "builtin":
+                assert restraint._optimizer._custom_cvg
+                assert all(
+                    fn is not False for fn in restraint._optimizer._custom_cvg.values()
+                )
+            else:
+                from rgi_toolkit.optim import _torch_cg_gpu
 
-            assert 0 in _torch_cg_gpu._CVG_BY_MODE
-            assert not _torch_cg_gpu._compile_failed[0]
+                assert 0 in _torch_cg_gpu._CVG_BY_MODE
+                assert not _torch_cg_gpu._compile_failed[0]
     else:
         jax = pytest.importorskip("jax")
         jax.config.update("jax_enable_x64", precision == "float64")

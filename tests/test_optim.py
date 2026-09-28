@@ -227,11 +227,15 @@ def test_gpu_custom_nan_gate_and_dtype_cache():
                 )
             assert torch.isfinite(coords).all()
             assert optimizer._dtype == dtype
-            if sigma == 0.0:
+            if optimizer._device_graph_cache is not None:
+                active_terms = (0,) if sigma == 0.0 else ()
+                assert optimizer._device_graph_cache[0][-1] == active_terms
+            elif sigma == 0.0:
                 assert optimizer._custom_cvg
             assert all(value is not False for value in optimizer._custom_cvg.values())
         # An empty custom subset shares the ordinary compiled built-in objective.
-        assert {key[1] for key in optimizer._custom_cvg} == {(0,)}
+        if optimizer._device_graph_cache is None:
+            assert {key[1] for key in optimizer._custom_cvg} == {(0,)}
 
 
 def test_torch_scatter_accepts_autograd_leaf_and_fixed_background():

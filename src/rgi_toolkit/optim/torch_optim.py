@@ -59,6 +59,8 @@ class TorchRestraintOptimizer:
         self.gtol = resolve_gtol(gtol)
         self.compile_cpu = coerce_bool(compile_cpu)
         self._prepared = None
+        self._device_graph_cache = None
+        self._device_graph_failures = set()
         self._prepared_g = {}  # cache {gate-state -> stable pre-gated prepared} (GPU CG)
         self._active_idx = None
         self._device = None
@@ -145,6 +147,10 @@ class TorchRestraintOptimizer:
             and self._dtype == dtype
         ):
             return
+        if self._device_graph_cache is not None:
+            self._device_graph_cache[1].close()
+            self._device_graph_cache = None
+        self._device_graph_failures.clear()
         # Build constant tensors outside inference mode so they are normal (not
         # inference) tensors and can participate in autograd ops with the leaf.
         with torch.inference_mode(False):
@@ -374,6 +380,17 @@ class TorchRestraintOptimizer:
                 and step <= float(self.spec.conf_stop_step)
             )
         )
+        if coords.is_cuda:
+            from rgi_toolkit.optim._cuda_minimize import try_minimize
+
+            update = try_minimize(
+                self, coords, sigma, step, mi, conformer_in_window, return_info
+            )
+            if update is not None:
+                new_active, info = update
+                with torch.no_grad():
+                    coords[..., self._active_idx, :] = new_active.to(out_dtype)
+                return (coords, info) if return_info else coords
         vdw_active = self._vdw is not None and conformer_in_window
         active_vdw_active = self._active_vdw is not None and conformer_in_window
         from rgi_toolkit.optim import _torch_cg_gpu as gpu

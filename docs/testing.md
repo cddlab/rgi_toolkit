@@ -65,6 +65,12 @@ PyTorch and JAX plus the test dependencies, then run `task test-gpu` in a GPU
 allocation. The development lockfile installs CPU-only PyTorch, so it is not a
 GPU test environment. The task does not sync or replace an activated environment's
 framework packages. GPU tests are additional to the complete CPU suite.
+Native conditional graph tests additionally require the Linux `torch` extra's
+`cuda-bindings` dependency, CUDA >=12.8, and PyTorch 2.8. They exercise shared
+SciPy Strong Wolfe contracts, native L-BFGS limits, replay buffer freshness,
+capture failure cleanup, geometry-fit reconstruction and failure recovery, and
+the absence of per-iteration host scalar reads.
+All compiler-heavy checks remain outside short CI.
 
 ## Maintaining coverage
 

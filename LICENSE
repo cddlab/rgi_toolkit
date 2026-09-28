@@ -64,7 +64,8 @@ PyTorch (BSD-3-Clause)
 ----------------------
 
 The following notice applies to code adapted from PyTorch 2.8.0 in
-src/rgi_toolkit/optim/_torch_lbfgs.py.
+src/rgi_toolkit/optim/_torch_lbfgs.py, src/rgi_toolkit/optim/_cuda_lbfgs.py,
+and the geometry-driver settings in src/rgi_toolkit/optim/_cuda_linalg.py.
 
 From PyTorch:
 
