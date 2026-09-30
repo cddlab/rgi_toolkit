@@ -1,6 +1,6 @@
 {
   "queries": {
-    "qbp_3.00": {
+    "qbp_2.65": {
       "chains": [
         {
           "molecule_type": "protein",
@@ -18,28 +18,28 @@
         "rmsd_restraints_config": [
           {
             "ref_cif": "1GGG.cif",
-            "atom_selection_ref_fit": "chain A and name CA",
-            "atom_selection_target_fit": "chain A and name CA",
-            "atom_selection_ref_calc": "chain A and name CA",
-            "atom_selection_target_calc": "chain A and name CA",
+            "atom_selection_ref_fit": "chain A and name CA and resid 1 to 220",
+            "atom_selection_target_fit": "chain A and name CA and resid 5 to 224",
+            "atom_selection_ref_calc": "chain A and name CA and resid 1 to 220",
+            "atom_selection_target_calc": "chain A and name CA and resid 5 to 224",
             "pairing": "align",
             "start_sigma": 99999999,
-            "stop_sigma": 1.0,
+            "stop_sigma": 1.5,
             "harmonic": {
-              "target_rmsd": 3.0
+              "target_rmsd": 2.65
             }
           },
           {
             "ref_cif": "1WDN.cif",
-            "atom_selection_ref_fit": "chain A and name CA",
-            "atom_selection_target_fit": "chain A and name CA",
-            "atom_selection_ref_calc": "chain A and name CA",
-            "atom_selection_target_calc": "chain A and name CA",
+            "atom_selection_ref_fit": "chain A and name CA and resid 2 to 221",
+            "atom_selection_target_fit": "chain A and name CA and resid 5 to 224",
+            "atom_selection_ref_calc": "chain A and name CA and resid 2 to 221",
+            "atom_selection_target_calc": "chain A and name CA and resid 5 to 224",
             "pairing": "align",
             "start_sigma": 99999999,
-            "stop_sigma": 1.0,
+            "stop_sigma": 1.5,
             "harmonic": {
-              "target_rmsd": 3.0
+              "target_rmsd": 2.65
             }
           }
         ]

@@ -1,5 +1,5 @@
 #!/bin/bash
-# alphafold3 RGI example -- dual-ref RMSD morph -> midpoint of 1GGG(open)/1WDN(closed), target 3.0 A
+# alphafold3 RGI example -- dual-reference QBP RMSD targets: open 2.65 A, closed 2.65 A
 # Restraint config = bench-rgi minimal; MSA is fetched from a server so the example is
 # self-contained. (AlphaFold3 is the exception -- it needs external model params + DBs.)
 # GPU only: run on a GPU compute node (not a shared login node).
@@ -21,8 +21,8 @@ MODEL_DIR="${MODEL_DIR:?set MODEL_DIR to your AF3 model-parameters directory}"
 DB_DIR="${DB_DIR:?set DB_DIR to your AF3 sequence-database directory}"
 export JAX_COMPILATION_CACHE_DIR="${JAX_COMPILATION_CACHE_DIR:-/tmp/${USER}_jax_cache}"
 python "$WS/alphafold3_restr/run_alphafold.py" \
-    --run_data_pipeline=True --model_dir="$MODEL_DIR" --db_dir="$DB_DIR" \
-    --json_path=qbp_3.00.json --output_dir=out
+    --num_diffusion_samples=1 --run_data_pipeline=True --model_dir="$MODEL_DIR" --db_dir="$DB_DIR" \
+    --json_path=qbp_2.65.json --output_dir=out
 # Local fallback (skip the DB search): add
 #   "unpairedMsaPath": "/path/to/precomputed.a3m"
-# to the protein object in qbp_3.00.json, then pass --run_data_pipeline=False.
+# to the protein object in qbp_2.65.json, then pass --run_data_pipeline=False.

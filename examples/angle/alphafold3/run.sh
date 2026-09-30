@@ -16,7 +16,7 @@ MODEL_DIR="${MODEL_DIR:?set MODEL_DIR to your AF3 model-parameters directory}"
 DB_DIR="${DB_DIR:?set DB_DIR to your AF3 sequence-database directory}"
 export JAX_COMPILATION_CACHE_DIR="${JAX_COMPILATION_CACHE_DIR:-/tmp/${USER}_jax_cache}"
 python "$WS/alphafold3_restr/run_alphafold.py" \
-    --run_data_pipeline=True --model_dir="$MODEL_DIR" --db_dir="$DB_DIR" \
+    --num_diffusion_samples=1 --run_data_pipeline=True --model_dir="$MODEL_DIR" --db_dir="$DB_DIR" \
     --json_path=adk_72.85.json --output_dir=out
 # Local fallback (skip the DB search): add
 #   "unpairedMsaPath": "/path/to/precomputed.a3m"

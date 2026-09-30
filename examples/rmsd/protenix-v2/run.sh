@@ -1,5 +1,5 @@
 #!/bin/bash
-# protenix-v2 RGI example -- dual-ref RMSD morph -> midpoint of 1GGG(open)/1WDN(closed), target 3.0 A
+# protenix-v2 RGI example -- dual-reference QBP RMSD targets: open 2.65 A, closed 2.65 A
 # Restraint config = bench-rgi minimal; MSA is fetched from a server so the example is
 # self-contained. (AlphaFold3 is the exception -- it needs external model params + DBs.)
 # GPU only: run on a GPU compute node (not a shared login node).
@@ -15,5 +15,5 @@ done )
 source "$WS/protenix_restr/.venv/bin/activate"
 cd "$HERE"
 # protenix must run on sm_89 (e.g. RTX 4090); Blackwell emits silent all-NaN coords.
-protenix pred -i qbp_3.00.json -o out \
-    --use_default_params true --use_msa true --seeds 0 --step 200 --sample 1 --cycle 10
+protenix pred -i qbp_2.65.json -o out \
+    --model_name protenix-v2 --use_default_params true --use_msa true --seeds 0 --step 200 --sample 1 --cycle 10

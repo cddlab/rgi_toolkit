@@ -1,72 +1,103 @@
 # rgi_toolkit RGI examples
 
-Minimal, ready-to-run Restraint-Guided Inference (RGI) samples: **4 restraint types x 7
-predictors**. Each `<type>/<tool>/` (and `custom/dist-diff/<tool>/`) is one representative
-restraint with a `run.sh`. Restraint blocks are the bench-rgi minimal configs; the runners
-fetch the MSA from a server where supported; OpenDDE disables external feature searches and
-AlphaFold3 uses its local data pipeline, as detailed below.
+Representative inputs from the paper's four protein state-control benchmarks.
+Each `<type>/<tool>/` directory contains one restraint setting and a `run.sh` for
+one prediction. The paper uses five target settings and nine seeds
+per setting. These examples retain the same restraint objective, atom selections,
+activation window, and minimization settings at the representative target.
 
-| type | system | restraint |
+| Directory | System | Representative restraint |
 |---|---|---|
-| `distance/` | QBP (226 aa) | centroid distance of two lobe groups -> 25.0 A |
-| `angle/` | adenylate kinase (214 aa) | NMP-CORE-LID centroid angle -> 72.85 deg |
-| `rmsd/` | QBP | dual-ref morph to the midpoint of 1GGG (open) / 1WDN (closed), target 3.0 A, released below sigma 1.0 |
-| `custom/dist-diff/` | DgoT transporter (419 aa) | custom energy `(d(A,B) - d(C,D)) -> 0` (a difference of two centroid distances) |
+| `distance/` | QBP, 226 residues | Interdomain centroid distance of 25.0 Å |
+| `angle/` | ADK, 214 residues | NMP–CORE–LID centroid angle of 72.85° |
+| `rmsd/` | QBP | Open/closed reference RMSD targets of 2.65/2.65 Å on 220 common Cα atoms |
+| `custom/dist-diff/` | DgoT, 419 residues | ΔD = D_in − D_out = 0.8 Å |
 
-Tools: `boltz-2`, `protenix-v2`, `opendde`, `alphafold3`, `openfold-3`, `chai`,
-`esmfold2`.
+The six paper predictors are `boltz-2`, `protenix-v2`, `alphafold3`, `openfold-3`,
+`chai`, and `esmfold2`. The `opendde` directories demonstrate the same restraints
+in another supported predictor; OpenDDE was not included in the paper benchmark.
 
 ## Run
 
 ```bash
-bash distance/boltz-2/run.sh          # one example
+bash examples/distance/boltz-2/run.sh
+
+# ESMFold2 requires the full ColabFold A3M for the selected protein.
+MSA_A3M=inputs/qbp.a3m bash examples/rmsd/esmfold2/run.sh
 ```
 
-Each `run.sh` locates the workspace root, activates/uses the matching fork's env, and folds.
+Run these commands from the RGI-toolkit checkout on a GPU compute node. Each
+runner locates the matching predictor fork as a sibling of `RGI-toolkit/` and
+uses its existing venv or Pixi environment. See [the integration guides](../docs/)
+for installation. Protenix-v2 is selected explicitly and requires a supported
+sm_89 GPU in this integration.
 
-## Prerequisites
+All runners request one diffusion sample. OpenFold3 and Chai also request one
+model/trunk sample. The restraint minimizer is CG with the default strong-Wolfe
+line search and `gtol=1e-5`; `max_iter` is 1000 for RMSD and 100 otherwise.
 
-- **The matching fork must exist as a sibling of `RGI-toolkit/`** (e.g. `../boltz_restr`,
-  `../esm_restr`) with its venv/pixi env built. `run.sh` finds it automatically. See each
-  fork's `RGI-toolkit/docs/<tool>.md` for install steps.
-- **Run on a GPU compute node** — not a shared login node. GPU generations: RTX 4090 (sm_89)
-  and Blackwell (sm_120).
-- **protenix runs on sm_89 only** (Blackwell emits silent all-NaN). The default esm/chai torch
-  is cu124 (sm_89) too.
-- **OpenDDE examples disable MSA, template, and RNA-MSA searches**. Install its checkpoint and
-  common runtime files first; the large search databases are unnecessary for these examples.
-- **AlphaFold3 is the one non-self-contained example**: it has no ColabFold MSA server, so its
-  `run.sh` runs the genetic-search data pipeline, requiring external `MODEL_DIR` (weights) and
-  `DB_DIR` (sequence databases, hundreds of GB). A local no-DB fallback is documented inline in
-  `alphafold3/*/run.sh`.
+## Restraint settings
 
-## Notes
+Distance, angle, and custom restraints use `start_sigma=99999999` and remain
+active through the final diffusion step. The paper's distance targets are
+25.00, 26.02, 27.05, 28.08, and 29.10 Å. Its angle targets are 60.90, 66.88,
+72.85, 78.82, and 84.80°.
 
-- For conformer settings beyond these examples, see [the configuration guide](../docs/config.md#conformer_restraints_config-single-dict).
-  `cistrans` covers ligand E/Z and defaults to weight 1. Protein chi, peptide omega and
-  acyclic sp2 restraints use `torsion`, off by default; enable them with `torsion: {weight: 1}`.
-  A configured monomer library supplies dictionary targets; otherwise polymer torsions
-  use documented RDKit-based approximations without downloading a dictionary. VdW now uses
-  chemical contact distances, ESD 0.2 A (dummy 0.3 A), and default `scale: 0.75`.
-  Existing VdW weights may need retuning against reference geometry terms.
-- The `rmsd/` reference structures (`1GGG.cif`, `1WDN.cif`) are **not stored in the repo** --
-  each `rmsd/*/run.sh` `wget`s them from RCSB into its own directory at run time (needs network
-  on the compute node). They are byte-identical to the RCSB deposits.
-- The `rmsd/` example deliberately restrains **nothing but the two RMSD terms** -- no polymer
-  conformer restraint is layered on top, so the moved CA atoms leave the local geometry to the
-  predictor. Adding one measurably WORSENS stereochemistry: a 2x2 ablation (boltz2, QBP, 3 seeds,
-  MolProbity medians) gave clashscore 4.81 unrestrained / 5.94 RMSD-only / 27.58 conformer-only /
-  22.91 conformer+RMSD. `max_iter: 1000` (vs 100 elsewhere) is what lets the inner CG satisfy the
-  two COMPETING targets each step; `stop_sigma: 1.0` releases them for the final low-noise steps
-  so the model can heal any strain it was held in.
-- Most selections use bare `resid N to M` because QBP / ADK / DgoT are single-chain and
-  ligand-free; OpenDDE examples use explicit `chain A` as a safer template. **On a system with a
-  ligand or multiple chains, qualify each group with `chain A and (...)`** or the bare `resid`
-  range will also sweep in the ligand's atoms.
-- `resid` is the per-chain 1-based ordinal (not the author residue number). Full schema:
-  `../docs/config.md`.
-- Set `verbose: true` (already on) and check the `setup` log line `built spec: ... distances=..
-  group_angle=.. rmsd=..` — the count must be non-zero, or the restraint silently did nothing.
-  The `rmsd/` example inverts this for the conformer half: its correct signal is an **absence**
-  (`conformer=False` in the setup line, `n_rmsd=2`). The opt-in and the config block must be
-  dropped TOGETHER — either one alone is a no-op whose intent nothing in the file records.
+RMSD uses two simultaneous harmonic restraints with `pairing: align`,
+`start_sigma=99999999`, and `stop_sigma=1.5`. The five (open, closed) target pairs
+are (0, 5.3), (1.325, 3.975), (2.65, 2.65), (3.975, 1.325), and (5.3, 0) Å.
+Both fitting and RMSD calculation use these chain-A Cα selections:
+
+| Coordinates | Per-chain residue ordinals |
+|---|---|
+| Prediction | 5–224 |
+| 1GGG, open reference | 1–220 |
+| 1WDN, closed reference | 2–221 |
+
+The two entries therefore use the same 220 corresponding atoms. No protein
+conformer restraints or conformer opt-in flags are added. The runners download
+the two reference CIFs from RCSB when needed; downloaded files are ignored.
+
+For DgoT, D_in = distance(A, B) is the cytoplasmic domain-centroid distance and
+D_out = distance(C, D) is the periplasmic distance. The harmonic custom loss is
+`((distance(A, B) - distance(C, D)) - 0.8)**2`. The paper's ΔD targets are −4.3,
+−1.75, 0.8, 3.35, and 5.9 Å. Group D excludes query residues 251–258 and 263–264,
+which are absent from the outward-occluded reference 6E9O. The query spans native
+residues 27–445; selections always use query-local, per-chain residue ordinals.
+
+## MSA inputs
+
+The paper supplies the same full ColabFold A3M for each protein across all six
+predictors. Restraint settings alone do not reproduce a particular prediction:
+the same MSA, model checkpoint, and seed are also required.
+
+The examples retain convenient MSA acquisition for Boltz-2, Protenix-v2,
+OpenFold3, and Chai. Those runners use an MSA server. AlphaFold3 uses its local
+data pipeline and requires `MODEL_DIR` and `DB_DIR`. ESMFold2 reads the full A3M
+from `MSA_A3M`, checks its query against the example sequence, and uses the paper
+settings `msa_max_depth=1024` and `msa_column_mask_rate=0.1`, with 20 recurrent
+loops and 200 diffusion steps. It does not fall back to a single-sequence input.
+
+To reuse a fixed paper MSA, provide it through the predictor's native input:
+
+| Predictor | Precomputed MSA input |
+|---|---|
+| Boltz-2 | Protein `msa` field; omit `--use_msa_server` |
+| Protenix-v2 | Protein-chain `unpairedMsaPath` |
+| AlphaFold3 | Protein `unpairedMsaPath`, `pairedMsa: ""`, and `templates: []`; use `--run_data_pipeline=False` |
+| OpenFold3 | Chain `main_msa_file_paths`; use `--use-msa-server false` |
+| Chai | Aligned Parquet files through `--msa-directory`; omit `--use-msa-server` |
+| ESMFold2 | `MSA_A3M` |
+
+OpenDDE disables external MSA and template searches in its extension examples.
+
+## Validation
+
+All protein selections are qualified with `chain A`. `resid` means a per-chain
+1-based ordinal, not the reference structure's author residue number. The
+[configuration guide](../docs/config.md) describes the schema and selection DSL.
+
+`verbose: true` enables setup diagnostics. Confirm a nonzero restraint count:
+one distance, group-angle, or custom term, or two RMSD terms with
+`conformer=False`. Schema and selection-syntax checks do not establish that a
+selection matches the intended atoms in a different input structure.

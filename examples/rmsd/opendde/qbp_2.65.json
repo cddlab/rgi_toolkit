@@ -1,0 +1,53 @@
+[
+  {
+    "name": "qbp_2.65",
+    "modelSeeds": [
+      0
+    ],
+    "sequences": [
+      {
+        "proteinChain": {
+          "id": [
+            "A"
+          ],
+          "sequence": "ADKKLVVATDTAFVPFEFKQGDKYVGFDVDLWAAIAKELKLDYELKPMDFSGIIPALQTKNVDLALAGITITDERKKAIDFSDGYYKSGLLVMVKANNNDVKSVKDLDGKVVAVKSGTGSVDYAKANIKTKDLRQFPNIDNAYMELGTNRADAVLHDTPNILYFIKTAGNGQFKAVGDSLEAQQYGIAFPKGSDELRDKVNGALKTLRENGTYNEIYKKWFGTEPK",
+          "count": 1
+        }
+      }
+    ],
+    "restraints_config": {
+      "verbose": true,
+      "gpu": true,
+      "max_iter": 1000,
+      "method": "CG",
+      "rmsd_restraints_config": [
+        {
+          "ref_cif": "1GGG.cif",
+          "atom_selection_ref_fit": "chain A and name CA and resid 1 to 220",
+          "atom_selection_target_fit": "chain A and name CA and resid 5 to 224",
+          "atom_selection_ref_calc": "chain A and name CA and resid 1 to 220",
+          "atom_selection_target_calc": "chain A and name CA and resid 5 to 224",
+          "pairing": "align",
+          "start_sigma": 99999999,
+          "stop_sigma": 1.5,
+          "harmonic": {
+            "target_rmsd": 2.65
+          }
+        },
+        {
+          "ref_cif": "1WDN.cif",
+          "atom_selection_ref_fit": "chain A and name CA and resid 2 to 221",
+          "atom_selection_target_fit": "chain A and name CA and resid 5 to 224",
+          "atom_selection_ref_calc": "chain A and name CA and resid 2 to 221",
+          "atom_selection_target_calc": "chain A and name CA and resid 5 to 224",
+          "pairing": "align",
+          "start_sigma": 99999999,
+          "stop_sigma": 1.5,
+          "harmonic": {
+            "target_rmsd": 2.65
+          }
+        }
+      ]
+    }
+  }
+]

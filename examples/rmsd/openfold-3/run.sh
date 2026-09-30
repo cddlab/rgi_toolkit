@@ -1,5 +1,5 @@
 #!/bin/bash
-# openfold-3 RGI example -- dual-ref RMSD morph -> midpoint of 1GGG(open)/1WDN(closed), target 3.0 A
+# openfold-3 RGI example -- dual-reference QBP RMSD targets: open 2.65 A, closed 2.65 A
 # Restraint config = bench-rgi minimal; MSA is fetched from a server so the example is
 # self-contained. (AlphaFold3 is the exception -- it needs external model params + DBs.)
 # GPU only: run on a GPU compute node (not a shared login node).
@@ -16,5 +16,5 @@ export OPENFOLD_CACHE="${OPENFOLD_CACHE:-$HOME/.openfold3}"
 PIXI="$WS/openfold-3_restr/.pixi-bin/pixi"; [ -x "$PIXI" ] || PIXI=pixi
 cd "$HERE"
 "$PIXI" run --manifest-path "$WS/openfold-3_restr/pixi.toml" -e openfold3-cuda12 \
-    run_openfold predict --query-json "$HERE/qbp_3.00.json" --output-dir "$HERE/out" \
-    --num-diffusion-samples 1 --use-msa-server true --use-templates false
+    run_openfold predict --query-json "$HERE/qbp_2.65.json" --output-dir "$HERE/out" \
+    --num-model-seeds 1 --num-diffusion-samples 1 --use-msa-server true --use-templates false

@@ -1,5 +1,5 @@
 #!/bin/bash
-# alphafold3 RGI example -- custom dist-diff: (d(A,B)-d(C,D)) -> 0.0 (DgoT)
+# alphafold3 RGI example -- custom dist-diff: Delta D = D_in - D_out -> 0.8 A (DgoT)
 # Restraint config = bench-rgi minimal; MSA is fetched from a server so the example is
 # self-contained. (AlphaFold3 is the exception -- it needs external model params + DBs.)
 # GPU only: run on a GPU compute node (not a shared login node).
@@ -16,8 +16,8 @@ MODEL_DIR="${MODEL_DIR:?set MODEL_DIR to your AF3 model-parameters directory}"
 DB_DIR="${DB_DIR:?set DB_DIR to your AF3 sequence-database directory}"
 export JAX_COMPILATION_CACHE_DIR="${JAX_COMPILATION_CACHE_DIR:-/tmp/${USER}_jax_cache}"
 python "$WS/alphafold3_restr/run_alphafold.py" \
-    --run_data_pipeline=True --model_dir="$MODEL_DIR" --db_dir="$DB_DIR" \
-    --json_path=dgot_0.00.json --output_dir=out
+    --num_diffusion_samples=1 --run_data_pipeline=True --model_dir="$MODEL_DIR" --db_dir="$DB_DIR" \
+    --json_path=dgot_0.80.json --output_dir=out
 # Local fallback (skip the DB search): add
 #   "unpairedMsaPath": "/path/to/precomputed.a3m"
-# to the protein object in dgot_0.00.json, then pass --run_data_pipeline=False.
+# to the protein object in dgot_0.80.json, then pass --run_data_pipeline=False.

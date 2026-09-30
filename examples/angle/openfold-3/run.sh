@@ -12,4 +12,4 @@ PIXI="$WS/openfold-3_restr/.pixi-bin/pixi"; [ -x "$PIXI" ] || PIXI=pixi
 cd "$HERE"
 "$PIXI" run --manifest-path "$WS/openfold-3_restr/pixi.toml" -e openfold3-cuda12 \
     run_openfold predict --query-json "$HERE/adk_72.85.json" --output-dir "$HERE/out" \
-    --num-diffusion-samples 1 --use-msa-server true --use-templates false
+    --num-model-seeds 1 --num-diffusion-samples 1 --use-msa-server true --use-templates false

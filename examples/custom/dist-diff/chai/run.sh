@@ -1,5 +1,5 @@
 #!/bin/bash
-# chai RGI example -- custom dist-diff: (d(A,B)-d(C,D)) -> 0.0 (DgoT)
+# chai RGI example -- custom dist-diff: Delta D = D_in - D_out -> 0.8 A (DgoT)
 # Restraint config = bench-rgi minimal; MSA is fetched from a server so the example is
 # self-contained. (AlphaFold3 is the exception -- it needs external model params + DBs.)
 # GPU only: run on a GPU compute node (not a shared login node).
@@ -10,7 +10,7 @@ WS="$HERE"; while [ "$WS" != / ] && [ ! -d "$WS/RGI-toolkit" ]; do WS="$(dirname
 source "$WS/chai-lab_restr/.venv/bin/activate"
 cd "$HERE"
 export CHAI_DOWNLOADS_DIR="${CHAI_DOWNLOADS_DIR:-$HOME/.cache/chai}"
-python -m chai_lab.main fold dgot_0.00.fasta out \
-    --restraints-config-path dgot_0.00.yaml \
-    --num-diffn-samples 1 --seed 0 \
-    --use-msa-server --use-templates-server
+python -m chai_lab.main fold dgot_0.80.fasta out \
+    --restraints-config-path dgot_0.80.yaml \
+    --num-trunk-samples 1 --num-diffn-samples 1 --seed 0 \
+    --use-msa-server

@@ -211,3 +211,7 @@ __marimo__/
 /examples/**/out_*.cif
 /examples/rmsd/*/1GGG.cif
 /examples/rmsd/*/1WDN.cif
+
+# User-supplied example alignments
+/examples/**/*.a3m
+/examples/**/*.aligned.pqt

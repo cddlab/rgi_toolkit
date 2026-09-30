@@ -1,13 +1,15 @@
 #!/bin/bash
-# esmfold2 RGI example -- custom dist-diff: (d(A,B)-d(C,D)) -> 0.0 (DgoT)
-# ESMFold2 uses single-sequence input and downloads model weights when needed.
+# esmfold2 RGI example -- custom dist-diff: Delta D = D_in - D_out -> 0.8 A (DgoT)
+# Supply the full ColabFold A3M via MSA_A3M; weights are downloaded when needed.
 # GPU only: run on a GPU compute node (not a shared login node).
 # Requires esm_restr on rgi-integration alongside RGI-toolkit.
 set -euo pipefail
+: "${MSA_A3M:?set MSA_A3M to the full ColabFold A3M for this protein}"
+export MSA_A3M="$(cd "$(dirname "$MSA_A3M")" && pwd)/$(basename "$MSA_A3M")"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WS="$HERE"; while [ "$WS" != / ] && [ ! -d "$WS/RGI-toolkit" ]; do WS="$(dirname "$WS")"; done
 PIXI="$WS/esm_restr/.pixi-bin/pixi"; [ -x "$PIXI" ] || PIXI=pixi
 cd "$HERE"
 # Use the native ESM model and its RGI sampling hook.
 "$PIXI" run --manifest-path "$WS/esm_restr/pyproject.toml" \
-    python "$HERE/run_custom.py"
+    env MSA_A3M="$MSA_A3M" python "$HERE/run_custom.py"

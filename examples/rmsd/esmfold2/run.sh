@@ -1,9 +1,11 @@
 #!/bin/bash
-# esmfold2 RGI example -- dual-ref RMSD morph -> midpoint of 1GGG(open)/1WDN(closed), target 3.0 A
-# ESMFold2 uses single-sequence input and downloads model weights when needed.
+# esmfold2 RGI example -- dual-reference QBP RMSD targets: open 2.65 A, closed 2.65 A
+# Supply the full ColabFold A3M via MSA_A3M; weights are downloaded when needed.
 # GPU only: run on a GPU compute node (not a shared login node).
 # Requires esm_restr on rgi-integration alongside RGI-toolkit.
 set -euo pipefail
+: "${MSA_A3M:?set MSA_A3M to the full ColabFold A3M for this protein}"
+export MSA_A3M="$(cd "$(dirname "$MSA_A3M")" && pwd)/$(basename "$MSA_A3M")"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WS="$HERE"; while [ "$WS" != / ] && [ ! -d "$WS/RGI-toolkit" ]; do WS="$(dirname "$WS")"; done
 # Reference structures (1GGG open / 1WDN closed) are downloaded from RCSB at run time
@@ -15,4 +17,4 @@ PIXI="$WS/esm_restr/.pixi-bin/pixi"; [ -x "$PIXI" ] || PIXI=pixi
 cd "$HERE"
 # Use the native ESM model and its RGI sampling hook.
 "$PIXI" run --manifest-path "$WS/esm_restr/pyproject.toml" \
-    python "$HERE/run_rmsd.py"
+    env MSA_A3M="$MSA_A3M" python "$HERE/run_rmsd.py"
