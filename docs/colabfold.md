@@ -1,17 +1,19 @@
 # RGI in ColabFold notebooks
 
 Open [ColabFold2 preview](https://colab.research.google.com/github/th2ch-g/ColabFold_restr/blob/rgi-integration/ColabFold2_preview.ipynb).
-The original notebook headings and workflow are retained. **RGI (optional)** is an
-ordinary Colab form after **Input sequences**: its fields are visible and editable
-**before any cell runs**. It needs no widget, Add button or separate confirmation.
+Expand **RGI (optional)** after **Input sequences** to edit the ordinary Colab form.
+The section starts collapsed; its fields are editable **before any cell runs**.
+It needs no widget, Add button or separate confirmation.
 
-1. Choose an RGI-supported model, for example **boltz2**, in **Install dependencies**.
+1. Choose an RGI-supported model, for example **openbind0**, in **Install dependencies**.
 2. Enter your molecules in **Input sequences**.
-3. In **RGI (optional)**, check **use_rgi** and fill the fields for the restraints you need.
+3. Expand **RGI (optional)**, check **use_rgi** and fill the fields for the restraints you need.
 4. Use **Runtime → Run all**.
 
-For vanilla, leave **use_rgi** off. The upstream default model, OpenBind0, is vanilla
-only, as are AF2 and IntelliFold2; choose a supported model to enable RGI.
+For vanilla, leave **use_rgi** off. The preview's default model, OpenBind-0, supports
+RGI through the same sampler hook as OpenFold3 in the shared JAX runner, while
+retaining its own model configuration and checkpoint. AF2 and IntelliFold2 are
+vanilla only.
 An enabled but empty RGI form raises an error before inference.
 After editing a form, rerun that cell and prediction, or use **Run all**.
 The form values live in notebook source and are retained when you save the notebook.
@@ -125,8 +127,8 @@ the file are relative to that file; upload the referenced structures too. Set
 
 | Notebook | RGI models |
 | --- | --- |
-| ColabFold2 preview | AlphaFold3, OpenFold3, Boltz2, Protenix2, RoseTTAFold3, Chai1, OpenDDE, ESMFold2 and LM600M/LM300M variants |
-| [AlphaFold3 / OpenFold3](https://colab.research.google.com/github/th2ch-g/ColabFold_restr/blob/rgi-integration/AlphaFold3_of3.ipynb) | AlphaFold3 and OpenFold3 |
+| ColabFold2 preview | AlphaFold3, OpenBind-0, OpenFold3, Boltz2, Protenix2, RoseTTAFold3, Chai1, OpenDDE, ESMFold2 and LM600M/LM300M variants |
+| [AlphaFold3 / OpenFold3](https://colab.research.google.com/github/th2ch-g/ColabFold_restr/blob/rgi-integration/AlphaFold3_of3.ipynb) | AlphaFold3, OpenBind-0 and OpenFold3 |
 | [Boltz-1](https://colab.research.google.com/github/th2ch-g/ColabFold_restr/blob/rgi-integration/Boltz1.ipynb) | Native Boltz-1 |
 
 Preview uses `alphafold3-colabfold==3.1.11` and the shared JAX adapter. ESMFold2's
