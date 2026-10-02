@@ -1,6 +1,6 @@
 #!/bin/bash
 # alphafold3 RGI example -- dual-reference QBP RMSD targets: open 2.65 A, closed 2.65 A
-# Restraint config = bench-rgi minimal; MSA is fetched from a server so the example is
+# MSA is fetched from a server so the example is
 # self-contained. (AlphaFold3 is the exception -- it needs external model params + DBs.)
 # GPU only: run on a GPU compute node (not a shared login node).
 # Requires the alphafold3_restr checkout to exist as a sibling of rgi_toolkit/.
