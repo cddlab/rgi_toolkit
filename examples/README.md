@@ -2,9 +2,10 @@
 
 Representative inputs from the paper's four protein state-control benchmarks.
 Each `<type>/<tool>/` directory contains one restraint setting and a `run.sh` for
-one prediction. The paper uses five target settings and nine seeds
-per setting. These examples retain the same restraint objective, atom selections,
-activation window, and minimization settings at the representative target.
+one prediction. Each input includes its restraint settings inline. The paper uses
+five target settings and nine seeds per setting. These examples retain the same
+restraint objective, atom selections, activation window, and minimization settings
+at the representative target.
 
 | Directory | System | Representative restraint |
 |---|---|---|
