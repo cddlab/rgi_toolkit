@@ -3,12 +3,13 @@
 Minimizes the restraint energy on active-site coordinates using autograd for
 gradients. ``method`` selects the solver: ``"CG"`` (default) -> a nonlinear
 conjugate-gradient solver with SciPy 1.17.1 strong Wolfe (default, PR+,
-DCSRCH/Wolfe2) or Armijo, shared with JAX through ``optim/_cg.py``; ``"l-bfgs"`` ->
-``torch.optim.LBFGS`` (strong-Wolfe). Operates in-place on the coordinate tensor
-and stays on whatever device the coordinates live on, so ``gpu: true`` runs
-entirely on GPU.
+DCSRCH/Wolfe2) or Armijo, shared with JAX through ``optim/_cg.py``. L-BFGS uses
+``torch.optim.LBFGS`` on CPU and its ``CudaLBFGS`` adaptation on the ordinary CUDA
+path, both with strong-Wolfe search. Supported bounded CUDA problems first use
+the native graph solver in ``_cuda_minimize``; other cases retain the ordinary paths.
+Coordinates are updated in place on their input device.
 
-Dynamic VdW caches are validated before every trial evaluation by the shared
+On the neighbour-list path, VdW caches are validated before every trial evaluation by
 ``_vdw_runtime``. Fixed partners receive the full Verlet skin displacement budget;
 two moving partners each receive half. Overflow rows use complete pair sums in
 bounded chunks. Rebuilding preserves the objective and CG history.
@@ -189,7 +190,7 @@ class TorchRestraintOptimizer:
         recompile per distinct value. Stable object identity per gate state lets
         ``torch.compile`` reuse its artifact; sigma decreases / step increases
         monotonically so each gate flips at most once -> a few states -> a few compiles,
-        then reuse. distance is now a per-entry term (in ``PER_ENTRY_KEYS``), so it is gated
+        then reuse. Distance is a per-entry term (in ``PER_ENTRY_KEYS``), so it is gated
         and folded here like rmsd/group. The conformer-gated key set (``CONF_KEYS``) and the
         per-entry-gated set (``PER_ENTRY_KEYS``) both come from ``TERM_DEFS``, so adding a term
         can't silently leave it ungated on the compiled path."""

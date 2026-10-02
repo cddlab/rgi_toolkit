@@ -21,10 +21,10 @@ _STEREO_RETRY_SEEDS = tuple(range(0xF00D, 0xF011))
 
 
 class RelaxError(ValueError):
-    """A force-field relax the user EXPLICITLY asked for could not be performed.
+    """Requested MMFF relaxation could not be performed.
 
-    Raised only for `mmff94`/`mmff94s`. UFF is the default (nobody asked for it), so a UFF
-    failure stays a soft fall-back to the cached conformer -- see :func:`ff_relax`.
+    Applies to ``mmff94`` and ``mmff94s``. UFF uses the fallback policy documented in
+    :func:`ff_relax`.
     """
 
 
@@ -476,7 +476,7 @@ def _ff_relax_once(mol, coords, force_field):
     mh = Chem.AddHs(m, addCoords=True)  # Hs placed from heavy-atom geometry
     if ff == "uff":
         if AllChem.UFFOptimizeMolecule(mh, maxIters=200) not in (0, 1):
-            return None  # not converged / no force field -> keep the tool's conformer
+            return None  # No usable force-field result; rc=1 is accepted above.
     else:
         # Check MMFF typing on the copy; unsupported atoms otherwise return only rc=-1.
         variant = "MMFF94s" if ff == "mmff94s" else "MMFF94"
@@ -581,54 +581,30 @@ def repair_stereo(mol, coords, stereo_mol, force_field="uff"):
 
 
 def ff_relax(mol, coords, force_field="uff", *, stereo_mol=None):
-    """Force-field-relax ``coords`` (a conformer of ``mol``) to ideal bond/angle geometry
-    while KEEPING the input fold.
+    """Relax ligand coordinates to derive force-field restraint targets.
 
-    Unlike :func:`generate_ideal_conformer` (a from-scratch ETKDG embed that mis-folds
-    big/flexible/phosphate ligands), this starts from the tool's existing conformer and
-    runs a LOCAL force-field minimisation, so the global fold is preserved while
-    Kekule-localized aromatic rings, stretched bonds and bent angles relax to their
-    force-field-ideal values. Used to derive bond/angle restraint TARGETS that are
-    consistent across tools (every tool's cached conformer otherwise carries its own
-    bond/angle idiosyncrasies). The result is checked against graph-defined
-    stereochemistry (falling back to the input 3D conformer where the graph has no
-    label). ``stereo_mol``, when supplied, is a source-graph molecule in ``mol`` atom
-    order; it keeps the user's SMILES @/@@ and E/Z labels authoritative even when a
-    framework rebuilt ``mol`` from already-inverted reference coordinates. If a rare
-    force-field crossing changes a protected tetrahedral centre or acyclic double-bond
-    E/Z label, or the input reference already disagrees with ``stereo_mol``, the relax is
-    retried from at most four deterministic stereo-aware ETKDG embeddings. Returns
-    heavy-atom coords in ``mol`` atom order, or None on a safe UFF fallback.
+    Local minimisation starts from ``coords``; the global fold may change. The result
+    is checked against graph-defined tetrahedral chirality and acyclic double-bond E/Z
+    labels, using input 3D stereochemistry where graph labels are absent. ``stereo_mol``
+    supplies the source graph in ``mol`` atom order, preserving SMILES @/@@ and E/Z
+    labels even when the predictor's reference coordinates disagree with them.
+    A stereo mismatch retries from at most four deterministic stereo-aware ETKDG
+    embeddings, which can also change the fold. Returns heavy-atom coordinates in
+    ``mol`` atom order, or None when falling back to the cached conformer.
 
     ``force_field`` (``conformer_restraints_config.relax_force_field.ligand``):
-    ``"uff"`` (default) / ``"mmff94"`` / ``"mmff94s"``. Neither is uniformly better --
-    on adenosine monophosphate MMFF lands the conjugated exocyclic C6-N6 far closer to
-    the monomer library (1.376-1.389 vs UFF 1.428, library 1.330) while UFF wins on the
-    glycosidic C1'-N9 -- hence a user-selectable option rather than a new default.
-    ``"none"`` is handled by the CALLER (it means "do not call this at all").
+    ``"uff"`` (default), ``"mmff94"`` or ``"mmff94s"``. The caller handles ``"none"``
+    by skipping this function. MMFF force-field failures raise :class:`RelaxError`;
+    UFF failures return None. If stereo retries are exhausted, MMFF raises
+    :class:`RelaxError`; UFF raises :class:`StereoGenerationError` when the input already
+    disagreed with the source graph, and otherwise falls back to the original conformer.
 
-    **The failure policies differ deliberately.** UFF is the default that nobody asked
-    for, so a failure returns None and the caller keeps its cached conformer (unchanged
-    long-standing behaviour). MMFF is only ever reached because the user explicitly set
-    ``relax_force_field.ligand``, so any failure raises :class:`RelaxError` rather
-    than silently producing un-relaxed targets that look like MMFF ones. This matters in
-    practice: MMFF has NO metal parameters (``MMFFHasAllMoleculeParams`` is False for Fe
-    where UFF is
-    True, and ``MMFFOptimizeMolecule`` then returns -1 without raising).
+    Relaxation uses molecule copies because MMFF typing can change aromatic flags and
+    bond orders used by downstream ``cistrans`` and ``plane`` construction. Unsupported
+    MMFF atom types are rejected before optimization.
 
-    **MMFF mutates the mol it is handed.** ``MMFFHasAllMoleculeParams`` /
-    ``MMFFGetMoleculeProperties`` / ``MMFFOptimizeMolecule`` KEKULIZE their argument --
-    aromatic flags cleared, bonds rewritten to SINGLE/DOUBLE (reproducible on caffeine).
-    ``featurizer._extract_conformer`` perceives ``cistrans`` from ``BondType.DOUBLE`` and
-    ``plane`` from ring info, so leaking that into the caller's mol would silently change
-    which restraints get built. Every RDKit call below therefore runs on the local
-    ``Chem.Mol(mol)`` copy (deep enough to protect the caller) -- never on ``mol``.
-
-    ``maxIters=200`` is shared by both force fields. RDKit reports rc=1 ("iteration limit")
-    there for all of UFF/MMFF94/MMFF94s on ATP, but the geometry is converged in practice:
-    re-running at 2000 and 20000 iterations gives bond lengths identical to 3 decimals and
-    only flips rc to 0. So rc=1 is accepted, and raising the budget would buy nothing while
-    moving every existing UFF target.
+    Both force fields use ``maxIters=200`` and accept return codes 0 and 1. Code 1 means
+    the iteration limit was reached; accepting it does not certify convergence.
     """
     ff = str(force_field).lower()
     try:

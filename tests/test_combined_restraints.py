@@ -1,4 +1,4 @@
-"""Integration tests for the new CombinedRestraints (set_config / setup / minimize).
+"""Integration tests for CombinedRestraints (set_config / setup / minimize).
 
 Uses the inferred torch backend (CPU, no GPU) with a mock adapter, exercising the full
 flow: config parse -> distance resolution -> conformer spec build -> minimize.

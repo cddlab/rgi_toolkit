@@ -790,10 +790,10 @@ def test_torch_group_angle_default_move_converges():
 
 
 def test_group_angle_step_gated_off_is_noop_torch_jax():
-    """A group-angle SOLVER term with a STEP window no-ops OUTSIDE its window and converges
-    INSIDE it — exercised end-to-end through the CG on both backends (distance has its own
-    step-window e2e test, but it is closed-form; this is the gradient-solver path). Unlike
-    the custom closure path (a gated-off custom term is DROPPED -> a constant objective ->
+    """A group-angle term no-ops outside its step window and converges inside it.
+
+    Both backends exercise the CG path, as does the separate distance step-window test.
+    Unlike the custom closure path (a gated-off custom term is dropped -> a constant objective ->
     the value_grad guard), an array term's gate is a multiplicative 0 inside total_energy,
     so the graph stays connected (grad 0) and the CG no-ops without needing the guard. Both
     backends must agree the gated-off step leaves the coords untouched."""

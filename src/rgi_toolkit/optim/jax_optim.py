@@ -4,9 +4,11 @@ Builds a pure JIT/scan/vmap-compatible minimizer over an autodiff energy.
 CG selects SciPy 1.17.1 PR+ with DCSRCH/Wolfe2 strong Wolfe (default) or
 historical Armijo through ``optim/_cg.py``, shared with Torch. Failed searches
 retain the last accepted point. ``return_info=True`` exposes traced CG diagnostics.
-``method='l-bfgs'`` uses ``jaxopt.LBFGS`` (lazily imported). No callback or runtime
-SciPy is used; optimization remains inside XLA on the selected device. Backend
-floating-point evaluation orders can produce different search decisions near a
+``method='l-bfgs'`` lazily imports ``CachedLBFGS``, a ``jaxopt.LBFGS`` subclass that
+retains the accepted VdW cache through auxiliary state. Search, history and stopping
+rules follow JAXopt. No callback or runtime SciPy is used; optimization remains inside
+XLA on the selected device. Backend floating-point evaluation orders can produce
+different search decisions near a
 condition boundary; ordinary scalar objectives are checked against SciPy.
 
 Dynamic VdW caches are validated before every trial evaluation by the shared
@@ -468,7 +470,7 @@ def make_minimizer(
     step-window gate, alongside ``sigma`` for the sigma-window gate). The returned function
     is pure and JIT/vmap-able, so it runs inside the diffusion loop's ``hk.scan``/``hk.vmap``
     (``step`` is a traced scalar there). ``method='cg'`` (the default) runs the pure-jax
-    ``_cg_minimize``; ``method='l-bfgs'`` uses ``jaxopt.LBFGS`` (lazily imported). Per-restraint
+    ``_cg_minimize``; ``method='l-bfgs'`` uses the JAXopt-derived ``CachedLBFGS``. Per-restraint
     gating uses the prepared window table and per-term masks. Pass the minimizer
     as an argument to the outermost JIT to keep restraint values dynamic. There is no
     ``start_sigma`` arg. ``return_info=True`` fixes the output as ``(coords, CGInfo)``

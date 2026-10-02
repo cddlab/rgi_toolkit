@@ -1,10 +1,9 @@
 """Parse + resolve standalone best-fit-plane restraints (``plane_restraints_config``).
 
-This is the selection-driven form of the ``plane`` energy term that until now existed
-only inside the conformer restraint (where groups are *perceived* from an RDKit mol —
-aromatic rings and non-ring sp2 groups — or supplied by the monomer library / polymer
-links). Here the user names the atoms with the selection DSL, so any atom group in the
-structure (protein, DNA/RNA, ligand) can be held planar.
+This is the selection-driven form of the conformer ``plane`` energy term. Conformer
+groups come from RDKit perception of aromatic rings and non-ring sp2 groups, or from
+the monomer library and polymer links. Here the user names atoms with the selection
+DSL, so any atom group in the structure (protein, DNA/RNA, ligand) can be held planar.
 
 The measured quantity is the group's out-of-plane RMS deviation from its own best-fit
 plane (Angstrom, target 0 = planar), shaped by the same four restraint types as the
@@ -16,7 +15,7 @@ restraint is essentially always 0, so an omitted block means ``harmonic`` with
 its ``coplanar_slack`` — 0 becomes a pure harmonic, a positive slack becomes
 ``flat-bottomed2``.)
 
-Several groups in ONE entry are **pooled into a single best-fit plane** — that is the
+Several groups in one entry are pooled into a single best-fit plane — that is the
 "keep these two bases coplanar" idiom (the base-pair macro's coplanarity group). Give
 separate entries for separate planes. Targets are Angstrom only, so there is no ``unit``
 key.

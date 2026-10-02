@@ -1,6 +1,6 @@
 """Scan-friendly wrapper around a pure restraint minimizer.
 
-JAX tools run the restraint minimizer INSIDE the diffusion ``lax.scan`` via a pure
+JAX tools run the restraint minimizer inside the diffusion ``lax.scan`` via a pure
 ``(flat_coords, sigma, step) -> flat_coords`` closure (``CombinedRestraints.get_minimizer``),
 rather than calling ``CombinedRestraints.minimize`` per step like the eager torch tools.
 ``ScanMinimizer`` bundles that closure with its ``CombinedRestraints`` and exposes the
@@ -12,8 +12,7 @@ active-site indices address, so any tool whose per-step coordinate tensor carrie
 axes (e.g. AF3's ``(num_tokens, max_atoms_per_token, 3)``) reshapes through here.
 
 Framework-free: ``positions`` is duck-typed (anything with ``.shape`` / ``.reshape`` — a
-jax or numpy array), so this module imports neither jax nor any tool, keeping
-``import rgi_toolkit`` numpy-only.
+jax or numpy array), so this module imports neither jax nor a predictor framework.
 """
 
 from __future__ import annotations

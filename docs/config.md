@@ -47,7 +47,7 @@ restraints_config:
   distance_restraints_config: [ ... ]   # list
   angle_restraints_config:    [ ... ]   # list  (group-centroid angle)
   dihedral_restraints_config: [ ... ]   # list  (group-centroid dihedral)
-  improper_restraints_config: [ ... ]   # list  (out-of-plane angle)
+  improper_restraints_config: [ ... ]   # list  (same signed torsion as dihedral)
   chiral_restraints_config:   [ ... ]   # list  (signed group-centroid volume)
   plane_restraints_config:    [ ... ]   # list  (best-fit-plane flatness / coplanarity)
   base_pair_restraints_config: [ ... ]  # list  (nucleic-acid Watson-Crick base pairs)
@@ -590,8 +590,8 @@ dihedral_restraints_config:
 
 ## `improper_restraints_config` (list)
 
-Restrains the signed out-of-plane angle of four group centroids. Its mathematical convention is
-identical to [`dihedral_restraints_config`](#dihedral_restraints_config-list): the angle between
+Uses the same signed torsion as [`dihedral_restraints_config`](#dihedral_restraints_config-list)
+for four ordered group centroids: the angle between
 planes 1–2–3 and 2–3–4 about the 2–3 axis, with range $[-180^\circ, 180^\circ]$. It has a separate
 config, spec term, energy breakdown, and log name (`group_improper`).
 
@@ -1228,8 +1228,9 @@ scalar form (`relax_force_field: uff`) is rejected with a migration hint.
 A predictor's cached ligand conformer is not refinement geometry either: boltz v2's `~/.boltz/mols`
 cache Kekulé-localizes aromatic rings (~1.34/1.48 Å alternating), and other tools' `ref_pos` carries
 its own bond/angle idiosyncrasies. Measuring targets straight off it would just reproduce them. So
-the conformer is first **locally relaxed** — the fold is preserved, only local geometry idealises —
-and the bond/angle/chiral/cistrans/torsion/plane targets are measured off the relaxed copy.
+the conformer is first locally relaxed from its cached coordinates, and the
+bond/angle/chiral/cistrans/torsion/plane targets are measured off the relaxed copy.
+The global fold can change during minimization or stereo-repair re-embedding.
 
 ```yaml
 conformer_restraints_config:
@@ -1254,12 +1255,12 @@ Measured on adenosine-5'-monophosphate against the monomer-library values tabula
 | exocyclic `C6-N6` (conjugated) | 1.330 | 1.428 | 1.389 | **1.376** |
 | glycosidic `C1'-N9` | 1.476 | **1.465** | 1.447 | 1.447 |
 
-MMFF is much closer on the conjugated exocyclic C–N; UFF is closer on the glycosidic bond. Two
-caveats on reading that table: it was measured from a from-scratch ETKDG embed, whereas a real run
-starts from the *tool's* cached conformer (different starting basin, so absolute values will not
-reproduce even where the ordering does); and although RDKit reports "iteration limit" at the
-production 200 iterations for all three, the geometry is converged — re-running at 2000 and 20000
-gives bond lengths identical to 3 decimals.
+In this comparison, MMFF is closer on the conjugated exocyclic C–N and UFF on the glycosidic bond.
+The measurements used a from-scratch ETKDG embedding; a predictor's cached starting conformer can
+give different results. All three runs reached the 200-iteration limit, and the reported bond
+lengths agreed to 3 decimals after 2000 and 20000 iterations. That agreement concerns these bond
+lengths. The production policy accepts return code 1 as an iteration limit without certifying
+convergence.
 
 Behaviour worth knowing:
 
@@ -1278,11 +1279,10 @@ Behaviour worth knowing:
   default therefore remains UFF for both CCD and SMILES ligands. Use
   `relax_force_field: {ligand: none}` only when the supplied reference coordinates themselves are
   the intended targets.
-- **MMFF raises where UFF falls back.** UFF is the default nobody asked for, so a failure quietly
-  keeps the cached conformer. `mmff94`/`mmff94s` are only ever reached because you set them, so any
-  failure raises instead of producing un-relaxed targets that look like MMFF ones. This is not
-  hypothetical: **MMFF has no metal parameters**, so a metal-containing ligand that UFF relaxes
-  fine will raise under MMFF. Switch that run to `uff`, or to `none`.
+- **Force-field failure policies differ.** UFF returns the cached conformer on force-field
+  failure, subject to the stereo-repair checks above. `mmff94` and `mmff94s` raise when requested
+  relaxation cannot be performed, including when MMFF atom typing is unsupported. A ligand with
+  UFF parameters may lack MMFF parameters; choose `uff` or `none` when appropriate.
 - **A skipped relax also raises under MMFF.** The relax only runs on a mol with real bond orders
   (detected as "has an aromatic or double bond"), because relaxing an order-less mol would collapse
   aromatic rings to ~1.5 Å. Under `uff` such a ligand is skipped silently; under an explicit MMFF it
@@ -1560,7 +1560,7 @@ $\lVert\cdot\rVert$ is the Euclidean norm:
 | `distance(A,B)` | scalar | $\lVert c_A - c_B \rVert$ | a separation between two groups; a **difference of two distances** encodes symmetry / equidistance |
 | `angle(A,B,C)` | scalar (rad) | $`\arccos\big( (c_A - c_B)\cdot(c_C - c_B) / (\lVert c_A - c_B \rVert\,\lVert c_C - c_B \rVert) \big)`$, vertex $B$ | the bend of three groups about the vertex $B$ |
 | `dihedral(A,B,C,D)` | scalar (rad) | torsion about the B–C centroid axis, range $\pm\pi$ | the twist / handedness across four groups — a **periodic** quantity: wrap its deviation, see below |
-| `improper(A,B,C,D)` | scalar (rad) | signed out-of-plane angle about the B–C centroid axis, range $\pm\pi$ | the custom-form counterpart of `improper_restraints_config`; wrap its deviation |
+| `improper(A,B,C,D)` | scalar (rad) | same signed torsion as `dihedral(A,B,C,D)`, about the B–C centroid axis, range $\pm\pi$ | the custom-form counterpart of `improper_restraints_config`; wrap its deviation |
 | `chiral(A,B,C,D)` | scalar (Angstrom cubed) | $(c_B-c_A)\cdot((c_C-c_A)\times(c_D-c_A))$ | signed volume about A, identical to conformer chiral for single atoms; no division by six |
 | `rg(A)` | scalar | $\sqrt{\frac{1}{\lvert A\rvert}\sum_i \lVert x_i - c_A \rVert^2}$ — radius of gyration | the compactness of one group (collapse vs extension) |
 | `norm(v)` | scalar | $\lVert v \rVert$ | the length of a vector you built, e.g. `centroid(A) - centroid(B)` |

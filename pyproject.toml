@@ -8,9 +8,7 @@ dependencies = [
     "numpy",
     "pyyaml>=6",
     "rdkit>=2024.3.2",
-    # RMSD-reference structure I/O (pdb_ref.py) + sequence alignment (_align.py). Both are
-    # imported lazily inside their modules so `import rgi_toolkit` stays numpy-only. Loose
-    # lower bounds: the host tool venvs pin gemmi 0.6.5-0.7.5 and biopython 1.84-1.87.
+    # Reference structure I/O and sequence alignment; imported lazily when used.
     "gemmi>=0.6.5",
     "biopython>=1.84",
     # Process-safe publication of the optional monomer-library cache.

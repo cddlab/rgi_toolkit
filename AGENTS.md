@@ -260,7 +260,7 @@ source-SMILES path (`chai/adapter.py` `_mol_from_smiles`, complete graph), the
 geometry-perceived fallback (no SMILES) being all-single so `cistrans=0`.
 
 `_extract_conformer` does NOT measure targets off the tool's cached conformer directly — it first
-**force-field relaxes** a copy (`_mol_build.ff_relax`, fold-preserving local minimisation), because
+**force-field relaxes** a copy (`_mol_build.ff_relax`, local minimisation from the input coordinates), because
 each tool's cache carries its own idiosyncrasies (boltz v2 Kekulé-localizes aromatic rings
 ~1.34/1.48). The force field is `conformer_restraints_config.relax_force_field.ligand`:
 `uff` (default) / `mmff94` / `mmff94s` / `none`. Two non-obvious consequences: (1) the relax
@@ -448,8 +448,9 @@ runs `SetNoImplicit(False)` + `UpdatePropertyCache` **before**
 `AssignStereochemistryFrom3D`, else stereocentres read as 3-coordinate and every
 chiral restraint silently vanishes.
 
-`ff_relax(mol, coords, force_field="uff")` — the fold-preserving relax whose output the conformer
-TARGETS are measured off (`featurizer._extract_conformer`); `parse_relax_force_field` validates
+`ff_relax(mol, coords, force_field="uff")` — local relaxation used to derive conformer
+targets (`featurizer._extract_conformer`); the fold may change during minimisation or stereo
+re-embedding. `parse_relax_force_field` validates
 the `relax_force_field: {ligand: ...}` mapping and is called from `config.py` at PARSE time, because
 the conformer whitelist only checks the outer key and a bad nested key or VALUE would otherwise
 slip through on any run where no ligand opts in. Two RDKit traps it encodes: (1) **MMFF typing
@@ -457,12 +458,12 @@ kekulizes the mol it is handed** (aromatic flags
 cleared, bonds → SINGLE/DOUBLE — reproducible on caffeine), which would corrupt the downstream
 `cistrans`/`plane` perception, so every RDKit call runs on the local `Chem.Mol(mol)` copy, never on
 `mol`; (2) **MMFF has no metal parameters** (`MMFFHasAllMoleculeParams` False for Fe where UFF is
-True; `MMFFOptimizeMolecule` then returns −1 without raising). Failure policies differ ON PURPOSE:
-UFF is the unrequested default so it soft-fails to the cached conformer (`return None`), while an
+True; `MMFFOptimizeMolecule` then returns −1 without raising). UFF force-field failures
+fall back to the cached conformer (`return None`), while an
 explicit `mmff*` raises `RelaxError` — including on an unsanitized mol, where RDKit's own
-`RuntimeError` is re-wrapped rather than swallowed. `maxIters=200` is shared and should stay: all
-three force fields report rc=1 there on ATP but the geometry is converged (identical to 3 decimals
-at 2000/20000 iterations), and moving it would shift every existing UFF target. The result is
+`RuntimeError` is re-wrapped rather than swallowed. Keep the shared `maxIters=200` budget
+and acceptance of return codes 0 and 1 for consistent target construction. Code 1 records
+an iteration limit, not verified convergence. The result is
 stereo-checked against source-graph chirality/E/Z retained separately as `LigandConf.stereo_mol`
 (input 3D fills missing labels); a mismatch retries at most four deterministic ETKDG seeds before
 applying that same UFF/MMFF policy. An already-wrong predictor reference raises if all four fail,
@@ -551,7 +552,7 @@ candidate dict); a ligand atom named "C"/"N"/"O" never matches them.
 
 (`rmsd_restr_data.py` + `pdb_ref.py`): `RmsdData` resolves a moving
 group against a reference structure — `ref_pdb` (PDB) or `ref_cif` (mmCIF), **mutually
-exclusive**, both **coordinate-parsed via gemmi** (lazy-imported, so `import rgi_toolkit` stays numpy-only)
+exclusive**, both **coordinate-parsed via gemmi** (imported lazily when a reader is called)
 by `read_pdb_atoms` / `read_cif_atoms` into the same `PdbAtom` list (a shared `_build_atoms`
 applies the per-chain ordinal once, so the two are interchangeable; PDB goes through
 `gemmi.read_structure`, mmCIF reads the `_atom_site` loop via `gemmi.cif` preferring the
@@ -673,7 +674,7 @@ materializing a dense distance matrix.
 
 ### Custom restraints (the extension point — `rgi_toolkit/custom/`)
 
-Beyond the eight built-ins, a user can define an **original** restraint as a backend-agnostic
+Beyond the nine built-ins, a user can define an **original** restraint as a backend-agnostic
 energy `energy(ctx) -> scalar`. Two authoring paths, ONE mechanism:
 - **config (expression DSL)**: a `custom_restraints_config` entry with an `energy` formula string
   over a shared vocabulary + named `selections` (e.g. `"(distance(A,B) - distance(C,D))**2"`).
@@ -727,7 +728,7 @@ compile per structure, VdW mode and active custom subset, vs `gpu_cg`'s process-
 JAX uses `lax.cond` for custom gates; zero-weight closures are omitted. Disabled formulas
 must never be evaluated and multiplied by zero, because an undefined value would still poison gradients. Any
 compile failure still degrades to the eager CG, which sums the identical terms. `import
-rgi_toolkit` stays numpy-only (torch/jax pulled lazily per backend by `get_ops`). Harness:
+rgi_toolkit` loads NumPy and RDKit; torch/jax are loaded per backend by `get_ops`. Harness:
 `tests/test_custom.py` + `tests/test_custom_move.py` (both paths × 3-backend energy/grad
 parity + move pinning + jax-scan + torch minimize + DSL safety). Full config surface: `docs/config.md`.
 
@@ -868,10 +869,8 @@ show up in the `distances=` / `n_group_plane=` counts). Full field surface: `doc
   are checked against independent finite differences and custom energy closures.
   Weights can affect convergence speed and the compromise between competing terms.
 - Top-level `import rgi_toolkit` must not pull a compute backend — keep heavy imports lazy
-  inside the backend modules. Measured (2026-08-21): the eager set is **numpy + rdkit**
+  inside the backend modules. The eager imports include **numpy + rdkit**
   (`featurizer.py` `from rdkit import Chem`, and `__init__` imports `featurizer`); torch,
-  jax, gemmi and biopython all stay unloaded. So "numpy-only" as written elsewhere in this
-  file means "no torch/jax/gemmi/biopython" — rdkit is a hard eager dependency, not a
-  lazy one. Verify with
+  jax, gemmi and biopython stay unloaded until needed. Verify with
   `.venv/bin/python -c "import sys, rgi_toolkit; print([m for m in ('torch','jax','gemmi','Bio') if m in sys.modules])"`.
 - GPU tests are marked `@pytest.mark.gpu` and excluded in CI.

@@ -39,5 +39,6 @@ For a form-based introduction, use the [ColabFold notebooks](colabfold.md).
   location differs by tool.
 - The backend is inferred from the predictor. `gpu` selects the PyTorch device and is inert for
   AlphaFold 3's JAX path.
-- Config validation checks schema and selection syntax, but it cannot prove that a selection
-  matches the intended atoms. The runtime `built spec:` counts provide that check.
+- Config validation checks schema and selection syntax. Runtime `built spec:` counts confirm
+  which restraints were built; verify the selected atom identities separately against the input
+  structure to check that the selections match the intended atoms.

@@ -2,16 +2,15 @@
 
 A custom restraint is a backend-agnostic energy ``energy(ctx) -> scalar`` written either as
 a config ``energy`` formula string or a Python ctx function. Both compile to a closure that
-the optimizers add to the CG objective. This harness drives BOTH authoring paths through:
+the optimizers add to the objective. This harness drives both authoring paths through:
 
-  (a) 3-backend energy + gradient parity. MOST custom energies use PLAIN centroids (no
-      rigid-translation stop-gradient trick), so unlike the built-in group restraints the
-      autodiff gradient matches the numpy finite-difference ground truth — a strict check
-      (test_custom_grad_matches_fd). EXCEPTION: kabsch / rmsd freeze the Kabsch rotation
-      with stop-gradient (the SVD is not differentiated), so — like the built-in rmsd term
-      — an FD gradient is INAPPLICABLE; those are checked torch-vs-jax instead
-      (test_custom_kabsch_grad_torch_vs_jax). `move` pinning is likewise stop-gradient and lives
-      in test_custom_move.py with torch-vs-jax checks. Do NOT add either case under the FD test.
+  (a) Three-backend energy and gradient parity. Custom and built-in group restraints use
+      ordinary centroid mean derivatives. Unpinned cases without stopped derivatives are
+      checked against numpy finite differences (test_custom_grad_matches_fd). Kabsch/RMSD
+      cases freeze the rotation with stop-gradient and use torch-vs-jax checks
+      (test_custom_kabsch_grad_torch_vs_jax). `move` pinning also stops derivatives and is
+      covered by torch-vs-jax checks in test_custom_move.py. Keep those cases separate from
+      the unrestricted finite-difference tests.
   (b) the torch eager CG: a custom distance restraint converges onto its target.
   (c) the jax minimizer (the AF3 lax.scan closure): converges, NaN-free.
 

@@ -1,8 +1,8 @@
 """Restraint-Guided Inference toolkit.
 
-The top-level package imports only numpy-level modules so that ``import rgi_toolkit``
-works without torch or jax installed. Heavy backends (torch/jax) are imported
-lazily by ``combined.py`` / the ``energy`` and ``optim`` subpackages.
+The top-level package loads NumPy and RDKit but works without torch or jax installed.
+Compute backends (torch/jax) are imported lazily by ``combined.py`` and the ``energy``
+and ``optim`` subpackages.
 """
 
 import logging

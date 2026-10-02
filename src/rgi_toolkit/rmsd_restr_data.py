@@ -89,10 +89,11 @@ logger = logging.getLogger(__name__)
 
 def build_resid_map(atoms, ref_atoms, ref_path) -> dict:
     """Sequence-align each polymer chain present on both sides and return
-    ``{(chain, target_resid): ref_resid}``. Polymer typing prefers an explicit
-    ``mol_type`` (boltz/esm set it) and otherwise derives it from the residue name
-    (protenix/of3/chai don't set mol_type), so only resname must be plumbed. Shared by the
-    built-in RMSD restraint and the custom ``rmsd()`` primitive, so both align identically."""
+    ``{(chain, target_resid): ref_resid}``. Polymer typing uses an explicit ``mol_type``
+    when present and falls back to the residue name only when it is absent. Polymer
+    residues need names for sequence alignment. The built-in RMSD restraint and custom
+    ``rmsd()`` primitive share this mapping.
+    """
 
     def seqs(records, resname_attr, side):
         by_chain: dict = {}

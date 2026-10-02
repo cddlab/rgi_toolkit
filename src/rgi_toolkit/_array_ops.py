@@ -1,8 +1,7 @@
 """Lazy backend array-operation facade shared by built-in and custom restraints.
 
-Geometry is implemented once against this small interface.  Only framework spelling
-differences live here, and torch/jax remain lazy imports so importing :mod:`rgi_toolkit`
-still requires NumPy only.
+Geometry is implemented once against this small interface. Framework spelling
+differences live here; torch and jax are imported when their backend is requested.
 """
 
 from __future__ import annotations

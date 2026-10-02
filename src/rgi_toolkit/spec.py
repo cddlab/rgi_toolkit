@@ -173,13 +173,17 @@ class VdwConfig:
     move (they live in ``active_sites``, addressed by ``ligand_local``); the
     background atoms (every non-padding atom not optimised — protein, DNA/RNA, any
     non-restrained ligand) are read from the full coordinate tensor via
-    ``background_global`` and held *fixed*. CG rebuilds a fixed-width Verlet-style
-    neighbour list between bounded iteration blocks, so only the ligand is pushed out
-    of contacts while the optimised variable set stays limited to ``active_sites``. The
-    penalty is
-    ``weight * (clamp(d - scale*contact, max=0)/ESD)**2`` summed over candidates.
-    ``chemistry`` holds small type tables and sparse exclusions. Without it, explicit
-    radii use their sum as the contact distance and ESD 0.2 A.
+    ``background_global`` and held fixed. The neighbour-list path checks trial-coordinate
+    displacement before each objective evaluation and rebuilds when the Verlet skin
+    limit is exceeded. The bounded native CUDA graph path uses complete pair sums.
+    Optimization remains limited to ``active_sites`` in both paths.
+
+    ``chemistry`` holds contact tables, inverse-variance factors and sparse exclusions.
+    With the default ``use_esd: false``, the penalty is
+    ``weight * clamp(d - scale*contact, max=0)**2`` summed over eligible pairs.
+    ``use_esd: true`` divides the residual by ESD before squaring. Without chemistry
+    tables, the legacy explicit-radii path uses their sum as the contact distance and
+    always applies ESD 0.2 A.
     """
 
     weight: float
@@ -339,9 +343,9 @@ class GroupAngleArrays:
     on group centroids. The penalty mirrors the distance restraint's four ``geom_type``
     codes (harmonic / flat-bottomed / lower / upper) on the angle value, with
     ``target1``/``target2`` the bound(s) in radians. ``move_free`` is a per-group mask
-    (1 = free, 0 = pinned): a pinned group's centroid is stop-gradient'd so the CG holds it
-    fixed for this term. Optimised by the CG solver (NOT closed-form like
-    distance), so the group atoms join active_sites; the centroid-only energy gradient is
+    (1 = free, 0 = pinned): a pinned group's centroid is stop-gradient'd so the solver holds
+    it fixed for this term. Group atoms join active_sites and use the same CG or L-BFGS
+    solver as distance restraints. The centroid-only energy gradient is
     uniform across each free group, so the solver translates it rigidly. Active window
     ``stop_sigma <= sigma <= start_sigma``. All ``*_idx`` are local indices into
     active_sites; padding columns are neutralised by ``grp*_mask``.

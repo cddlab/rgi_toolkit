@@ -17,8 +17,8 @@ From these it provides:
   - ConformerAdapter.num_atoms / get_elements / iter_ligand_confs
     (ligand bond/angle/chiral + intramolecular VdW)
 
-Like the other adapters it imports no framework: tensors are duck-typed to numpy
-(``.detach().cpu().numpy()`` when present) so ``import rgi_toolkit`` stays numpy-only.
+This adapter imports no predictor framework: tensors are duck-typed to numpy
+(``.detach().cpu().numpy()`` when present). Ligand chemistry uses RDKit.
 
 Conformer bonds come from ``token_bonds`` (the real CCD/SMILES connectivity) rather
 than perceived geometry — more reliable than the chai path. ``token_bonds`` is itself

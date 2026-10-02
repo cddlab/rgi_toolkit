@@ -65,7 +65,8 @@ Nine **built-in** restraint types, all minimized during the denoising loop to gu
 - **angle** — the angle of three atom groups' centroids (vertex = group 2), in degrees;
   the angular analogue of the distance restraint.
 - **dihedral** — the dihedral of four atom groups' centroids (axis = groups 2–3), in degrees.
-- **improper** — the signed out-of-plane angle of four atom groups' centroids, in degrees.
+- **improper** — the same signed torsion as **dihedral**, with separate restraint settings;
+  four atom groups' centroids, axis = groups 2–3, in degrees.
 - **chiral** — the signed volume of four atom groups' centroids, centered on group 1,
   in Angstrom cubed; the selection-driven counterpart of conformer `chiral`.
 - **plane** — best-fit-plane flatness of any atom group you select (out-of-plane RMS, Angstrom):
@@ -81,8 +82,9 @@ Beyond these nine built-ins you can define your **own** restraint — see
 [Custom restraints](#custom-restraints) below.
 
 The default `method='CG'` solver (a nonlinear conjugate gradient with autodiff gradients)
-runs on GPU or CPU via the same torch/jax backend (`gpu: false` runs it on CPU); all
-restraints — distance included — are minimised by this solver.
+runs on GPU or CPU through torch or jax. For Torch, `gpu: false` forces CPU optimization;
+otherwise the input coordinates' device is used. JAX uses its selected device and ignores
+`gpu`. All restraints, including distance, use the selected solver.
 CG uses SciPy-style PR+ with `line_search: strong-wolfe` (default) or `armijo`,
 without a per-atom displacement cap. Mixed distance/conformer CG uses a fixed coordinate transformation
 to improve conditioning while preserving every energy and weight. Dynamic VdW caches
@@ -134,15 +136,15 @@ pre-rename commit.
 from rgi_toolkit.combined import CombinedRestraints
 
 restraints_config = {
-    "gpu": True,                 # device: True=GPU, False=CPU. backend: torch (default) / jax
+    "gpu": True,                 # False forces Torch CPU optimization; JAX ignores this flag.
     "method": "CG",
     "max_iter": 200,
     "verbose": True,
-    # NOTE: start_sigma / stop_sigma are NOT top-level keys (a top-level start_sigma
-    # raises). They are set per distance/rmsd/group entry and once inside
+    # start_sigma / stop_sigma are rejected as top-level keys.
+    # They are set per distance/rmsd/group entry and once inside
     # conformer_restraints_config. start_sigma omitted -> active at every step (set it,
     # e.g. 1.0, to act only late); stop_sigma omitted -> never released.
-    "distance_restraints_config": [          # a LIST of entries
+    "distance_restraints_config": [          # a list of entries
         {
             "atom_selection1": "chain A and resid 10",
             "atom_selection2": "chain B and resid 20",
@@ -156,7 +158,7 @@ restraints_config = {
             "atom_selection1": "chain A and resid 1 to 10",
             "atom_selection2": "chain A and resid 40 to 50",
             "atom_selection3": "chain A and resid 80 to 90",
-            "harmonic": {"target_angle": 90.0},   # DEGREES
+            "harmonic": {"target_angle": 90.0},   # degrees
         }
     ],
     "conformer_restraints_config": {
@@ -165,7 +167,7 @@ restraints_config = {
         # "torsion": {"weight": 1.0},        # optional chi / omega / sp2 torsions
         # "plane": {"weight": 1.0},          # optional; overlapping cistrans/torsion takes priority
     },
-    "custom_restraints_config": [            # define your OWN restraint as a formula (DSL)
+    "custom_restraints_config": [            # custom energy formula (DSL)
         {"name": "symmetric",               # keep two inter-domain distances equal
          "energy": "(distance(A, B) - distance(C, D))**2",
          "selections": {"A": "chain A and resid 10", "B": "chain B and resid 10",
@@ -173,11 +175,11 @@ restraints_config = {
     ],
     # "rmsd_restraints_config": [{"ref_pdb": "ref.pdb", "harmonic": {"target_rmsd": 0.0}}],
     # "dihedral_restraints_config": [...],   # group-centroid dihedral: 4 groups, axis = 2-3
-    # "improper_restraints_config": [...],   # signed out-of-plane angle: 4 groups
+    # "improper_restraints_config": [...],   # same torsion as dihedral, separate settings
     # "chiral_restraints_config": [...],     # signed volume: 4 groups, center = 1
 }
 
-# ONE instance per structure (not a singleton). setup() takes the config dict.
+# Create one instance per structure. setup() takes the config dict.
 restr = CombinedRestraints()
 restr.setup(adapter, nbatch=multiplicity, config=restraints_config)
 
@@ -198,7 +200,7 @@ of `minimize`.
 
 The default CG uses SciPy 1.17.1 PR+ with strong-Wolfe searches. Set
 `line_search: armijo` for historical backtracking and the small-energy-change
-stop, or `method: l-bfgs` with no `line_search` key for L-BFGS. Set
+stop, or `method: l-bfgs` with no `line_search` key for L-BFGS. For CG, set
 `return_info=True` on `minimize` or `get_minimizer` to obtain `(coords, CGInfo)`
 and distinguish gradient convergence, a small energy change, search failure and an
 iteration limit. A failed CG search keeps the last accepted coordinates.
@@ -233,8 +235,8 @@ per-chain 1-based ordinal:
 | ---------------- | -------------------------------------- | ---------------------------------- |
 | `harmonic`       | `target_distance`                      | Quadratic penalty at all distances |
 | `flat-bottomed`  | `target_distance1`, `target_distance2` | No penalty between d1–d2           |
-| `flat-bottomed1` | `target_distance1`                     | No penalty below d1                |
-| `flat-bottomed2` | `target_distance2`                     | No penalty above d2                |
+| `flat-bottomed1` | `target_distance1`                     | Penalty only below d1              |
+| `flat-bottomed2` | `target_distance2`                     | Penalty only above d2              |
 
 Distance is calculated between the centroids (unweighted geometric centers) of the two selected atom groups (`calc_method: "unfixed-absolute"`).
 
@@ -295,7 +297,7 @@ plane_restraints_config:
     start_sigma: 2.0
     flat-bottomed2: {target_plane2: 0.1}
 
-  # two stacked bases share ONE plane; only the first moves
+  # two stacked bases share one plane; only the first moves
   - atom_selection1: "chain A and resid 10 and not backbone"
     atom_selection2: "chain B and resid 24 and not backbone"
     move: 1
@@ -357,7 +359,7 @@ restr = CombinedRestraints()
 restr.add_custom(                         # throwaway: a callable, no registration
     fn=lambda ctx: (ctx.distance("chain A and resid 10", "chain B and resid 10")
                   - ctx.distance("chain A and resid 90", "chain B and resid 90"))**2)
-restr.setup(adapter, config=restraints_config)   # add_custom BEFORE setup
+restr.setup(adapter, config=restraints_config)   # add_custom must precede setup
 
 @custom_restraint("symmetric")            # reusable: config can {use: "symmetric"}
 def energy(ctx): ...

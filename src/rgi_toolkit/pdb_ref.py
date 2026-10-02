@@ -1,8 +1,7 @@
 """PDB / mmCIF reader for RMSD reference structures, backed by gemmi.
 
-rgi_toolkit core stays numpy-only at import (``import rgi_toolkit`` needs numpy only), so
-gemmi is imported **lazily** inside the reader functions -- only the RMSD restraint, when
-it actually resolves a ``ref_pdb`` / ``ref_cif``, pulls it in. Both readers emit the SAME
+Gemmi is imported lazily inside the reader functions when a ``ref_pdb`` or ``ref_cif``
+is resolved. Both readers emit the same
 ``PdbAtom`` list for the same structure (so ``ref_pdb`` / ``ref_cif`` are interchangeable
 downstream): the format-specific extraction normalises each atom to a
 ``(group_pdb, chain, res_key, name, res_name, element, x, y, z)`` row, and the shared

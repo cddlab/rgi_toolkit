@@ -65,10 +65,11 @@ except Exception:
 
 
 def _energy(a, prepared):
-    """Pure pre-gated restraint energy (distance + conformer + RMSD + group; every active
-    term, distance now an autodiff CG term). ``prepared`` carries the noise gate folded into
-    its masks, so there is no ``sigma`` argument -- which is what lets the compiled graph be
-    reused across steps."""
+    """Sum array-backed restraint energies with activation gates folded into the masks.
+
+    ``prepared`` includes distance, conformer, RMSD and group terms. No ``sigma`` argument
+    is needed, so the compiled graph can be reused across diffusion steps.
+    """
     return torch_energy.total_energy(a, prepared, sigma=None)
 
 

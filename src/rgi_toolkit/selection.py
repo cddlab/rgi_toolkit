@@ -115,13 +115,13 @@ def _backbone_names(kind: str) -> frozenset:
 
 
 class Backbone(SelectionNode):
-    """Matches POLYMER backbone atoms (MDTraj ``backbone``): protein N/CA/C/O(/OXT) or
-    the nucleic sugar-phosphate. GATED on polymer type, so a ligand atom merely named
-    "C"/"N"/"O"/"P" never matches (organic ligands are full of those). Polymer type is
-    ``mol_type`` where the adapter sets it (boltz/esm/AF3), else derived from
-    ``resname`` (chai/of3/protenix) -- so the candidate dict must carry ``resname``.
-    A modified residue (e.g. MSE) counts as polymer only where the framework typed it;
-    see ``polymer_type`` for that accepted cross-tool divergence."""
+    """Match polymer backbone atoms: protein N/CA/C/O(/OXT) or nucleic sugar-phosphate.
+
+    Polymer typing uses ``mol_type`` when present, with ``resname`` fallback only when
+    it is absent. Both annotations are read from the candidate dict. A ligand atom named
+    "C"/"N"/"O"/"P" is excluded by its polymer type. Modified residues such as MSE count
+    as polymer only when explicitly typed by the framework; see ``polymer_type``.
+    """
 
     def eval(self, mol: Dict[str, Union[str, int]]) -> bool:
         kind = polymer_type(mol.get("mol_type"), mol.get("resname"))

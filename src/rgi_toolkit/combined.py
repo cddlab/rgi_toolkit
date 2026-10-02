@@ -41,11 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 def _enable_verbose_logging() -> None:
-    """Attach a stdout handler to the rgi_toolkit logger for verbose runs.
-
-    Libraries normally stay silent (NullHandler in __init__). When the user sets
-    verbose=true we surface restraint stats on stdout for debugging.
-    """
+    """Enable verbose logging, adding a stderr handler when none is configured."""
     pkg = logging.getLogger("rgi_toolkit")
     if not any(isinstance(h, logging.StreamHandler) for h in pkg.handlers):
         handler = logging.StreamHandler()
@@ -410,11 +406,12 @@ class CombinedRestraints:
 
     @staticmethod
     def _infer_backend(coords) -> str:
-        """Infer the optimizer backend from the coords object, import-free (keeps the
-        ``import rgi_toolkit`` numpy-only invariant). A jax array/tracer lives under the
-        ``jax``/``jaxlib`` top-level package; everything else (torch.Tensor, numpy
+        """Infer the optimizer backend without importing torch or jax.
+
+        A jax array/tracer lives under the ``jax``/``jaxlib`` top-level package;
+        everything else (torch.Tensor, numpy
         array, list, None) routes to the torch optimizer (which handles torch tensors
-        AND numpy arrays). Walk the MRO so both the concrete ``jaxlib._jax.ArrayImpl``
+        and numpy arrays). Walk the MRO so both the concrete ``jaxlib._jax.ArrayImpl``
         and the public ``jax.Array`` base are caught."""
         for klass in type(coords).__mro__:
             root = (klass.__module__ or "").split(".", 1)[0]

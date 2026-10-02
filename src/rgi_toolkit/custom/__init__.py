@@ -1,4 +1,4 @@
-"""Custom restraints — define an ORIGINAL restraint and run it, two ways:
+"""Custom restraints defined by an expression or a Python function.
 
 * **config (expression DSL)**: a ``custom_restraints_config`` entry with an ``energy``
   formula string over a shared geometry+math+penalty vocabulary and named selections,
@@ -9,9 +9,8 @@
   ``{"fn": ...}``) or registered with ``@custom_restraint("name")`` and referenced from
   config by ``{"use": "name"}``.
 
-Both compile to one backend-agnostic energy that runs on numpy / torch / jax. This package
-imports numpy only (torch/jax are pulled lazily per backend), so ``import rgi_toolkit`` stays
-torch/jax-free.
+Both compile to a backend-agnostic energy that runs on numpy / torch / jax.
+Torch and JAX are imported lazily when their backend is used.
 """
 
 from __future__ import annotations

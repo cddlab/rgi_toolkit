@@ -1,7 +1,7 @@
 """Dictionary-free polymer chemistry and periodic reference torsions.
 
 RDKit's standard-residue templates supply bond orders without network access.
-They are used only for chemical classification and the new torsion terms; they
+They are used only for chemical classification and torsion terms; they
 never replace the predictor's reference coordinates or protonate the model.
 """
 

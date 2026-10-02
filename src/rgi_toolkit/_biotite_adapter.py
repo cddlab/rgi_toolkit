@@ -1,15 +1,13 @@
-"""Shared biotite-``AtomArray`` extraction for protenix, openfold3, and OpenDDE.
+"""Shared biotite-``AtomArray`` extraction for Protenix, OpenFold3, OpenDDE, and RF3.
 
-Both tools expose the SAME biotite ``AtomArray`` type (per-atom element/chain + a
-``BondList``), so ``get_elements`` and the ligand-conformer loop are identical up to
-a few framework knobs: which annotation marks a ligand atom, which chain-id field
-names the chain, where the conformer geometry comes from, and the default
-``conformer_restraints`` opt-in when the per-ligand annotation is absent. Those knobs
-are parameters here so the two adapters stay thin and can't drift apart.
+These adapters share element extraction and ligand-conformer construction from an
+``AtomArray`` with per-atom annotations and a ``BondList``. Parameters select the
+ligand annotation, chain-id field, conformer-coordinate source, and default
+``conformer_restraints`` opt-in when the per-ligand annotation is absent.
 
-Like the adapters, this module does NOT import biotite — the ``AtomArray`` is
-duck-typed (``.element`` / ``.bonds`` / ``.get_annotation_categories`` / named
-annotations), so ``import rgi_toolkit`` stays numpy-only.
+The ``AtomArray`` is duck-typed through ``.element``, ``.bonds``,
+``.get_annotation_categories`` and named annotations, so this module does not import
+biotite. Ligand chemistry uses RDKit.
 """
 
 from __future__ import annotations

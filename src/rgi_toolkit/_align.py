@@ -10,7 +10,7 @@ this also dodges the 1-letter collision between nucleotides (A/C/G/T/U) and amin
 The alignment itself is delegated to Biopython's :class:`Bio.Align.PairwiseAligner`
 (global mode, free end gaps, affine gaps ``open=-11`` / ``extend=-1``, protein = BLOSUM62,
 NA/other = ``+5`` / ``-4`` identity). ``Bio`` is imported **lazily** inside
-:func:`pair_residues` so ``import rgi_toolkit`` stays numpy-only.
+:func:`pair_residues`, so package import does not load Biopython.
 
 The public entry point is :func:`pair_residues`. It takes the two chains' ordered
 ``(resid, resname)`` lists plus the polymer ``mol_type`` and returns the aligned
