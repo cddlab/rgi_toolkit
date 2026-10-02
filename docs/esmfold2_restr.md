@@ -10,8 +10,10 @@ ESMFold2 + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided
 > writes a validated `restraints_config` where this tool expects it. Use it when hand-writing the
 > full config below is unnecessary.
 
-ESMFold2 folds in **single-sequence mode** (a language-model folder — no MSA, hence no
-MSA-server option).
+ESMFold2 supports single-sequence input and optional MSAs supplied through
+`ProteinInput(msa=...)`. The complete example below uses single-sequence input.
+The ESMFold2 scripts in [`examples/`](../examples/README.md#msa-inputs) require a
+full ColabFold A3M via `MSA_A3M`.
 
 Use **`esm_restr` on `rgi-integration`**. Since ESM 3.4.1, the native model and
 diffusion loop live in `esm/models/esmfold2/`. `ESMFold2InputBuilder.fold` builds

@@ -2,7 +2,7 @@
 # OpenDDE RGI example -- dual-reference QBP RMSD targets: open 2.65 A, closed 2.65 A
 # External feature searches are disabled; the OpenDDE checkpoint and common runtime
 # files must already be installed. Run on a GPU compute node, not a login node.
-# Requires the OpenDDE_restr checkout to exist as a sibling of rgi_toolkit/.
+# Requires the OpenDDE_restr checkout to exist as a sibling of RGI-toolkit/.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WS="$HERE"; while [ "$WS" != / ] && [ ! -d "$WS/RGI-toolkit" ]; do WS="$(dirname "$WS")"; done

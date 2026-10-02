@@ -1,9 +1,8 @@
 #!/bin/bash
 # openfold-3 RGI example -- dual-reference QBP RMSD targets: open 2.65 A, closed 2.65 A
-# MSA is fetched from a server so the example is
-# self-contained. (AlphaFold3 is the exception -- it needs external model params + DBs.)
+# MSA is fetched from a server.
 # GPU only: run on a GPU compute node (not a shared login node).
-# Requires the openfold-3_restr checkout to exist as a sibling of rgi_toolkit/.
+# Requires the openfold-3_restr checkout to exist as a sibling of RGI-toolkit/.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WS="$HERE"; while [ "$WS" != / ] && [ ! -d "$WS/RGI-toolkit" ]; do WS="$(dirname "$WS")"; done

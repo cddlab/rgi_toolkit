@@ -15,6 +15,5 @@ WS="$HERE"; while [ "$WS" != / ] && [ ! -d "$WS/RGI-toolkit" ]; do WS="$(dirname
 done )
 PIXI="$WS/esm_restr/.pixi-bin/pixi"; [ -x "$PIXI" ] || PIXI=pixi
 cd "$HERE"
-# Use the native ESM model and its RGI sampling hook.
 "$PIXI" run --manifest-path "$WS/esm_restr/pyproject.toml" \
     env MSA_A3M="$MSA_A3M" python "$HERE/run_rmsd.py"

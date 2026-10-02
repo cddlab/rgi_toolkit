@@ -1,11 +1,8 @@
 # rgi_toolkit RGI examples
 
-Representative inputs from the paper's four protein state-control benchmarks.
+Examples of distance, angle, RMSD, and custom restraints for protein structures.
 Each `<type>/<tool>/` directory contains one restraint setting and a `run.sh` for
-one prediction. Each input includes its restraint settings inline. The paper uses
-five target settings and nine seeds per setting. These examples retain the same
-restraint objective, atom selections, activation window, and minimization settings
-at the representative target.
+one prediction. Each input includes its restraint settings inline.
 
 | Directory | System | Representative restraint |
 |---|---|---|
@@ -14,9 +11,8 @@ at the representative target.
 | `rmsd/` | QBP | Open/closed reference RMSD targets of 2.65/2.65 Å on 220 common Cα atoms |
 | `custom/dist-diff/` | DgoT, 419 residues | ΔD = D_in − D_out = 0.8 Å |
 
-The six paper predictors are `boltz-2`, `protenix-v2`, `alphafold3`, `openfold-3`,
-`chai`, and `esmfold2`. The `opendde` directories demonstrate the same restraints
-in another supported predictor; OpenDDE was not included in the paper benchmark.
+Examples are provided for `boltz-2`, `protenix-v2`, `alphafold3`, `openfold-3`,
+`chai`, `esmfold2`, and `opendde`.
 
 ## Run
 
@@ -40,9 +36,9 @@ line search and `gtol=1e-5`; `max_iter` is 1000 for RMSD and 100 otherwise.
 ## Restraint settings
 
 Distance, angle, and custom restraints use `start_sigma=99999999` and remain
-active through the final diffusion step. The paper's distance targets are
-25.00, 26.02, 27.05, 28.08, and 29.10 Å. Its angle targets are 60.90, 66.88,
-72.85, 78.82, and 84.80°.
+active through the final diffusion step. Example target grids are
+25.00, 26.02, 27.05, 28.08, and 29.10 Å for distance, and 60.90, 66.88,
+72.85, 78.82, and 84.80° for angle.
 
 RMSD uses two simultaneous harmonic restraints with `pairing: align`,
 `start_sigma=99999999`, and `stop_sigma=1.5`. The five (open, closed) target pairs
@@ -61,25 +57,24 @@ the two reference CIFs from RCSB when needed; downloaded files are ignored.
 
 For DgoT, D_in = distance(A, B) is the cytoplasmic domain-centroid distance and
 D_out = distance(C, D) is the periplasmic distance. The harmonic custom loss is
-`((distance(A, B) - distance(C, D)) - 0.8)**2`. The paper's ΔD targets are −4.3,
+`((distance(A, B) - distance(C, D)) - 0.8)**2`. Example ΔD targets are −4.3,
 −1.75, 0.8, 3.35, and 5.9 Å. Group D excludes query residues 251–258 and 263–264,
 which are absent from the outward-occluded reference 6E9O. The query spans native
 residues 27–445; selections always use query-local, per-chain residue ordinals.
 
 ## MSA inputs
 
-The paper supplies the same full ColabFold A3M for each protein across all six
-predictors. Restraint settings alone do not reproduce a particular prediction:
-the same MSA, model checkpoint, and seed are also required.
+For comparisons across predictors, use the same full ColabFold A3M for each
+protein. Reproducing a prediction also requires the same model checkpoint and
+seed.
 
-The examples retain convenient MSA acquisition for Boltz-2, Protenix-v2,
-OpenFold3, and Chai. Those runners use an MSA server. AlphaFold3 uses its local
-data pipeline and requires `MODEL_DIR` and `DB_DIR`. ESMFold2 reads the full A3M
-from `MSA_A3M`, checks its query against the example sequence, and uses the paper
-settings `msa_max_depth=1024` and `msa_column_mask_rate=0.1`, with 20 recurrent
+Boltz-2, Protenix-v2, OpenFold3, and Chai use an MSA server. AlphaFold3 uses its
+local data pipeline and requires `MODEL_DIR` and `DB_DIR`. ESMFold2 reads the full
+A3M from `MSA_A3M`, checks its query against the example sequence, and uses
+`msa_max_depth=1024` and `msa_column_mask_rate=0.1`, with 20 recurrent
 loops and 200 diffusion steps. It does not fall back to a single-sequence input.
 
-To reuse a fixed paper MSA, provide it through the predictor's native input:
+To reuse a precomputed MSA, provide it through the predictor's native input:
 
 | Predictor | Precomputed MSA input |
 |---|---|
@@ -90,7 +85,7 @@ To reuse a fixed paper MSA, provide it through the predictor's native input:
 | Chai | Aligned Parquet files through `--msa-directory`; omit `--use-msa-server` |
 | ESMFold2 | `MSA_A3M` |
 
-OpenDDE disables external MSA and template searches in its extension examples.
+OpenDDE disables external MSA and template searches in its examples.
 
 ## Validation
 

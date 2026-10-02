@@ -2,7 +2,7 @@
 # OpenDDE RGI example -- group-centroid angle -> 72.85 deg (ADK NMP-CORE-LID)
 # External feature searches are disabled; the OpenDDE checkpoint and common runtime
 # files must already be installed. Run on a GPU compute node, not a login node.
-# Requires the OpenDDE_restr checkout to exist as a sibling of rgi_toolkit/.
+# Requires the OpenDDE_restr checkout to exist as a sibling of RGI-toolkit/.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WS="$HERE"; while [ "$WS" != / ] && [ ! -d "$WS/RGI-toolkit" ]; do WS="$(dirname "$WS")"; done

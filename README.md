@@ -333,8 +333,8 @@ validation rules, and gating details.
 
 ### Custom restraints
 
-Define your **own** restraint — not one of the eight built-ins — as a differentiable energy,
-two ways (same vocabulary, both run on every backend):
+Define a custom restraint as a differentiable energy. Both authoring methods use
+the same vocabulary and run on every backend:
 
 **Config only** — write the energy as a math **formula** over named selections, no Python:
 
