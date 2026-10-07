@@ -434,6 +434,26 @@ parity and representative public-API minimization tests; exhaustive combinations
 compiler checks, and GPU tests remain in the local suites. See
 [testing](docs/testing.md) for coverage and GPU environment setup.
 
+## Citation
+
+If you use RGI-toolkit, please cite:
+
+Hori, T., Moriwaki, Y. & Ishitani, R. (2026). *RGI-Toolkit: Differentiable Restraints
+for Controllable Biomolecular Structure Prediction.* bioRxiv, preprint, version 1.
+[doi:10.64898/2026.10.05.756905](https://doi.org/10.64898/2026.10.05.756905).
+
+```bibtex
+@article{hori2026rgi,
+  author  = {Hori, Tatsuki and Moriwaki, Yoshitaka and Ishitani, Ryuichiro},
+  title   = {{RGI-Toolkit}: Differentiable Restraints for Controllable Biomolecular Structure Prediction},
+  journal = {bioRxiv},
+  year    = {2026},
+  doi     = {10.64898/2026.10.05.756905},
+  url     = {https://www.biorxiv.org/content/10.64898/2026.10.05.756905v1},
+  note    = {Preprint, version 1}
+}
+```
+
 ## References
 
 The **plane** restraints — both the conformer `plane` term and the standalone
