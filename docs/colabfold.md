@@ -1,13 +1,14 @@
 # RGI in ColabFold notebooks
 
 Open [ColabFold2 preview](https://colab.research.google.com/github/th2ch-g/ColabFold_restr/blob/rgi-integration/ColabFold2_preview.ipynb).
-Expand **RGI (optional)** after **Input sequences** to edit the ordinary Colab form.
+Expand **RGI: Making restraint-guided protein folding inference accessible to all! (optional)**
+after **Input sequences** to edit the ordinary Colab form.
 The section starts collapsed; its fields are editable **before any cell runs**.
 It needs no widget, Add button or separate confirmation.
 
 1. Choose an RGI-supported model, for example **openbind0**, in **Install dependencies**.
 2. Enter your molecules in **Input sequences**.
-3. Expand **RGI (optional)**, check **use_rgi** and fill the fields for the restraints you need.
+3. Expand the **RGI** form, check **use_rgi** and fill the fields for the restraints you need.
 4. Use **Runtime → Run all**.
 
 For vanilla, leave **use_rgi** off. The preview's default model, OpenBind-0, supports
@@ -20,7 +21,7 @@ The form values live in notebook source and are retained when you save the noteb
 
 ## First example: a distance of 25 Å
 
-For protein chain A with at least 50 residues, set these fields in **RGI (optional)**:
+For protein chain A with at least 50 residues, set these fields in the **RGI** form:
 
 | Field | Enter |
 | --- | --- |

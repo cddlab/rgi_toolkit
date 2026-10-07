@@ -13,7 +13,7 @@ import json
 from rgi_toolkit.config import resolve_restraints_config
 from rgi_toolkit.notebook import compose_config
 
-COLAB_FORM = """#@title RGI (optional)
+COLAB_FORM = """#@title RGI: Making restraint-guided protein folding inference accessible to all! (optional)
 #@markdown Fill in this form before **Runtime → Run all**. Leave `use_rgi` off for vanilla. Leave unused restraint
 #@markdown fields empty.
 use_rgi = False #@param {type:"boolean"}
@@ -180,7 +180,7 @@ def config_from_fields(fields, *, base_dir=None):
             )
     if not items and not any(key.endswith("_restraints_config") for key in settings):
         raise ValueError(
-            "RGI is on but no restraints are set. In RGI (optional), fill the two "
+            "RGI is on but no restraints are set. In the RGI form, fill the two "
             "distance_atom_selection fields and target_distance, select conformer_chains, "
             "or configure another type. Leave use_rgi off for vanilla."
         )
