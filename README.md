@@ -3,8 +3,8 @@
 Restraint-Guided Inference (RGI) toolkit for diffusion-based structure predictors
 (PyTorch and JAX).
 
-The documentation covers the six models and restraint types described in the
-RGI-Toolkit paper.
+The documentation covers the restraint types described in the RGI-Toolkit
+paper and the predictor integrations listed below.
 
 | Model | Integration | Backend | Details |
 | --- | --- | --- | --- |
@@ -14,6 +14,8 @@ RGI-Toolkit paper.
 | **ESMFold2** | esmfold2 | torch | [ESMFold2](docs/esmfold2_restr.md) |
 | **OpenFold-3** | openfold-3 | torch | [OpenFold-3](docs/openfold-3_restr.md) |
 | **Chai-1** | chai-lab | torch | [Chai-1](docs/chai-lab_restr.md) |
+| **OpenDDE v1** | opendde | torch | [OpenDDE](docs/opendde_restr.md) |
+| **RF3** | foundry | torch | [RF3](docs/foundry_restr.md) |
 
 See each tool's guide in [`docs/`](docs/) for install / run details, and
 [`docs/config.md`](docs/config.md) for the `restraints_config` reference. For common failure modes
@@ -22,11 +24,14 @@ The [`implementation specification`](docs/SPEC.md) covers API contracts, energy 
 gradient conventions, optimizer references, and independent SciPy/E2E validation.
 
 **Ready-to-run samples live in [`examples/`](examples/)** — 4 restraint types (`distance/`,
-`angle/`, `rmsd/`, `custom/dist-diff/`) × 6 documented predictors, each a real system with a `run.sh`
+`angle/`, `rmsd/`, `custom/dist-diff/`) × 7 documented predictors, each a real system with a `run.sh`
 that finds the matching fork's env and folds. Start there rather than from the snippets
 below: `bash examples/distance/boltz-2/run.sh`. It needs the matching fork checked out as a
 sibling of `RGI-toolkit/` and a GPU node; see [`examples/README.md`](examples/README.md) for the
 per-tool prerequisites.
+
+RF3 examples and their validation runner are maintained in the
+[`foundry_restr` fork](https://github.com/cddlab/foundry_restr/tree/rgi-integration/examples/rgi).
 
 The documented restraint types are minimized during the denoising loop:
 

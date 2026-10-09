@@ -2,8 +2,9 @@
 
 [Documentation index](README.md)
 
-Every RGI tool is driven by one `restraints_config` dict (a YAML/JSON block for boltz / protenix /
-chai / AF3 / openfold, or a Python dict for ESMFold2 — see each tool's page for where it lives).
+Every RGI tool is driven by one `restraints_config` dict: a YAML/JSON block
+for Boltz, Protenix, Chai, AlphaFold3, OpenFold3, OpenDDE, and RF3, or a Python
+dict for ESMFold2. See each tool's guide for where to place it.
 This page documents configuration for the restraint types described in the paper.
 Each documented key includes its type, default, allowed values, and meaning.
 

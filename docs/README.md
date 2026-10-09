@@ -8,7 +8,7 @@ contracts, optimizer algorithms, and verification against independent implementa
 
 ## Tool guides
 
-These guides cover the six predictors described in the paper.
+Guides are available for the following predictor integrations.
 
 | Predictor         | Backend | Config placement                                              | Guide                              |
 | ----------------- | ------- | ------------------------------------------------------------- | ---------------------------------- |
@@ -18,6 +18,8 @@ These guides cover the six predictors described in the paper.
 | ESMFold2          | PyTorch | Python dict passed to `fold()`                                | [ESMFold2](esmfold2_restr.md)      |
 | OpenFold 3        | PyTorch | `queries.<name>.restraints_config` in the input JSON          | [OpenFold 3](openfold-3_restr.md)  |
 | Chai-1            | PyTorch | Top-level sidecar YAML passed with `--restraints-config-path` | [Chai-1](chai-lab_restr.md)        |
+| OpenDDE v1 | PyTorch | `restraints_config` in each fold-input JSON object | [OpenDDE](opendde_restr.md) |
+| RF3 (Foundry) | PyTorch | `restraints_config` in each input JSON job | [RF3](foundry_restr.md) |
 
 ## Recommended workflow
 

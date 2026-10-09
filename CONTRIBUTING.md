@@ -3,8 +3,8 @@
 `rgi_toolkit` is the shared **Restraint-Guided Inference (RGI)** engine — it injects
 differentiable distance / angle / dihedral / ligand-conformer / RMSD / custom restraints into
 the denoising loop of diffusion structure predictors, on both the **torch** and **jax**
-backends. The documentation covers six models: Boltz-2, Protenix-v2, Chai-1,
-OpenFold3, ESMFold2, and AlphaFold3.
+backends. The documentation covers eight models: Boltz-2, Protenix-v2, Chai-1,
+OpenFold3, ESMFold2, AlphaFold3, OpenDDE, and RF3.
 
 This guide is for people **hacking on the engine itself**. Start here, then:
 

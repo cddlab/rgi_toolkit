@@ -11,8 +11,8 @@ one prediction. Each input includes its restraint settings inline.
 | `rmsd/` | QBP | Open/closed reference RMSD targets of 2.65/2.65 Å on 220 common Cα atoms |
 | `custom/dist-diff/` | DgoT, 419 residues | ΔD = D_in − D_out = 0.8 Å |
 
-The six predictors covered here are `boltz-2`, `protenix-v2`, `alphafold3`,
-`openfold-3`, `chai`, and `esmfold2`.
+The seven predictors covered here are `boltz-2`, `protenix-v2`, `alphafold3`,
+`openfold-3`, `chai`, `esmfold2`, and `opendde`.
 
 ## Run
 
@@ -83,6 +83,8 @@ To reuse a precomputed MSA, provide it through the predictor's native input:
 | OpenFold3 | Chain `main_msa_file_paths`; use `--use-msa-server false` |
 | Chai | Aligned Parquet files through `--msa-directory`; omit `--use-msa-server` |
 | ESMFold2 | `MSA_A3M` |
+
+OpenDDE disables external MSA and template searches in its examples.
 
 ## Validation
 
