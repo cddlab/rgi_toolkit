@@ -34,28 +34,6 @@ In some cases, the model produces an intermediate, distorted conformation of a b
 This can leave the minimizer trapped in a local minimum with nonzero loss, even when a zero-loss
 conformation is possible. Increasing `max_iter` alone may not resolve such a local minimum.
 
-## How can I invert chirality or switch cis/trans in only part of a ligand?
-
-Add entries to `chiral_restraints_config` or `dihedral_restraints_config` under
-`restraints_config`. Use `atom_selection1` through `atom_selection4` with the atom-selection
-DSL (`chain`, `resid`, `name`, `index`, etc.) to select the atoms around the specific center or
-bond you want to change. For an atom-level restraint, each selection should identify one atom.
-
-- **Chiral inversion:** use `chiral_restraints_config` with the chiral center as
-  `atom_selection1` and three ordered neighbors as selections 2, 3, and 4. Set
-  `harmonic.target_chiral` to the desired signed volume in Angstrom cubed. For a fixed atom
-  order, reversing the target's sign reverses the preferred handedness.
-- **Cis/trans change:** use `dihedral_restraints_config` with four ordered atoms, placing the
-  bond to be changed between selections 2 and 3. Set `harmonic.target_dihedral` to the desired
-  torsion, typically 0 or 180 degrees for the chosen atom order.
-
-If conformer restraints are also enabled, check for conflicting `chiral`/`cistrans` targets
-and adjust the reference stereochemistry or the corresponding weights as needed. Standalone
-restraints add to the energy; they do not automatically replace conformer restraints.
-
-See [chiral restraints](config.md#chiral_restraints_config-list) and
-[dihedral restraints](config.md#dihedral_restraints_config-list) for the full configuration.
-
 ## Why does an RMSD restraint break the predicted structure?
 
 Consider combining the RMSD restraint with conformer restraints or setting `stop_sigma` to release

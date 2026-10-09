@@ -11,8 +11,8 @@ one prediction. Each input includes its restraint settings inline.
 | `rmsd/` | QBP | Open/closed reference RMSD targets of 2.65/2.65 Å on 220 common Cα atoms |
 | `custom/dist-diff/` | DgoT, 419 residues | ΔD = D_in − D_out = 0.8 Å |
 
-Examples are provided for `boltz-2`, `protenix-v2`, `alphafold3`, `openfold-3`,
-`chai`, `esmfold2`, and `opendde`.
+The six predictors covered here are `boltz-2`, `protenix-v2`, `alphafold3`,
+`openfold-3`, `chai`, and `esmfold2`.
 
 ## Run
 
@@ -51,8 +51,7 @@ Both fitting and RMSD calculation use these chain-A Cα selections:
 | 1GGG, open reference | 1–220 |
 | 1WDN, closed reference | 2–221 |
 
-The two entries therefore use the same 220 corresponding atoms. No protein
-conformer restraints or conformer opt-in flags are added. The runners download
+The two entries therefore use the same 220 corresponding atoms. The runners download
 the two reference CIFs from RCSB when needed; downloaded files are ignored.
 
 For DgoT, D_in = distance(A, B) is the cytoplasmic domain-centroid distance and
@@ -84,8 +83,6 @@ To reuse a precomputed MSA, provide it through the predictor's native input:
 | OpenFold3 | Chain `main_msa_file_paths`; use `--use-msa-server false` |
 | Chai | Aligned Parquet files through `--msa-directory`; omit `--use-msa-server` |
 | ESMFold2 | `MSA_A3M` |
-
-OpenDDE disables external MSA and template searches in its examples.
 
 ## Validation
 

@@ -3,30 +3,23 @@
 [Documentation index](README.md)
 
 Every RGI tool is driven by one `restraints_config` dict (a YAML/JSON block for boltz / protenix /
-OpenDDE / chai / AF3 / openfold, or a Python dict for ESMFold2 — see each tool's page for where it lives).
-This page documents **every variable**: its type, default, allowed values, and meaning.
+chai / AF3 / openfold, or a Python dict for ESMFold2 — see each tool's page for where it lives).
+This page documents configuration for the restraint types described in the paper.
+Each documented key includes its type, default, allowed values, and meaning.
 
 Omitted keys fall back to their documented defaults. Unknown top-level keys and unknown conformer
 keys raise an error. Unknown keys inside individual restraint entries are logged and ignored, so
 check their spelling against this page. Source of truth:
-`src/rgi_toolkit/{config,distance_restr_data,group_geom_restr_data,base_pair_restr_data,ref_geom_restr_data,ref_config,featurizer,rmsd_restr_data,pdb_ref,_align,selection}.py`.
-
-> **Don't want to hand-write this?** Run the `generate-rgi-config` skill in Claude Code
-> (`/generate-rgi-config`) or Codex (`$generate-rgi-config`). It turns a plain-language
-> goal into a validated `restraints_config` (correct restraint type, atom-selection DSL,
-> target, sigma window) and places it where your tool expects it. Reach for it whenever
-> the schema below is more than you need.
+`src/rgi_toolkit/{config,distance_restr_data,group_geom_restr_data,ref_geom_restr_data,ref_config,featurizer,rmsd_restr_data,pdb_ref,_align,selection}.py`.
 
 ## Quick navigation
 
-- [Config shape](#shape), [external files](#external-configuration-files), and [top-level keys](#top-level-keys)
+- [Config shape](#shape) and [top-level keys](#top-level-keys)
 - [Computational cost](#computational-cost-current-implementation)
-- [Activation windows](#sigma-gating-start_sigma--stop_sigma) and [step gating](#step-gating-start_step--stop_step-alternative-to-sigma)
+- [Activation windows](#sigma-gating-start_sigma--stop_sigma)
 - [Atom-selection DSL](#atom-selection-dsl) and [penalty shapes](#penalty-shapes-shared)
 - [Distance](#distance_restraints_config-list), [group angle](#angle_restraints_config-list),
-  [group dihedral](#dihedral_restraints_config-list), [improper](#improper_restraints_config-list),
-  [chiral](#chiral_restraints_config-list), and [plane](#plane_restraints_config-list)
-- [Base pairs](#base_pair_restraints_config-list)
+  and [group dihedral](#dihedral_restraints_config-list)
 - [Conformer geometry and VdW](#conformer_restraints_config-single-dict)
 - [RMSD](#rmsd_restraints_config-list)
 - [Custom restraints](#custom_restraints_config-list)
@@ -47,11 +40,7 @@ restraints_config:
   distance_restraints_config: [ ... ]   # list
   angle_restraints_config:    [ ... ]   # list  (group-centroid angle)
   dihedral_restraints_config: [ ... ]   # list  (group-centroid dihedral)
-  improper_restraints_config: [ ... ]   # list  (same signed torsion as dihedral)
-  chiral_restraints_config:   [ ... ]   # list  (signed group-centroid volume)
-  plane_restraints_config:    [ ... ]   # list  (best-fit-plane flatness / coplanarity)
-  base_pair_restraints_config: [ ... ]  # list  (nucleic-acid Watson-Crick base pairs)
-  conformer_restraints_config: { ... }  # single dict (ligand/polymer local geometry)
+  conformer_restraints_config: { ... }  # single dict (ligand local geometry)
   rmsd_restraints_config:     [ ... ]   # list
   custom_restraints_config:   [ ... ]   # list  (define your OWN restraint — see below)
 ```
@@ -59,53 +48,9 @@ restraints_config:
 A restraint type is active only if its block is present (and, for conformer terms, the term's
 `weight > 0`).
 
-Distance, angle, dihedral, improper, chiral, plane, conformer, RMSD, and base-pair are the nine built-in restraint
-types (base-pair expands into distance and plane restraints under the hood).
-`custom_restraints_config` defines an original restraint as a math formula or Python callable.
-
-## External configuration files
-
-Use the same `config_path` key at the whole-config level or at any of the ten
-`*_restraints_config` sections. A referenced JSON/YAML file contains the replacement
-value itself: a dictionary for the whole config or conformer, a list for other sections.
-
-```yaml
-# input.yaml
-restraints_config:
-  config_path: configs/rgi.yaml
-```
-
-```yaml
-# configs/rgi.yaml
-conformer_restraints_config: {}
-distance_restraints_config:
-  config_path: distances.json
-```
-
-```json
-[
-  {"atom_selection1": "chain A and resid 1", "atom_selection2": "chain B and resid 1",
-   "harmonic": {"target_distance": 5}}
-]
-```
-
-Paths are relative to the file containing them, including nested includes. Within an
-external file, `ref_pdb`, `ref_cif`, named `refs` structures and monomer-library paths
-also resolve relative to that file. Existing inline resource paths retain their behavior.
-The supported extensions are `.json`, `.yaml` and `.yml`. `config_path` cannot share a
-block with inline settings; there is no override merge. References replace entire
-sections, not individual list entries. Missing files, malformed values and reference
-cycles raise with the section and file chain; expanded data passes the normal schema.
-
-All seven predictors use the shared resolver. Chai's root sidecar can itself contain
-`config_path`; a referenced sidecar may include its `conformer_restraints` chain map.
-For Python input, use `resolve_restraints_config(config, base_dir=...)` or
-`RestraintsConfig.from_dict(config, base_dir=...)`; the default base is the current
-working directory. Resolution returns a new mapping without changing the caller's
-dictionary. YAML is loaded safely and lazily. Inline-only parsing performs no file I/O.
-
-Runnable examples: [whole config](../examples/distance/alphafold3/qbp_25.00.json)
-and [one section](../examples/distance/boltz-2/qbp_25.00.yaml).
+The documented restraint types are distance, angle, dihedral, conformer, RMSD,
+and custom expressions. `custom_restraints_config` defines a differentiable loss
+as a mathematical formula.
 
 ## Top-level keys
 
@@ -119,84 +64,10 @@ and [one section](../examples/distance/boltz-2/qbp_25.00.yaml).
 | `max_iter` | int | `100` | Nonnegative maximum optimizer iterations per denoising step, shared by all methods. |
 | `gtol` | float | `1e-5` | Nonnegative finite gradient tolerance for CG and L-BFGS on both backends. Smaller values request tighter optimization. |
 
-On CUDA, PyTorch compiles the energy/gradient. Since version 0.3.1, CG trial
-statistics are also fused to reduce kernel launches. VdW overflow predicates are
-reused until the neighbor cache changes; cache validity is still checked at every
-trial. These optimizations do not change the configured objective, line search,
-or stopping criteria.
-Compilation failures fall back to eager evaluation. The JAX solver retains its
-existing JIT path.
-
-Since version 0.3.8, the CUDA objective with fixed-background VdW uses CUDA Graph
-replay. Returned gradients and energies retain their own storage so CG and L-BFGS
-history cannot be overwritten by a later replay. Unsupported graph compilation
-or replay retries default Inductor compilation. CPU, custom-energy, and other
-VdW-mode artifacts keep their existing compilation path.
-
-Version 0.3.2 also fuses CUDA neighbor-cache validity checks and PR+ direction
-updates. Every trial retains its displacement and finite-value checks. Reduction
-order can change floating-point optimization trajectories.
-
-Since version 0.3.3, CPU objective/gradient compilation is enabled by default
-(`compile_cpu: true`). Set `gpu: false` to run the restraints on CPU when the
-predictor uses CUDA. Compilation works
-with CG and L-BFGS and leaves weights, gates, tolerances, and iteration limits
-unchanged. Set `compile_cpu: false` for short runs or frequently changing shapes
-when compilation startup outweighs the savings. A missing compiler or
-a compilation failure falls back to eager evaluation; CPU failures do not disable
-CUDA compilation. `RGI_DISABLE_COMPILE=1` disables both. Dense VdW overflow sums
-and CPU solver control remain eager.
-
-Version 0.3.7 also compiles CPU CG trial statistics and avoids retransferring the
-CG gradient norm to CUDA. Armijo reuses the direction slope until the direction
-changes. CUDA L-BFGS batches scalar reads for its line search and fuses its
-two-loop recursion for up to 8192 variables. Larger problems retain the ordinary
-recursion; unavailable or failed compilation uses the native operations.
-The objective, tolerances, iteration limits, and neighbor checks are unchanged.
-Reduction order can introduce small floating-point differences. With `gpu: false`,
-inactive restraint windows skip coordinate transfers and results copy directly
-back to the predictor's coordinate buffer.
-
-
-Version 0.3.10 preserves the native scalar precision in captured L-BFGS:
-Python-number arithmetic stays float64, while Tensor scalar operations round to
-the coordinate dtype, including reciprocal-then-multiply reverse division.
-Scalar bookkeeping is compiled separately from objective evaluations, with
-Inductor conversion-chain removal disabled in those regions. CG trial coordinate
-updates retain their original multiplication/addition rounding; gradient statistics
-and PR+ directions retain the existing compiled reductions. Native CUDA branches
-still control every trial and convergence check without per-trial host reads.
-
-Since version 0.3.9, eligible PyTorch CUDA solves use native CUDA conditional
-IF/WHILE graphs for CG (Strong Wolfe or Armijo) and L-BFGS, including line search
-and convergence decisions. All restraint families share this path: conformer,
-distance, RMSD, group geometry, base pairs, torsion, and capturable custom energies.
-Kabsch/plane fits remain part of every objective evaluation; only the existing
-stop-gradient convention is retained. Peptide alternatives are selected once per
-invocation and refreshed at the next call. Batch dimensions and mixed-restraint
-coordinate maps are preserved.
-
-This path currently requires PyTorch 2.8, CUDA 12.8 or later, and the Linux
-`cuda-bindings` dependency installed by the `torch` extra. Existing predictor
-environments can add it with `uv pip install 'cuda-bindings>=12.8,<13'`.
-At most 8192 coordinate variables and 65536 dynamic VdW pairs (including all
-samples) are captured. Complete fixed-background and active-active pairs preserve
-chemistry and exclusions and are evaluated at every trial. Larger problems keep
-the ordinary neighbor-list solver; unsupported frameworks, dtypes, custom
-operations, or failed captures also retain that solver. CPU and JAX are unchanged.
-
-The graph reuses resident buffers within one optimizer and refreshes coordinates
-and fixed partners on every call. Shape, device, dtype, gate state, method,
-iteration limit, or tolerance changes invalidate it. Inductor's compiler cache
-can persist across processes, but native graphs must be constructed per process.
-First-call compilation and graph construction are included in whole-prediction
-timing. `RGI_DISABLE_COMPILE=1` also disables this path. `return_info=True` copies
-CG diagnostics to the host after the solve, never within its line search.
-For Kabsch and plane fits, cuSOLVER convergence status stays on the GPU during
-the solve and is checked once at the end. Failure retries the ordinary optimizer,
-including PyTorch's SVD recovery. The 3 x 3 SVD keeps PyTorch's Jacobi driver;
-plane eigenproblems use batched Jacobi even for one matrix. This can introduce
-small rounding differences from PyTorch's single-matrix eigensolver.
+Torch compiles eligible objective and gradient calculations. Compilation failures
+fall back to eager evaluation. `compile_cpu: false` disables CPU compilation;
+`RGI_DISABLE_COMPILE=1` disables Torch compilation. The first compiled call can
+be slower, while repeated calls reuse compiled artifacts. JAX uses its JIT path.
 
 Choose one of these three configurations inside `restraints_config`:
 
@@ -250,9 +121,9 @@ before any adapter or reference-structure processing.
 The orders below describe the tensors actually evaluated by the current torch/JAX kernels, not
 only the underlying geometry formula. In particular, variable-length groups are padded to the
 widest group in the same restraint category, so the maximum padded width appears in the cost.
-Coordinates are three-dimensional: the covariance eigendecomposition used by `plane` and the SVD
-used by RMSD/Kabsch are always on a **3 x 3** matrix and are therefore constant work per entry; the
-atom gather, centring, and covariance construction remain linear in the number of selected atoms.
+The SVD used by RMSD/Kabsch is always on a **3 x 3** matrix and is therefore
+constant work per entry; gathering, centring, and covariance construction remain
+linear in the number of selected atoms.
 
 Let `Q` be the number of objective/gradient evaluations made by the optimizer in one diffusion
 step, and let `N_active` be the number of optimized atoms. `Q` is usually a multiple of the
@@ -274,18 +145,13 @@ themselves are shared across the batch.
 | `distance_restraints_config` | `R` entries, padded group width `G` | `O(RG)` | `O(RG)` | Two centroids per entry; the factor 2 is constant. |
 | `angle_restraints_config` | `R` entries, padded group width `G` | `O(RG)` | `O(RG)` | Three group centroids plus one constant-size angle. |
 | `dihedral_restraints_config` | `R` entries, padded group width `G` | `O(RG)` | `O(RG)` | Four group centroids plus one constant-size torsion. |
-| `improper_restraints_config` | `R` entries, padded group width `G` | `O(RG)` | `O(RG)` | Same four-group kernel shape as group dihedral. |
-| `chiral_restraints_config` | `R` entries, padded group width `G` | `O(RG)` | `O(RG)` | Four geometric centroids and one scalar triple product. |
-| `plane_restraints_config` | `R` entries, maximum pooled atoms per entry `G` | `O(RG)` | `O(RG)` | One 3 x 3 covariance eigendecomposition per entry is `O(R)` in addition to the linear atom work. |
-| `base_pair_restraints_config` | `H` generated H-bond distances, `P` generated coplanarity planes of padded width `G` | `O(H + PG)` | `O(H + PG)` | A config-time macro only: it expands to ordinary one-atom distance and pooled-plane rows. |
 | conformer `bond` | `B` bond tuples | `O(B)` | `O(B)` | Each tuple gathers two atoms. |
 | conformer `angle` | `A` angle tuples | `O(A)` | `O(A)` | Each tuple gathers three atoms. |
 | conformer `chiral` | `C` chiral tuples | `O(C)` | `O(C)` | Each tuple gathers four atoms and evaluates one scalar triple product. |
-| conformer `cistrans` / `torsion` | `T` tuples per term | `O(T)` | `O(T)` | Each tuple gathers four atoms. |
-| conformer `plane` | `P` plane groups, padded width `G` | `O(PG)` | `O(PG)` | One constant-size 3 x 3 eigendecomposition per plane group. |
+| conformer `cistrans` | `T` tuples per term | `O(T)` | `O(T)` | Each tuple gathers four atoms. |
 | `rmsd_restraints_config` | `R` entries, maximum padded fit/calc widths `F` / `C` | `O(R(F + C))` | `O(R(F + C))` | One 3 x 3 Kabsch SVD per entry; it is not `O(F^3)` or `O(C^3)`. |
 | built-in `refN and ...` variant | total prediction/reference group atoms `G`, reference-fit atoms `F` | `O(G + F)` per reference access | `O(G + F)` | These entries use a closure. A configured fit recomputes a 3 x 3 Kabsch transform; without a fit the `F` term is absent. |
-| `custom_restraints_config` | `C_expr` = sum of the executed primitive/array costs | `O(C_expr)` | expression-dependent | Centroid geometry is linear in the selected group sizes; `kabsch`, `rmsd`, and `plane` are also linear because their matrix decomposition is 3 x 3. Repeated calls are recomputed, and `where`/conditional expressions evaluate **both** branches. |
+| `custom_restraints_config` | `C_expr` = sum of the executed primitive/array costs | `O(C_expr)` | expression-dependent | Centroid geometry is linear in the selected group sizes; `kabsch` and `rmsd` are also linear because their matrix decomposition is 3 x 3. Repeated calls are recomputed, and `where`/conditional expressions evaluate **both** branches. |
 
 The table starts after atom selections and reference pairings have been resolved. That one-time
 setup scans the target atom records once per selection (`O(S * N_target)` for `S` selections).
@@ -295,31 +161,14 @@ RDKit force field for at most 200 iterations; that library-dependent cost does n
 
 ### VdW cost breakdown
 
-VdW has four current execution paths. Let `n_l` be the atom count of restrained ligand `l`, `L`
-the number of moving atoms queried against a fixed background of `B` atoms, `N` the number of
-active atoms in the active-active list, and `K = max_neighbors` (capped by the number of possible
-partners). `P_intra` and `P_ll` are the explicit static pair counts defined below.
+For the protein–ligand setting, restrained ligand atoms are queried against the
+fixed protein background. Let `L` be the number of moving ligand atoms, `B` the
+background atom count, and `K = max_neighbors` the sparse capacity. At ordinary
+density, cell-list construction costs `O(B log B + L log B)` and an objective
+evaluation costs `O(LK)`. Overflow rows use complete background sums. A collapsed
+structure can require `O(LB)` work, without allocating a dense distance matrix.
 
-| VdW path | pair-list construction | one objective + gradient evaluation | pair-list / working storage | worst case |
-|---|---:|---:|---:|---|
-| Intramolecular ligand | setup pair scan `O(sum_l n_l^2)` | `O(P_intra)` | `O(P_intra)` | `P_intra = O(sum_l n_l^2)`; sparse topology comes from a bounded three-bond traversal. |
-| Restrained ligand-ligand | setup `O(P_ll)`, where `P_ll = sum_(i<j) n_i n_j` | `O(P_ll)` | `O(P_ll)` | `O((sum_l n_l)^2)`; this remains an explicit all-cross-pairs list. |
-| Moving atoms vs fixed background | ordinary density: `O(B log B + L log B)` per required rebuild | `O(LK)`; overflowing rows add complete pair sums | `O(B + LK)` plus bounded chunks | A collapsed/hash-colliding cell population degrades to `O(LB)` build time, without allocating an `L x B` distance matrix. |
-| Active-active pairs involving conformer-restrained atoms | ordinary density: `O(N log N)` per required rebuild | `O(NK)`; overflowing rows add complete pair sums | `O(NK)` plus bounded chunks | A collapsed cell degrades to `O(N^2)` build time, without allocating an `N x N` distance matrix. |
-
-The dynamic rows show coordinate-search/scoring costs. Preparation indexes topology exclusions
-by query atom in sorted, padded rows. With maximum row width `D`, each lookup
-costs `O(log D)` and the row tables use `O(N_query D)` storage. Sparse evaluations reuse contact
-parameters resolved at the last rebuild. If `M` active-active query rows overflow, their fallback
-costs `O(MN)` with fixed-size block padding and `O(N * chunk_size)` working storage.
-Atom-type parameter tables use `O(T^2)` storage for `T` distinct types.
-
-The cell-list orders treat the 27 adjacent cells, traversal chunk width 32, and configured `K` as
-bounded constants, which is the intended use (`K=32` by default). If `K` itself is scaled with the
-system, active-active exclusion/reciprocal bookkeeping adds `O(NK log X + NK^2)` work for `X`
-sorted covalent exclusions and can transiently retain `O(NK^2)` values. Sigma/step gating makes an
-inactive row contribute only its already-vectorized mask work; when **all** restraints are outside
-their activation windows, the optimizer skips the whole step.
+When every restraint is outside its sigma window, minimization is skipped.
 
 ## Sigma gating: `start_sigma` & `stop_sigma`
 
@@ -334,7 +183,7 @@ window:
 - **Active window:** `stop_sigma <= sigma <= start_sigma`. `stop_sigma > start_sigma` is an empty
   window and **raises** (a silent no-op would read as "satisfied").
 
-Where they live: **once per `distance` / `angle` / `dihedral` / `improper` / `rmsd` / `custom` entry**, and **once
+Where they live: **once per `distance` / `angle` / `dihedral` / `rmsd` / `custom` entry**, and **once
 for all conformer terms** (`conformer_restraints_config.start_sigma` / `.stop_sigma`). When `sigma`
 exceeds every active restraint's `start_sigma`, the whole minimization step is skipped (cheap at high
 noise).
@@ -342,29 +191,6 @@ noise).
 The RMSD restraint's `stop_sigma` has a specific use: releasing it late (e.g. `1.0`) lets the model
 re-idealise geometry the restraint held distorted — the fix for a peptide bond broken at a
 restrained-residue / free unmodeled-tail boundary.
-
-## Step gating: `start_step` & `stop_step` (alternative to sigma)
-
-Instead of the noise level, a restraint may be gated on the **diffusion step index** (the 0-based
-denoising iteration counter). Same shape as the sigma window, on the step axis:
-
-- **`start_step`** (int) — active once `step >= start_step`. **Omitted → `-inf`** (active from the
-  first step).
-- **`stop_step`** (int) — released once `step > stop_step`. **Omitted → `+inf`** (never released).
-- **Active window:** `start_step <= step <= stop_step`. `stop_step < start_step` is an empty window
-  and **raises**.
-
-Available on the same entries as the sigma window (`distance` / `angle` / `dihedral` / `improper` / `rmsd` /
-`custom`, and the shared `conformer_restraints_config`).
-
-> **A restraint uses EITHER the sigma window OR the step window — never both.** Setting any of
-> `start_sigma` / `stop_sigma` together with any of `start_step` / `stop_step` on one entry **raises**
-> (mutually exclusive). The unused axis stays always-on.
-
-> ⚠️ **Step windows are NOT portable across tools.** The number of denoising steps differs per tool
-> (e.g. boltz vs AF3 vs protenix), so `start_step: 50` means a *different point in the trajectory* in
-> each tool. `sigma` windows ARE portable (all tools share `sigma_data=16`). Prefer `sigma` windows
-> unless you specifically need step-index control for one tool.
 
 ## Atom-selection DSL
 
@@ -404,11 +230,10 @@ distance, angle, volume, …) from its target. Four block names choose how $\del
 | `flat-bottomed1` | $`\min(0,\, x - t_1)`$ | lower bound — penalise only $x \lt t_1$ |
 | `flat-bottomed2` | $`\max(0,\, x - t_2)`$ | upper bound — penalise only $x \gt t_2$ |
 
-The same four shapes drive the `distance` / `angle` / `dihedral` / `improper` / `plane` / `rmsd` blocks (only
-the target key differs: `target_distance` / `target_angle` / `target_dihedral` / `target_improper` / `target_plane` /
-`target_rmsd`, with `…1` / `…2` for the flat-bottomed bounds). `plane` is the one block whose type
-is OPTIONAL — its measured quantity is an RMS deviation with an implicit target of 0, so an omitted
-block means `harmonic` with `target_plane: 0`. The **conformer** terms use the flat-bottomed shape with a symmetric `slack`:
+The same four shapes drive the `distance`, `angle`, `dihedral`, and `rmsd` blocks.
+Their target keys are `target_distance`, `target_angle`, `target_dihedral`, and
+`target_rmsd`, with `…1` / `…2` for the flat-bottomed bounds.
+The **conformer** geometry terms use the flat-bottomed shape with a symmetric `slack`:
 $\delta = 0$ within $\pm$`slack` of the RDKit-ideal value, quadratic outside (`slack = 0` $\Rightarrow$ pure harmonic).
 
 `distance` is part of the same CG objective as every other restraint. Centroids use
@@ -441,7 +266,6 @@ see [termination semantics](SPEC.md#nonlinear-conjugate-gradient)).
 | `atom_selection2` | str | — (required) | group 2 |
 | `start_sigma` | float | `+inf` | activation upper bound (see Sigma gating) |
 | `stop_sigma` | float | `-1` | release lower bound |
-| `start_step` / `stop_step` | int | `-inf` / `+inf` | step gating — the alternative to the sigma window (mutually exclusive; see Step gating) |
 | `move` | `"both"`/`"all"`/`1`/`2`/`[1,2]`/`"1,2"` | `"both"` | which group the correction moves: `both` (= `all` = `[1,2]`) = minimal-displacement split; `1` / `2` (or `[1]` / `[2]`) move only that group and **pin** the other (e.g. move a ligand toward a fixed pocket). Shares the list/comma vocabulary of the angle/dihedral `move`; distance has 2 groups so only indices 1–2 are valid (`[1,3]` raises) |
 | `weight` | float | `1.0` | relative strength. **No-op for a single restraint or disjoint groups** (each reaches its exact target regardless). Only bites when an atom is the **sole mover** of two **over-constrained coupled** restraints (each pinning its other group), where the shared atom settles `w₁:w₂` between the two targets (e.g. `2` vs `1` → 2:1). Not a soft "strength" knob in the common case |
 | one restraint-type block | dict | — (required) | the penalty (below) |
@@ -499,7 +323,6 @@ either way).
 |---|---|---|---|
 | `atom_selection1..3` | str | — (required) | the three groups; group 2 is the vertex |
 | `start_sigma` / `stop_sigma` | float | `+inf` / `-1` | sigma gating |
-| `start_step` / `stop_step` | int | `-inf` / `+inf` | step gating (mutually exclusive with the sigma window; see Step gating) |
 | `unit` | `"degrees"`/`"radians"` | `"degrees"` | unit of the target angle(s) for this entry |
 | `weight` | float | `1.0` | energy scale |
 | `move` | `"all"` / int / list / `"1,3"` | arms (1,3) free, vertex (2) pinned | which groups are free; the rest are pinned (stop-gradient). `"all"` frees every group |
@@ -529,7 +352,7 @@ angle_restraints_config:
 ## `dihedral_restraints_config` (list)
 
 The **dihedral of 4 group centroids**, about the axis through groups 2–3 — the group-centroid
-analogue of the distance restraint, distinct from the per-atom conformer `cistrans` and `torsion` terms.
+analogue of the distance restraint, distinct from the per-atom conformer `cistrans` term.
 CG-solved; `weight: 1.0` drives any group size, as for the angle.
 
 The measured quantity is the dihedral angle $\phi$ of the four centroids $c_1, c_2, c_3, c_4$ about
@@ -560,7 +383,6 @@ Targets in **degrees** by default (`unit: radians` to override).
 |---|---|---|---|
 | `atom_selection1..4` | str | — (required) | the four groups; groups 2–3 are the axis |
 | `start_sigma` / `stop_sigma` | float | `+inf` / `-1` | sigma gating |
-| `start_step` / `stop_step` | int | `-inf` / `+inf` | step gating (mutually exclusive with the sigma window; see Step gating) |
 | `unit` | `"degrees"`/`"radians"` | `"degrees"` | unit of the target dihedral(s) for this entry |
 | `weight` | float | `1.0` | energy scale |
 | `move` | `"all"` / int / list / `"1,4"` | ends (1,4) free, axis (2,3) pinned | which groups are free; the rest are pinned (stop-gradient). `"all"` frees every group |
@@ -588,871 +410,106 @@ dihedral_restraints_config:
     harmonic: {target_dihedral: 180.0}
 ```
 
-## `improper_restraints_config` (list)
-
-Uses the same signed torsion as [`dihedral_restraints_config`](#dihedral_restraints_config-list)
-for four ordered group centroids: the angle between
-planes 1–2–3 and 2–3–4 about the 2–3 axis, with range $[-180^\circ, 180^\circ]$. It has a separate
-config, spec term, energy breakdown, and log name (`group_improper`).
-
-The full dihedral field surface applies unchanged: `atom_selection1..4`, `move`, `weight`,
-`unit`, sigma/step windows, and prediction/reference groups. The default pins groups 2–3 and moves
-groups 1 and 4. Only the target names differ:
-
-| block | params |
-|---|---|
-| `harmonic` | `target_improper` |
-| `flat-bottomed` | `target_improper1`, `target_improper2` |
-| `flat-bottomed1` | `target_improper1` |
-| `flat-bottomed2` | `target_improper2` |
-
-Harmonic deviations are periodicity-safe; flat-bottomed windows cannot straddle the $\pm180^\circ$
-boundary. Targets are degrees by default and may use `unit: radians`.
-
-```yaml
-improper_restraints_config:
-  - atom_selection1: "chain A and resid 10"
-    atom_selection2: "chain A and resid 11"
-    atom_selection3: "chain A and resid 12"
-    atom_selection4: "chain A and resid 13"
-    move: [1, 4]
-    harmonic: {target_improper: 0.0}
-```
-
-## `chiral_restraints_config` (list)
-
-Restrains the **signed scalar triple product of four group centroids**, with group 1
-as the center. It uses the same measured quantity as conformer `chiral`, with atom
-selections and an independent entry window. Each selection may contain one atom or
-several atoms; the latter use their geometric (unweighted) centroid:
-
-```math
-V = (c_2-c_1)\cdot\big((c_3-c_1)\times(c_4-c_1)\big)
-```
-
-The unit is **Angstrom cubed**, and there is **no division by six**. Swapping any two
-groups reverses the sign. The sign follows the ordered selections; it does not directly
-encode an R/S label. All four centroids coincident or collinear give zero volume and
-zero gradient; no artificial displacement is added to escape that stationary geometry.
-
-| key | type | default | meaning |
-|---|---|---|---|
-| `atom_selection1..4` | str | required | four groups; group 1 is the center |
-| `weight` | float | `1.0` | least-squares energy scale |
-| `move` | `"all"` / int / list / `"2,3,4"` | `"all"` | movable groups; remaining groups contribute geometry but no gradient for this term |
-| `start_sigma` / `stop_sigma` | float | `+inf` / `-1` | inclusive sigma window |
-| `start_step` / `stop_step` | int | `-inf` / `+inf` | inclusive step window, mutually exclusive with a sigma window |
-| one restraint-type block | dict | required | signed target or bounds in Angstrom cubed; there is no `unit` key |
-
-| block | params |
-|---|---|
-| `harmonic` | `target_chiral` |
-| `flat-bottomed` | `target_chiral1`, `target_chiral2`, with lower < upper |
-| `flat-bottomed1` | `target_chiral1` (lower bound) |
-| `flat-bottomed2` | `target_chiral2` (upper bound) |
-
-Positive, negative and zero targets are accepted. Energy is `weight * delta(V)**2`
-with the shared penalty shapes. A conformer target `vol0` with slack `s > 0` is equivalent
-to `flat-bottomed` bounds `[vol0-s, vol0+s]`; zero slack is `harmonic`. This standalone
-block activates without a conformer block or entity opt-in.
-
-```yaml
-chiral_restraints_config:
-  # Four atoms, centered on CA. Choose the signed target for this atom order.
-  - atom_selection1: "chain A and resid 10 and name CA"
-    atom_selection2: "chain A and resid 10 and name N"
-    atom_selection3: "chain A and resid 10 and name C"
-    atom_selection4: "chain A and resid 10 and name CB"
-    harmonic: {target_chiral: 2.0}
-  # Four whole groups; each group contributes its geometric centroid.
-  - atom_selection1: "chain A and resid 1 to 10"
-    atom_selection2: "chain A and resid 20 to 30"
-    atom_selection3: "chain A and resid 40 to 50"
-    atom_selection4: "chain A and resid 60 to 70"
-    flat-bottomed1: {target_chiral1: 10.0}
-```
-
-The array term and diagnostic name are `group_chiral`. As with group angles, the
-built-in centroid gradient is multiplied by each group's atom count `N`; an isolated
-entry translates each free group uniformly. Other restraints sharing those atoms
-can also move or deform them. Targets and bounds are specified explicitly.
-
-### Reference groups
-
-Up to three distinct references can supply groups. At least one group must select
-prediction atoms. Omitted/`all`/`both` moves every prediction group; an explicit `move`
-must select only prediction-side group indices. Each reference supports its usual
-independent fit and file-relative `config_path` resource resolution.
-
-```yaml
-chiral_restraints_config:
-  - atom_selection1: "ref1 and chain A"
-    atom_selection2: "chain B"
-    atom_selection3: "chain C"
-    atom_selection4: "chain D"
-    refs:
-      ref1: {ref_cif: reference.cif}
-    harmonic: {target_chiral: 2.0}
-```
-
-### Custom form
-
-`chiral(A,B,C,D)` returns the same signed volume, centered on `A`, in Angstrom cubed.
-It supports prediction/reference selections and custom `move` by selection name.
-Custom and built-in centroid functions use ordinary mean derivatives;
-both energies and gradients agree.
-
-```yaml
-custom_restraints_config:
-  - selections: {A: "chain A", B: "chain B", C: "chain C", D: "chain D"}
-    energy: "harmonic(chiral(A,B,C,D), 2.0)"
-```
-
-The Python callable API uses the same function:
-
-```python
-def energy(ctx):
-    return ctx.harmonic(ctx.chiral("A", "B", "C", "D"), 2.0)
-```
-
-`harmonic(abs(chiral(A,B,C,D)), 2.0)` accepts either sign with target magnitude 2.
-All four penalty functions compose with `chiral`; no angular wrapping is needed.
-
-## `plane_restraints_config` (list)
-
-Holds an atom group **planar** — or brings it into **another group's plane**. This is the
-selection-driven form of the [conformer `plane` term](#energy-terms), which can only reach groups
-*perceived* from a ligand's RDKit mol (aromatic rings, non-ring sp2 groups) or supplied by the
-monomer library. Here you name the atoms yourself, so any group works: a nucleobase, a
-peptide-bond plane, an aromatic side chain, a ligand fragment.
-
-The measured quantity is the group's **out-of-plane RMS deviation** (Angstrom, target 0 = planar),
-
-```math
-x = \sqrt{\lambda_{\min}/N}
-```
-
-where $\lambda_{\min}$ is the smallest eigenvalue of the group's centred covariance — i.e. the RMS
-distance of its atoms from their own best-fit plane. It is shaped by one of the penalty blocks
-(see [Penalty shapes](#penalty-shapes-shared)) and CG-minimized like every other restraint.
-
-This is the plane-restraint formulation used by
-[**servalcat**](https://github.com/keitaroyam/servalcat) / Refmac — a whole planar *group* held flat
-by its best-fit-plane RMS, rather than per-centre improper (signed-volume) terms — which is what both
-this restraint and the conformer `plane` term were modelled on. See
-[References](../README.md#references) for the citations.
-
-Several `atom_selectionN` in ONE entry are **pooled into a single plane**: that is how you say
-"keep these two groups coplanar with each other". Use separate entries for separate planes.
-
-| key | type | default | meaning |
-|---|---|---|---|
-| `atom_selection1` | str | — (required) | group 1 (selection DSL) |
-| `atom_selection2` … `atom_selection4` | str | — | further groups, **pooled into the same plane**. Numbering must be contiguous from 1 (a gap raises) |
-| `start_sigma` | float | `+inf` | activation upper bound (see [Sigma gating](#sigma-gating-start_sigma--stop_sigma)) |
-| `stop_sigma` | float | `-1` | release lower bound |
-| `start_step` / `stop_step` | int | `-inf` / `+inf` | step gating — the alternative to the sigma window (mutually exclusive; see [Step gating](#step-gating-start_step--stop_step-alternative-to-sigma)) |
-| `move` | `"all"`/`1`/`[1,2]`/`"1,2"` | `"all"` | which group(s) the solver may move; the rest are **pinned** (their atoms still shape the plane fit, but get no gradient). The default frees every group — a plane has no anchor group to pin, unlike the angle vertex / dihedral axis |
-| `weight` | float | `1.0` | relative strength (least-squares weight) |
-| one restraint-type block | dict | — (**optional**) | the penalty (below). Omitted ⇒ `harmonic` with `target_plane: 0` |
-
-Restraint-type block (at most one):
-
-| block | params | behaviour |
-|---|---|---|
-| `harmonic` | `target_plane` | quadratic penalty on the RMS deviation toward the target (use `0`) |
-| `flat-bottomed2` | `target_plane2` | **the tolerance form**: no penalty while the group is planar to within `target_plane2` A |
-| `flat-bottomed` | `target_plane1`, `target_plane2` | no penalty inside `[d1, d2]` (needs `d1 < d2`) |
-| `flat-bottomed1` | `target_plane1` | penalise only *below* `d1` — i.e. "stay non-planar". Accepted for consistency with the other blocks; rarely what you want |
-
-```yaml
-plane_restraints_config:
-  # keep one nucleobase flat, only late in denoising
-  - atom_selection1: "chain A and resid 5 and not backbone"
-    start_sigma: 2.0
-    flat-bottomed2: {target_plane2: 0.1}   # 0.1 A of pucker is free
-
-  # make two stacked bases share ONE plane, moving only the first
-  - atom_selection1: "chain A and resid 10 and not backbone"
-    atom_selection2: "chain B and resid 24 and not backbone"
-    move: 1
-    weight: 2.0
-```
-
-Two things worth knowing:
-
-- **Group size.** Unlike the centroid restraints (distance / angle / dihedral), the plane gradient is
-  NOT rescaled by the group size — the plane RMS is a genuine least-squares fit, not a rigid-body
-  translation. `weight: 1` converges any group on its own, but a very large group's contribution is
-  weaker *relative to other restraints*; raise `weight` if a big plane loses a tug-of-war.
-- **VdW partners.** A restrained group's atoms join the optimized set. When a ligand or polymer
-  also opts into conformer VdW, contacts with that group move from the fixed-background list to the
-  active-active list, where both endpoints receive gradients.
-
-### Reference groups
-
-Write one group as `refN and <selection>` (plus its `refs.refN`) to anchor the plane to an
-**external structure**. This changes the measured quantity: the plane is fitted to the
-**reference atoms alone** and held fixed (stop-gradient, fitted into the prediction frame like every
-other reference group), and `x` becomes the RMS distance of the **prediction** atoms from that fixed
-plane. So the prediction group is pulled *onto* the reference's plane instead of merely being
-flattened. At least one group must be a prediction selection, the reference selection needs ≥ 3
-atoms, and `move` accepts prediction-side indices only.
-
-```yaml
-plane_restraints_config:
-  - atom_selection1: "chain A and resid 30 to 36 and backbone"
-    atom_selection2: "ref1 and chain A and resid 30 to 36 and backbone"
-    refs:
-      ref1:
-        ref_cif: template.cif
-        atom_selection_target_fit: "chain A and backbone"
-        atom_selection_ref_fit: "chain A and backbone"
-    harmonic: {target_plane: 0.0}
-```
-
-If you configure no fit selections, set `pairing: identity` on the reference: the default
-`pairing: align` runs a sequence alignment up front and raises when the chain ids differ, even though
-nothing consumes the result without a fit.
-
-## `base_pair_restraints_config` (list)
-
-Restrain two nucleotides into **Watson-Crick base-pair geometry**, optionally widening the
-coplanarity plane to a **base triple** with `residue3`. This is a config-time
-**macro**, not a new energy term: each entry EXPANDS into the primitives above — one
-[`distance`](#distance_restraints_config-list) restraint per WC hydrogen bond, plus (optionally)
-one best-fit [`plane`](#conformer_restraints_config-single-dict) restraint over both bases so the
-pair stays coplanar. It mirrors what servalcat/Refmac do (base pairing is imposed as H-bond
-distance + planarity restraints, there is no dedicated base-pair potential).
-
-You name the two paired residues; the engine looks up the WC donor/acceptor atoms and their ideal
-H-bond distance from a built-in table:
-
-| pair | H-bond atom pairs (residue1, residue2) |
-|---|---|
-| G·C | `(N1,N3)` `(N2,O2)` `(O6,N4)` |
-| A·T / A·U | `(N1,N3)` `(N6,O4)` |
-| G·U wobble | `(N1,O2)` `(O6,N3)` — **opt-in via `pair: GU`** (never auto-detected) |
-
-The base identity is auto-detected from each residue's `resname` (DNA `D`-prefix stripped; DNA and
-RNA share base-atom names). Pairs are **user-specified only** — auto-detecting which bases pair from
-coordinates is intentionally NOT done (coordinates are pure noise at high sigma). Reverse orders
-(C·G, T·A, …) are handled automatically.
-
-```yaml
-base_pair_restraints_config:
-  - residue1: "chain A and resid 5"   # each selector must match EXACTLY one residue
-    residue2: "chain B and resid 12"
-    # hbonds: true      # false -> coplanarity ONLY: no WC lookup, no distances, so any
-    #                   # residues may be named (non-WC pair, reverse-Hoogsteen, ...)
-    # residue3: "chain A and resid 30"   # optional THIRD base -> base triple.
-    #                   # Joins the coplanarity plane only; generates no H-bonds and its
-    #                   # base identity is not validated (a docked third base is non-WC).
-    # pair: GC          # optional: override auto-detection (needed if resname is
-    #                   # unavailable, or for a G-U wobble). Two letters from ACGTU.
-    # coplanar: true    # add the inter-base coplanarity plane (default true)
-    # coplanar_slack: 0.45  # out-of-plane RMS (A) allowed before the plane term bites.
-    #                   # Default 0 for a pair, 0.45 for a triple.
-    # target: [2.7, 3.1]  # H-bond distance: [low, high] -> flat-bottomed (default),
-    #                   # or a scalar -> harmonic
-    # weight: 1.0       # strength of the H-bonds AND the coplanarity plane
-    # move: both        # both / 1 / 2 — 1 docks residue1 onto a fixed residue2
-    # start_sigma / stop_sigma   # sigma gating (applies to the H-bond distances)
-    # start_step / stop_step     # step gating (mutually exclusive with sigma)
-```
-
-| key | type | default | meaning |
-|---|---|---|---|
-| `residue1` / `residue2` | str | — (required) | selection-DSL strings, each matching exactly one nucleotide (else it raises) |
-| `pair` | str | auto from `resname` | override the detected bases, e.g. `"GC"`, `"AU"`, `"GU"`. Required when `resname` is unavailable or for a wobble pair |
-| `hbonds` | bool | `true` | `false` keeps only the coplanarity plane: the Watson-Crick lookup is skipped, so ANY residues may be named and no distance restraints are generated. Use it for a pair the WC table cannot describe — see *Coplanarity without hydrogen bonds* |
-| `residue3` | str | `None` | optional third nucleotide, making the entry a base TRIPLE. It joins the coplanarity plane and nothing else: no H-bond distances are generated for it, and its base identity is never checked against the WC table. Requires `coplanar: true` (raises otherwise, since it would be a silent no-op) |
-| `coplanar` | bool | `true` | also add a best-fit-plane restraint over the bases' atoms (keeps the pair/triple coplanar) |
-| `coplanar_slack` | float | `0.0` pair / `0.45` triple | out-of-plane RMS (A) the plane term tolerates before it penalises — a one-sided flat bottom. See *Base triples* below for where the triple default comes from |
-| `target` | `[low, high]` or float | `[2.7, 3.1]` | WC H-bond distance: a `[low, high]` window → flat-bottomed; a scalar → harmonic (Å) |
-| `weight` | float | `1.0` | energy scale for the generated H-bond distances and the coplanarity plane |
-| `move` | `both` / `1` / `2` | `both` | which residue the H-bonds pull; `1` moves only residue1 (dock a strand onto a fixed template), `2` only residue2. Addresses residues 1-2 only: it acts on the H-bond distances, and a `residue3` has none |
-| `start_sigma` / `stop_sigma` | float | `+inf` / `-1` | sigma gating of the H-bond distances |
-| `start_step` / `stop_step` | int | `-inf` / `+inf` | step gating (mutually exclusive with the sigma window) |
-
-### Base triples
-
-`residue3` extends the plane group to three bases — a third base docked onto the pair's
-groove edge — a recurring tertiary motif in folded nucleic acids.
-
-Only the plane grows. No H-bonds are generated for the third base: which of its atoms
-bond depends on the base identity and the Leontis-Westhof family, and no small built-in
-table covers that — give them with
-[`distance_restraints_config`](#distance_restraints_config-list).
-
-**A triple is not as flat as a pair**, which is why it gets its own slack. Measured over
-sixteen base triples drawn from four reference structures (1.9-3.5 A resolution):
-
-| | out-of-plane RMS (A) | third base's tilt |
-|---|---|---|
-| WC pair alone | 0.02 - 0.29 | — |
-| triple | 0.15 - 0.44 | 5 - 28 deg |
-
-Driving a triple to RMS 0 would flatten real geometry, so `coplanar_slack` defaults to
-**0.45 A** when `residue3` is present — just past the worst observed value, so only
-arrangements that no real triple explains are penalised. A plain pair keeps its historical
-`0.0`, so existing configs are unaffected.
-
-```yaml
-base_pair_restraints_config:
-  - residue1: "chain A and resid 10"   # the WC pair...
-    residue2: "chain A and resid 25"
-    residue3: "chain A and resid 45"   # ...plus the base docked on its groove edge
-distance_restraints_config:            # the third base's H-bonds go here
-  - atom_selection1: "chain A and resid 10 and name O6"
-    atom_selection2: "chain A and resid 45 and name N2"
-    flat-bottomed: {target_distance1: 2.6, target_distance2: 3.4}
-```
-
-### Coplanarity without hydrogen bonds
-
-`hbonds: false` drops the WC lookup and the generated distances, leaving the plane. It
-exists because the built-in table cannot describe every arrangement that is nonetheless
-coplanar:
-
-| arrangement | without `hbonds: false` |
-|---|---|
-| a non-WC pair (G-A, G-G) | raises — not in the table |
-| a **reverse-Hoogsteen** U-A | **silently wrong**: auto-detected as `AU`, so it restrains the WC `N1-N3`/`N6-O4` when the real bonds are `O2-N6`/`N3-N7`, building a different pair |
-| a G-U that stacks without bonding | forces a wobble bond that is not there |
-
-The `residue3` triple form composes with it, so a plane over three arbitrary bases is
-`{residue1, residue2, residue3, hbonds: false}`. Give whatever hydrogen bonds do exist
-with [`distance_restraints_config`](#distance_restraints_config-list).
-
-`hbonds: false` together with `coplanar: false` raises, since the entry would generate
-nothing at all.
-
-### Gating
-
-The gate window applies to the **H-bond distances AND the coplanarity plane**: the plane is emitted
-as a [`plane_restraints_config`](#plane_restraints_config-list) restraint, which carries its own
-per-entry window, so `stop_sigma` releases both together. (It used to ride the shared conformer gate,
-where a per-entry `start_sigma` did not move the coplanarity release point.) `move` reaches the plane
-too — `move: 1` pins residue2's atoms in the plane fit as well as in the H-bonds.
-
-Per-base planarity is already maintained by
-[`conformer_restraints_config`](#conformer_restraints_config-single-dict) when polymer geometry is
-enabled; `coplanar` here additionally makes the **two** bases of the pair share one plane.
-
-### Validation
-
-The parser fails loudly rather than creating a silent no-op: a `residue` selector matching zero or
-more than one residue, an
-auto-detected non-Watson-Crick pair (e.g. G-G, or a G-U without `pair: GU`), a `resname`-less residue
-with no `pair`, a missing WC atom, a negative `coplanar_slack`, or a `residue3` with
-`coplanar: false` all raise. The non-WC check applies to `residue1`/`residue2` only. Verbose setup logs
-`base_pair=N entries (T triples) -> H h-bonds + C coplanar groups` (the generated restraints also show up in the
-`distances=` / `plane=` counts).
-
 ## `conformer_restraints_config` (single dict)
 
-Repairs local geometry in ligands, proteins, DNA, and RNA. It is a single dict (not a
-list). Every molecule is **independently opt-in**: set `conformer_restraints: true`
-on each boltz / protenix / OpenDDE / AF3 / openfold sequence or chain object, or
-`conformer_restraints=True` on each esmfold2 input object. Chai uses the equivalent
-sidecar map keyed by chain id because FASTA cannot carry the flag. Missing/false chains
-remain unrestrained, including when another chain of the same polymer type is enabled.
+Ligand conformer restraints use a single dictionary. Set `conformer_restraints: true`
+on each ligand sequence/chain object, or `conformer_restraints=True` on an
+ESMFold2 `LigandInput`. Chai uses a sidecar map keyed by ligand chain ID.
 
 ```yaml
-conformer_restraints_config: {}  # Five terms at weight 1; plane off; active every step.
+conformer_restraints_config: {}  # Enable the five default terms at weight 1.
 ```
 
-Intra-residue bond, angle, chiral, and planar-group targets come from each predictor's residue-local
-ideal reference conformer — or, for polymers, from a CCP4 monomer library when
-[`monomer_library`](#monomer_library--refinement-targets-for-polymers-not-a-term) is set (the
-reference conformer is approximate chemistry, so read that section before enabling `bond`/`angle`
-on a nucleic acid). Canonical inter-residue geometry is added explicitly: peptide `C-N` bonds
-plus `CA-C-N`, `O-C-N`, and `C-N-CA` angles; and DNA/RNA `O3'-P` phosphodiester bonds plus
-`C3'-O3'-P`, `O3'-P-O5'`, and `O3'-P-OP1/OP2` angles. Without dictionary coverage,
-redundant link angles are completed in the same local reference geometry as the
-intra-residue angles. At a peptide carbonyl, `CA-C-O + CA-C-N + O-C-N = 360` degrees;
-the two link angles share the correction to their ideal values. At a phosphate,
-all link angles are measured to one unit partner direction fitted to the local
-reference bonds. Independently positioned residues never supply cross-residue vectors.
-This also applies to the reference side of a mixed dictionary/reference link;
-covered dictionary targets retain their link modifications and cis/trans alternatives.
-If a dictionary link is missing, its generated fallback angles use the covered
-residue's dictionary-local angles, including their local state conditions.
-The adjacent `P-O5'-C5'` angle comes from the current residue's reference conformer.
-Together these prevent an RMSD restraint from repairing a selected residue while
-breaking the covalent link to its neighbor. Polymer `plane` **is** built (opt-in via the `plane`
-sub-block): residue-local aromatic rings — His/Phe/Tyr/Trp side chains and nucleic-acid bases — plus
-the protein **peptide plane**, the canonical inter-residue four-atom group `{C, CA, O}` (previous
-residue) `+ {N}` (current), scored by the best-fit-plane `plane` term (this replaces the old
-peptide-plane zero-volume impropers that rode the `chiral` term — so a `chiral`-only config no longer
-flattens the peptide plane; set `plane: {weight: 1}`). Polymer `torsion` includes side-chain χ,
-peptide ω and selected sp2 torsions, with dictionary or approximate targets as described below.
-Enable it explicitly with `torsion: {weight: 1}`; its default weight is 0.
+An omitted or null block disables conformer restraints. An empty or partial
+mapping enables bond, angle, chiral, cistrans, and VdW at weight 1 on opted-in
+ligands. Set an individual term's `weight` to zero to disable it. The shared
+`start_sigma` and `stop_sigma` keys control all conformer terms together.
 
-Top-level (shared by all terms): `start_sigma` (`+inf`), `stop_sigma` (`-1`) — or the step-window
-alternative `start_step` (`-inf`) / `stop_step` (`+inf`) (mutually exclusive with the sigma window).
+### Reference geometry
 
-An omitted or null conformer block disables the entire layer. An empty mapping,
-`conformer_restraints_config: {}`, enables **bond, angle, chiral, cistrans and vdw at
-weight 1** on opted-in molecules. Their sub-blocks need only be written for overrides.
-**Plane and torsion default to weight 0 even when their empty sub-blocks are present**;
-enable them explicitly with `plane: {weight: 1}` or `torsion: {weight: 1}`.
-For every term, an explicit `weight <= 0` or `weight: null`
-disables its energy. To request only one term, explicitly disable the other default-on
-terms. This changes the former presence-based defaults; check older partial configs.
+Targets are measured from the predictor's ligand reference conformer after RDKit
+UFF relaxation. The source molecular graph supplies tetrahedral chirality and
+acyclic double-bond E/Z labels. If the relaxed coordinates disagree with these
+labels, the toolkit retries stereo-aware ETKDG embedding and UFF relaxation with
+up to four deterministic seeds. If UFF changes an initially correct conformer
+and all retries fail, that original conformer is retained. If no reference with
+the source stereochemistry can be recovered, setup raises an error.
 
-General χ/ω/sp2 restraints previously shared `cistrans`. They now belong to
-`torsion`, with independent weights, slack and energy diagnostics. Set
-`torsion: {weight: 1}` to retain those general torsions in older configurations.
-`cistrans` now controls only ligand acyclic double-bond E/Z geometry and remains
-enabled at weight 1. ESD normalization applies to both terms when requested.
-
-When an enabled cistrans or torsion tuple's four atoms all belong to a conformer plane group,
-the plane group is suppressed and the torsion is retained. Nonoverlapping plane groups
-remain active. Reference-derived and dictionary-derived geometry follow this same rule;
-local peptide conditions suppress the plane only in states where the torsion is active.
-Covalent topology remains available for VdW exclusions regardless of geometry weights. Standalone
-`plane_restraints_config`, base-pair planes and custom energies are independent.
+Relaxation operates on a copy. It requires evidence of real bond orders
+(an aromatic or double bond); stereo validation also covers saturated chiral
+ligands. These targets are distinct from an independently generated conformer
+used to evaluate predictions.
 
 | term | keys (default) | meaning |
-|---|---|---|
-| `bond` | `weight` (1.0), `slack` (0.0 Å) | bond lengths toward ideal; flat-bottomed by `slack` |
-| `angle` | `weight` (1.0), `slack` (0.0 rad) | bond angles toward ideal; targets within 0.5° of 180° use a stable cosine residual |
-| `chiral` | `weight` (1.0), `slack` (0.0 Å³) | signed chiral volume; the library may also allow either sign |
-| `plane` | `weight` (0.0), `slack` (0.0 Å) | **best-fit-plane** flatness of whole planar atom groups ([servalcat](https://github.com/keitaroyam/servalcat)-style) — penalises each group's out-of-plane RMS deviation toward 0. Fires on (a) aromatic/conjugated rings (whole ring) and (b) non-ring sp2 groups (an acyclic double-bond centre + its heavy neighbors: carbonyl / amide / ester / carboxyl / trisubstituted alkene). Group membership is confirmed by the reference conformer being coplanar (not the RDKit aromaticity flag). Set `plane: {weight: 1}` to activate |
-| `cistrans` | `weight` (1.0), `slack` (0.0 rad) | ligand acyclic double-bond E/Z geometry; period 1 preserves the stereoisomer. Cumulated double bonds (e.g. azides and allenes) are excluded because their linear endpoint does not define this dihedral |
-| `torsion` | `weight` (0.0), `slack` (0.0 rad) | protein side-chain χ, peptide ω and acyclic sp2 torsions, with explicit periodicity; enable with `torsion: {weight: 1}` |
-| `vdw` | `weight` (1.0), `mode` (`"intermolecular"`), `scale` (0.75), `dmax` (5.0 Å), `max_neighbors` (32), `neighbor_skin` (2.0 Å) | elemental radius sums and optional ESD-based clash penalties, with unrestricted CG steps and exact Verlet caches validated at every trial |
-
-### ESD normalization of conformer geometry
-
-`conformer_restraints_config.use_esd` selects ESD normalization for **all seven conformer
-terms**. It accepts a boolean and defaults to `false`, including when omitted. This covers
-reference targets, built-in links, dictionary geometry, approximate torsions, and both
-static and dynamic VdW contacts. By default, ordinary bond, angle, chiral and periodic
-torsion residuals are squared without ESD normalization:
-
-```text
-energy = weight * max(abs(deviation) - slack, 0)**2
-```
-
-To enable normalization while keeping the same targets and user weights:
-
-```yaml
-restraints_config:
-  conformer_restraints_config:
-    use_esd: true
-```
-
-With `true`, those residuals use inverse-variance weights:
-
-```text
-energy = weight * (max(abs(deviation) - slack, 0) / ESD)**2
-```
-
-Angular residuals remain in radians, bond/plane/VdW distances in Angstroms, and chiral
-volumes in Angstrom cubed. Plane weights retain the atom-count factor in both modes,
-so their energy still sums per-atom squared deviations. Slack, topology exclusions,
-periodicity, activation windows and disabled/invalid dictionary-row handling do not
-change. ESD metadata validation still applies. This option does not affect standalone
-distance/angle/dihedral/plane/chiral/RMSD or custom restraints. Per-entity conformer
-opt-in is still required.
-
-Changing `use_esd` changes the relative strength of the terms: energies from the two
-settings have different scales and must not be compared as a measure of structural
-improvement. Compare physical deviations as well. The option does not restore older
-targets, contact rules or torsion sets.
-
-ESD sets the scale of a deviation; it is not a flat-bottom tolerance. User `slack`
-retains its documented units and defaults. `weight` remains a linear energy multiplier.
-At unit weight and zero slack, the normalized harmonic energies are twice Servalcat's
-`0.5 * (deviation / ESD)**2` convention. This common factor does not change the minimum
-of geometry terms alone; custom and standalone restraints retain their own weights.
-
-Reference coordinates do not carry statistical ESDs. With `use_esd: true`, their uncertainties are
-explicit approximations, applied during setup without changing targets:
-
-| Reference term | ESD |
-|---|---|
-| bond | 0.02 Å |
-| angle | 3°, converted to radians alongside the angular residual |
-| chiral | First-order propagation of the three 0.02 Å bond and three 3° angle uncertainties around the center |
-| plane | 0.02 Å per modeled atom |
-| ligand double-bond E/Z | 5°, with period 1 |
-
-The bond and angle values follow Gemmi's coordinate-derived fallback
-[`make_chemcomp_with_restraints`](https://github.com/project-gemmi/gemmi/blob/v0.7.5/src/topo.cpp#L73-L111).
-Plane uses an approximate 0.02 Å scale, as in the
-[CCP4 plane-restraint example](https://www.ccp4.ac.uk/html/refmac5/files/log.html).
-E/Z uses the same 5° approximation as the other sp2 torsions below. These values are
-not chemistry-specific dictionary uncertainties or estimates of prediction confidence.
-An active chiral restraint whose reference geometry cannot define a finite positive
-propagated ESD raises instead of silently reverting to an unnormalized weight.
-
-Built-in peptide and phosphodiester links keep their bond targets and ESDs:
-0.011 Å and 0.010 Å for their respective bonds, and 1.5° for link angles. With
-`use_esd: true`, those ESDs enter inverse-variance weights; only user `slack` creates a free interval.
-Covered monomer-library geometry keeps its own dictionary ESDs; it is not normalized twice.
-Link-angle completion is independent of ESD normalization and explicit slack. It
-removes a mixed-source geometric inconsistency; it does not idealize the reference
-conformer or guarantee that every soft restraint can simultaneously reach zero.
-
-For conformer planes with `use_esd: true`, `weight * N / ESD**2` multiplies the group's squared RMS
-residual, so zero slack gives the sum of squared per-atom distances from the fitted
-plane, as in Servalcat. Explicit plane slack still applies to the group's RMS.
-
-Changing ESD normalization changes the objective: raw energies are not directly
-comparable across the two settings. No optimizer limits or tolerances are changed.
-Finite soft restraints can compete, so a nonzero total is not by itself evidence of
-failed minimization; also examine convergence diagnostics and geometric deviations.
-
-### `monomer_library` — refinement targets for polymers (not a term)
-
-`monomer_library` sits alongside the term blocks but builds nothing of its own: it changes
-where the **polymer** `bond` / `angle` / `chiral` / `plane` / `torsion` and inter-residue
-link targets and uncertainties come from. It also supplies covalent topology for
-VdW exclusions, including covered ligands and fixed background atoms. VdW radii
-remain the RDKit elemental values. Each desired energy term and moving entity
-still needs its normal opt-in.
-
-By default they are **measured from the predictor's per-residue reference conformer**, which is
-not refinement geometry — AF3 fills `ref_pos` by RDKit **ETKDG-embedding the free CCD component**.
-Comparing that embedding against the library shows how far its nucleotide targets sit from the
-refinement values (Å, library on the right):
-
-| bond | reference conformer (ETKDG, 3 seeds) | monomer library |
-|---|---|---|
-| exocyclic `C6-N6` | 1.421–1.423 | **1.330** |
-| exocyclic `C4-N4` | 1.411–1.425 | **1.325** |
-| phosphate `P-OP2` | 1.674–1.709 | **1.517** |
-| glycosidic `C1'-N1` | 1.404–1.453 | **1.476** |
-
-The exocyclic C-N comes out as an amine single bond instead of the conjugated base value, and the
-phosphate as P-OH because the free component is a monophosphate. The embed also takes a **random
-seed**, so those targets move ±0.02–0.03 Å between runs. Switching `bond`/`angle` on therefore
-drags a nucleotide *away* from crystallographic geometry.
-
-Enable a **CCP4 monomer library** to use dictionary targets and ESDs, read through Gemmi.
-`true` acquires the public [MonomerLibrary/monomers](https://github.com/MonomerLibrary/monomers)
-repository automatically at the first setup that needs polymer geometry:
-
-```yaml
-conformer_restraints_config:
-  monomer_library: true
-  bond: {}
-  angle: {}
-  chiral: {}
-  plane: {weight: 1}
-  torsion: {weight: 1}
-```
-
-| key | type | default | meaning |
-|---|---|---|---|
-| `path` | str | automatic cache | existing monomer-library directory holding `list/mon_lib_list.cif`, `ener_lib.cif`, and component subdirectories. `$VAR` and `~` are expanded; an explicit empty or null path is invalid |
-| `on_missing` | `"fallback"` / `"error"` | `"fallback"` | use and log reference/built-in fallback for missing residues, links or chiral inputs, or raise |
-
-The mapping form may omit `path`: `monomer_library: {on_missing: error}` also uses the
-automatic cache. A path string (`monomer_library: "$CLIBD_MON"`) or a mapping with `path`
-uses that directory without downloading. Omission, `null` and `false` disable the library.
-
-The first acquisition needs Git and network access. It makes a shallow clone into
-`$XDG_CONFIG_HOME/rgi_toolkit/monomers`, or `~/.config/rgi_toolkit/monomers` when
-`XDG_CONFIG_HOME` is unset. A process lock and validated staging directory prevent concurrent
-setups from seeing an incomplete clone. Completed snapshots are reused offline and never
-automatically updated. Setup logs the source Git SHA; use an explicitly managed local path
-when runs must share a particular revision. Parsing a config does not access the network.
-Invalid paths and failed downloads raise at setup.
-
-Dictionary ESD and user `slack` are separate. The energy formulas below assume
-`use_esd: true`; the default `false` omits their inverse-variance factors:
-
-- **Inverse-variance weighting:** bond, angle, torsion and chiral use
-  `weight * (max(abs(deviation) - slack, 0) / ESD)**2`. Dictionary-derived `slack` defaults
-  to zero for every term, including chiral. Explicit slack keeps its usual units: Å for bond
-  and plane, radians for angle and torsion, Å³ for chiral. Angular dictionary targets and
-  ESDs are both converted from degrees to radians.
-- **Plane:** with zero slack, the energy is `weight * sum(atom_plane_distance**2) / ESD**2`,
-  using Gemmi's group ESD. Internally this scales the existing best-fit-plane RMS squared by
-  the number of modeled atoms. Explicit plane slack still applies to the group's RMS.
-  Named nucleobase planes and local peptide planes stay separate; the usual peptide group
-  is `{CA, C, O}(previous) + {N}(current)`, without the next Cα.
-- **Torsion:** when `torsion` has positive weight, `omega` and labels beginning
-  `sp2_sp2` are used, plus `chi*` for proteins.
-  Backbone φ/ψ and the complete nucleic-acid backbone torsion set are not enabled. The residual is
-  `wrap(period * (angle - target)) / period`, with `period <= 0` treated as 1.
-- **Peptide state:** each sample chooses the nearer cis/trans omega target from its coordinates
-  at the start of each `minimize` call. Ties and degenerate geometry choose trans. That state
-  stays fixed through line searches and neighbor-list rebuilds, and selects the entire link's
-  targets, ESDs and modifications (`TRANS/CIS`, `PTRANS/PCIS`, `NMTRANS/NMCIS`). The next call
-  chooses again. An incomplete backbone uses trans geometry for the atoms present. If a
-  modeled omega lacks a cis dictionary counterpart, fallback omits omega and logs that fact;
-  `on_missing: error` rejects it.
-- **Chiral:** signed ideal volume and its ESD are derived by first-order propagation of the
-  dictionary's three bonds and three angles around the center, after link modifications.
-  Positive, negative and either-sign definitions are supported. Missing inputs obey
-  `on_missing`, with no simultaneous reference and dictionary restraint at the same center.
-- **Coverage:** dictionary targets replace covered reference tuples; link additions, changes
-  and deletions are applied to private copies. ESDs <= 0 disable the corresponding energy
-  term without discarding covalent exclusions. Nonfinite active targets or ESDs raise.
-  Setup logs component coverage and candidate row counts; cis/trans rows are alternatives.
-
-ESD determines relative strength between competing restraints. It does not create a free
-interval: an isolated harmonic term can still converge to its exact target. Reference
-fallbacks use the approximate ESDs above. Standalone and custom restraints keep their own
-weight conventions.
-
-### Torsions without a monomer library
-
-Enable general torsions with `torsion: {weight: 1}`. An omitted or false
-`monomer_library` never downloads a dictionary. Standard-residue RDKit
-templates supply chemical bond orders for protein χ and acyclic sp2 torsions; ligand source
-graphs supply the same classification for ligands. Only atoms already present are used.
-Unknown residues, missing χ atoms and degenerate χ references are logged and skipped.
-
-χ targets are measured from the predictor's residue reference. The approximate periods are
-3 for sp3–sp3, 6 for sp3–sp2, and 2 for sp2–sp2 axes, with ESDs of 10°, 10° and 5°,
-respectively. Acyclic conjugated sp2–sp2 single bonds use period 2 and ESD 5°; ligand targets
-come from the same relaxed, stereo-checked coordinates as the other ligand geometry.
-Peptide ω uses cis 0° / trans 180°, ESD 5°, with the nearest state fixed for each minimization.
-The separate `cistrans` double-bond E/Z restraints use ESD 5° and keep period 1, so a trans double bond never gains a
-second cis minimum. These chemical approximations are not dictionary-derived uncertainties.
-
-### `relax_force_field` — which force field idealises the ligand reference (not a term)
-
-Like `monomer_library`, this builds nothing of its own — it changes where **ligand** targets come
-from. Where `monomer_library` covers polymers, this covers ligands. The mapping currently accepts
-only `ligand`; polymers use the CCP4 monomer library and have no force-field option here. The old
-scalar form (`relax_force_field: uff`) is rejected with a migration hint.
-
-A predictor's cached ligand conformer is not refinement geometry either: boltz v2's `~/.boltz/mols`
-cache Kekulé-localizes aromatic rings (~1.34/1.48 Å alternating), and other tools' `ref_pos` carries
-its own bond/angle idiosyncrasies. Measuring targets straight off it would just reproduce them. So
-the conformer is first locally relaxed from its cached coordinates, and the
-bond/angle/chiral/cistrans/torsion/plane targets are measured off the relaxed copy.
-The global fold can change during minimization or stereo-repair re-embedding.
-
-```yaml
-conformer_restraints_config:
-  relax_force_field:
-    ligand: mmff94s     # uff (default) | mmff94 | mmff94s | none
-  bond: {}
-  angle: {}
-```
-
-| value | meaning |
-|---|---|
-| `uff` | **default.** Universal Force Field. Covers essentially any element, including metals |
-| `mmff94` | Merck Molecular Force Field 94 — better parameterised for organic/drug-like chemistry |
-| `mmff94s` | the MMFF94 "s" (planar-nitrogen) variant — flattens amide/amine nitrogens |
-| `none` | do not relax at all; targets come straight off the predictor's cached conformer |
-
-**Neither force field is uniformly better** — this is a real choice, not a strictly-better upgrade.
-Measured on adenosine-5'-monophosphate against the monomer-library values tabulated above (Å):
-
-| bond | monomer library | `uff` | `mmff94` | `mmff94s` |
-|---|---|---|---|---|
-| exocyclic `C6-N6` (conjugated) | 1.330 | 1.428 | 1.389 | **1.376** |
-| glycosidic `C1'-N9` | 1.476 | **1.465** | 1.447 | 1.447 |
-
-In this comparison, MMFF is closer on the conjugated exocyclic C–N and UFF on the glycosidic bond.
-The measurements used a from-scratch ETKDG embedding; a predictor's cached starting conformer can
-give different results. All three runs reached the 200-iteration limit, and the reported bond
-lengths agreed to 3 decimals after 2000 and 20000 iterations. That agreement concerns these bond
-lengths. The production policy accepts return code 1 as an iteration limit without certifying
-convergence.
-
-Behaviour worth knowing:
-
-- **Relaxation cannot silently change defined stereochemistry.** After relaxation, RGI compares
-  source-graph tetrahedral chirality and acyclic non-aromatic double-bond E/Z labels with labels
-  perceived from the relaxed 3D coordinates. Adapters retain the original SMILES graph separately
-  from framework reference coordinates. A mismatch triggers up to four deterministic, stereo-aware
-  ETKDG re-embeddings followed by the selected force field. If relaxation inverted an otherwise
-  correct predictor conformer and every retry fails, UFF safely keeps that original conformer. If
-  the predictor conformer already disagreed with the source graph, failure after four attempts
-  raises instead of silently using the wrong stereoisomer. Stereo validation also runs for an
-  all-single chiral ligand and with `relax_force_field: {ligand: none}`; `none` skips force-field
-  relaxation of regenerated candidates, not the source-stereo check.
-- **CCD input does not imply `none`.** Several predictors regenerate a random RDKit conformer even
-  when the user supplied a CCD code, and other CCD caches carry non-ideal local geometry. The
-  default therefore remains UFF for both CCD and SMILES ligands. Use
-  `relax_force_field: {ligand: none}` only when the supplied reference coordinates themselves are
-  the intended targets.
-- **Force-field failure policies differ.** UFF returns the cached conformer on force-field
-  failure, subject to the stereo-repair checks above. `mmff94` and `mmff94s` raise when requested
-  relaxation cannot be performed, including when MMFF atom typing is unsupported. A ligand with
-  UFF parameters may lack MMFF parameters; choose `uff` or `none` when appropriate.
-- **A skipped relax also raises under MMFF.** The relax only runs on a mol with real bond orders
-  (detected as "has an aromatic or double bond"), because relaxing an order-less mol would collapse
-  aromatic rings to ~1.5 Å. Under `uff` such a ligand is skipped silently; under an explicit MMFF it
-  raises, since "I set `mmff94s` and got un-relaxed targets" is exactly the invisible outcome the
-  explicit setting exists to rule out. Note the check also fires on a *genuinely saturated* ligand
-  whose bond orders are real.
-- **The `plane` count can change with the force field.** Plane-group membership is confirmed by the
-  **relaxed** conformer being coplanar within 0.1 Å, so a borderline-puckered ring can be restrained
-  under one force field and dropped under another. Every other count (bonds/angles/chirals/cistrans/torsion)
-  is topology-derived and must not move.
-- **Polymers are untouched.** Monomer-library and reference-conformer polymer residues are never
-  force-field relaxed, so this setting cannot affect them.
-- Verbose setup reports the choice as `relax_ff=…` on the `built spec:` line.
+| --- | --- | --- |
+| `bond` | `weight` (1.0), `slack` (0.0 Å) | Bond lengths toward reference values |
+| `angle` | `weight` (1.0), `slack` (0.0 rad) | Bond angles toward reference values |
+| `chiral` | `weight` (1.0), `slack` (0.0 Å³) | Signed chiral volumes toward reference values |
+| `cistrans` | `weight` (1.0), `slack` (0.0 rad) | Dihedrals about acyclic double bonds toward reference E/Z geometry |
+| `vdw` | `weight` (1.0), `mode` (`"intermolecular"`), `scale` (0.75), `dmax` (5.0 Å), `max_neighbors` (32), `neighbor_skin` (2.0 Å) | Intermolecular repulsion based on elemental radius sums |
 
 ### Energy terms
 
-Each term applies the shared flat-bottomed squared penalty ($\delta = 0$ within
-$\pm$`slack` of the RDKit-ideal value, quadratic outside — see Penalty shapes) to a per-tuple
-quantity $x$:
+Bond, angle, chiral, and cistrans terms use squared deviations from their
+reference values, with a symmetric interval of width `slack` on either side of
+the target where the loss is zero.
 
-| term | measured quantity $x$ | ideal |
-|---|---|---|
-| `bond` | bond length $r$ | $r_0$ |
-| `angle` | bond angle $\theta$ (radians) | $\theta_0$ |
-| `chiral` | signed volume $V = (a_1 - a_0)\cdot\big((a_2 - a_0)\times(a_3 - a_0)\big)$ | $V_0$ (handedness) |
-| `plane` | group's out-of-plane RMS deviation $\sqrt{\lambda_{\min}/N}$ ($\lambda_{\min}$ = smallest eigenvalue of the centred covariance) | $0$ (planar) |
-| `cistrans` | E/Z torsion $\phi$, residual $\mathrm{wrap}(\phi-\phi_0)$ | reference $\phi_0$, period 1 |
-| `torsion` | torsion $\phi$, residual $\mathrm{wrap}(n(\phi-\phi_0))/n$ | $\phi_0$ and periodicity $n$ |
+| term | measured quantity | target |
+| --- | --- | --- |
+| `bond` | Bond length | Reference bond length |
+| `angle` | Bond angle in radians | Reference bond angle |
+| `chiral` | `(a1-a0) dot ((a2-a0) cross (a3-a0))` | Reference signed volume, without division by six |
+| `cistrans` | Dihedral in radians about an acyclic double bond | Reference dihedral; the deviation wraps to `[-pi, pi]` |
 
-Conformer angles with `abs(target_degrees - 180) < 0.5` use
-`2 * weight * (1 + cos(theta))` instead of squared angle deviation. Packed reference and
-dictionary weights include `1 / ESD_radians**2` when `use_esd: true`. The factor two preserves RGI's quadratic coefficient
-for small deviations from linearity. With nonzero slack, the squared residual is
-`max(2*sin((pi-theta)/2) - 2*sin(slack/2), 0)**2`, preserving the requested angular free interval.
-Bond lengths in the cosine denominator are floored at 0.02 Å. Ordinary-length linear bonds
-have zero energy and gradient; degenerate bonds remain finite. Standalone group angles and
-custom angle functions are unchanged.
+Cumulated double bonds, such as those in allenes, are excluded from cistrans
+restraints because the linear endpoint does not define the required dihedral.
+Conformer angles strictly within 0.5 degrees of 180 degrees use a stable cosine
+residual. At zero slack their energy is `2 * weight * (1 + cos(theta))`.
+With nonzero slack the residual is
+`max(2*sin((pi-theta)/2) - 2*sin(slack/2), 0)`. Bond norms in the cosine
+denominator have a 0.02 Å floor. Group-angle and custom-angle terms are unchanged.
 
-`vdw` is one-sided (repulsion only),
+### Intermolecular van der Waals repulsion
+
+The default `vdw.mode` is `intermolecular`. In a protein–ligand system, this
+penalizes ligand contacts with the protein using
 
 ```math
-E = w \sum_{(i,j)} \left[\frac{\min(0,\;d_{ij}-\text{scale}\cdot R_{ij})}{\sigma_{ij}}\right]^2,
+E = w \sum_{(i,j)} \min(0, d_{ij} - \mathrm{scale}(r_i + r_j))^2.
 ```
 
-where $d_{ij}$ is the pair distance and $R_{ij} = r_i + r_j$ is the sum of
-RDKit elemental VdW radii (`Chem.GetPeriodicTable().GetRvdw(atomic_number)`), as in
-v0.1.0-a. Thus the distance lower bound is `scale * (r_i + r_j)`.
-The ESD denominator applies only with `use_esd: true`; the default `false` omits it.
-Optional VdW ESD is uniformly 0.2 Å.
-
-Atom typing depends only on atomic number, including for fixed background atoms and
-nonrestrained ligands. There is no radius cap, hydrogen-inclusive radius, or
-hydrogen-bond, ionic or dummy-atom correction. Dictionary `type_energy` and
-`ener_lib.cif` radii do not override this lookup. Source graphs and configured
-dictionaries still supply covalent topology. Hydrogens participate only when already
-present; this lookup never changes protonation, formal charges or stereochemistry.
-
-All covalent 1–2, 1–3 and 1–4 pairs
-are excluded, regardless of plane membership. These exclusions use chemical topology even
-when bond, angle or plane energy blocks are disabled, including paths across polymer links.
-The same rule applies to static ligand pairs and dynamic contacts. Static pairs are enumerated from
-topology; `dmax` is the baseline cutoff for dynamic neighbor searches.
-The verbose `finalize` `vdw=` value includes these static rows and both optimizer-only dynamic
-halves on Torch and JAX.
-
-`scale` defaults to 0.75 and multiplies the elemental radius sum. ESD normalization
-is off by default. With `use_esd: true`, ESD 0.2 Å
-multiplies the unnormalized VdW energy and gradient by 25 at the same distance and
-contact threshold. Reference geometry terms use the same switch. `weight` remains a
-linear multiplier; with normalization enabled, doubling an ESD divides both energy
-and gradient by four.
-
-### Van der Waals modes
-
-`vdw.mode` selects the contact category (default `"intermolecular"`):
-
-- `"intramolecular"` — clashes **within** one ligand or polymer chain, with the covalent
-  exclusions above. Ligand pairs are static; polymer contacts use dynamic lists.
-- `"intermolecular"` — clashes between the ligand and **every other molecule**: the **fixed
-  background** (every non-padding atom not being optimized — protein, DNA/RNA, any **non-restrained**
-  ligand; dynamic, torch/jax) **and** other **restrained** ligands (≥2 ligands that each set
-  `conformer_restraints: true` + `vdw` both move, so neither is in the other's background — every
-  cross-molecule atom pair gets the same one-sided penalty, scored in the energy layer on all
-  backends).
-
-Since version 0.3.0, omitting `mode` applies only intermolecular repulsion. This
-includes an empty conformer block (`conformer_restraints_config: {}`), an omitted
-`vdw` block, and an empty `vdw: {}` block. The following settings are the defaults:
+The radii are RDKit elemental values from
+`Chem.GetPeriodicTable().GetRvdw(atomic_number)`. They are not adjusted for
+hydrogen bonds or ionic environments. Covalent 1–2, 1–3, and 1–4 pairs are
+excluded using topology, even when the corresponding geometry energies are
+disabled. The default contact threshold is `0.75 * (r_i + r_j)`.
 
 ```yaml
 restraints_config:
   conformer_restraints_config:
     vdw:
-      mode: intermolecular  # Default; use both to include intramolecular contacts.
+      mode: intermolecular
       weight: 1.0
       scale: 0.75
 ```
 
-To retain the earlier default contact categories, set `mode: both` explicitly.
-Use `mode: intramolecular` for intramolecular repulsion alone. The mode changes
-contact eligibility; the radius lookup, distance lower bound, covalent exclusions,
-weights, and optimizer settings are unchanged.
-
-`"both"` enables both categories. To make two restrained ligands avoid each other,
-keep the default `mode: intermolecular` and give both a `vdw` block — no extra key. `scale` multiplies the elemental
-radius sum. `dmax` is the baseline dynamic-search cutoff; CG expands it
-with a safe movement skin. Eligible intramolecular pairs and all inter-ligand
-pairs are enumerated regardless of their reference-conformer distance, because either can clash in
-the predicted coordinates. An explicit empty or partial conformer block enables VdW at weight 1.0. Set
-`vdw: {weight: 0}` to disable it; omitting or nulling the entire conformer block disables the layer. **The old
-`mode: ligand_protein` was removed** (it was only the fixed-background half) — it now raises a
-migration error pointing to `intermolecular`.
-
 ### Dynamic intermolecular neighbor lists
 
-Dynamic neighbor lists cover moving atoms against a fixed background and eligible
-active-active pairs. **Every energy/gradient evaluation validates its own trial
-coordinates**, including rejected line-search trials. The background is frozen for
-one `minimize` invocation. Inactive conformer windows skip list construction.
+Every objective/gradient evaluation checks the neighbor cache against its own
+trial coordinates, including rejected line-search trials. The protein background
+is held fixed for one minimization invocation. The search radius is
+`max(dmax, max_contact + neighbor_skin)`. With a fixed background, the cache is
+rebuilt when the maximum ligand displacement exceeds `neighbor_skin`.
 
-`neighbor_skin` (default 2 Å) is the cache's extra search radius and displacement
-budget. The search radius is `max(dmax, max_contact + neighbor_skin)`. Rebuild when
-maximum atom displacement from the cached reference exceeds the skin for fixed
-partners, or half the skin when both partners move. A zero skin rebuilds after any
-movement. Peptide states and activation gates remain fixed for the invocation.
+`max_neighbors` controls sparse buffer capacity. Rows that exceed the capacity
+use complete pair sums in bounded chunks, so no eligible contacts are discarded.
+Increasing capacity or the skin can change performance but does not change the
+objective. Inactive conformer windows skip list construction.
 
-`max_neighbors` (default 32) controls the sparse buffer capacity. Candidates outside
-their pair-specific contact distance plus the skin cannot reach contact before the
-next rebuild, so they do not count toward overflow. An extra eligible candidate
-detects overflow; overflowing query rows use complete pair sums in bounded chunks.
-Active-active overflow queries are packed at rebuild time, so only those rows are
-evaluated against all partners. Contact parameters are cached with the sparse
-neighbour indices and replaced together on a rebuild. No contacts are discarded.
-Increasing capacity can reduce fallback work; increasing the skin can reduce rebuilds
-but increase overflow. These settings change performance, not the objective. There
-is no `neighbor_skin <= dmax` restriction.
-
-CG uses scalar line-search steps without per-atom displacement clipping. Armijo
-uses historical backtracking; `line_search: strong-wolfe` uses strict strong Wolfe
-(`c1=1e-4`, `c2=0.4`). Cache rebuilds preserve the objective, conjugate direction and counters.
-`max_atom_step` and `neighbor_rebuild_interval` have been removed: delete these keys
-from old configs; passing them raises a migration error. Request `return_info=True`
-through the [Python API](SPEC.md#public-lifecycle) to distinguish convergence from
-iteration exhaustion or an unsuccessful search. L-BFGS and energy diagnostics also
-evaluate the complete dynamic VdW objective. JAX L-BFGS carries the accepted trial's
-validated neighbour cache through JAXopt's auxiliary state. Subsequent trials still
-check their displacement before reusing it; the library's search, history and
-stopping rules are unchanged.
-
-When distance and conformer restraints are combined, CG uses a fixed linear change
-of variables to improve conditioning of large centroid translations. It preserves
-the scalar energy and every weight; the selected PR+ algorithm runs in the
-transformed coordinates. This does not alter configured iteration limits.
-See the [solver specification](SPEC.md#nonlinear-conjugate-gradient).
-
-The neighbor-list build uses a sorted spatial cell list whose cell width is the resulting search
-cutoff (never smaller than `dmax`). Hash collisions are checked against the full cell coordinate,
-and each bucket is traversed completely in fixed-width chunks. Chemical topology exclusions,
-molecule mode and moving-atom participation are filtered **before** the K cap. Remaining
-candidates are ranked by clearance `distance - scale * R_ij`, so the most severe clashes
-win even when elemental radii give different contact thresholds. Small type-pair
-tables and sparse topology codes avoid a dense atom-pair parameter matrix. At ordinary density the build remains
-`O(B log B + L log B)` / `O(N log N)`, with linear fixed-width working memory; a collapsed
-structure degrades to `O(LB)` / `O(N^2)` time without allocating a dense distance matrix.
-
-The sparse capacity applies after those filters; overflow uses the complete fallback described
-above. Exact and near-exact overlaps use a deterministic pair-derived separation axis in the
-gradient, avoiding a zero radial gradient and seed-dependent escape direction. Under JAX the pair
-codes are int32, so a single restrained polymer selection is limited to ~46340 active atoms on AF3;
-exceeding it raises rather than silently corrupting covalent exclusions.
+CG, L-BFGS, and energy diagnostics evaluate the same dynamic VdW objective.
+Rebuilds preserve the objective, conjugate direction, and counters. Exact or
+near-exact overlaps use a deterministic pair-dependent separation direction in
+the gradient. See the [solver specification](SPEC.md#nonlinear-conjugate-gradient).
 
 ## `rmsd_restraints_config` (list)
 
@@ -1483,7 +540,6 @@ from a Kabsch SVD on the **fit** atoms. $\hat{R}$ (and the centroids) are treate
 | `harmonic` / `flat-bottomed` / `flat-bottomed1` / `flat-bottomed2` | block | — (one required) | restraint-type block on the RMSD (Å); target keys `target_rmsd` (harmonic) / `target_rmsd1` / `target_rmsd2` (see Penalty shapes). `harmonic: {target_rmsd: 0}` = match the reference; `flat-bottomed2: {target_rmsd2: X}` = stay within $X$ Å |
 | `weight` | float | `1.0` | energy scale |
 | `start_sigma` / `stop_sigma` | float | `+inf` / `-1` | sigma gating (set `stop_sigma`, e.g. `1.0`, to release late and heal a strained terminus) |
-| `start_step` / `stop_step` | int | `-inf` / `+inf` | step gating (mutually exclusive with the sigma window; see Step gating) |
 | `pairing` | `"align"` / `"identity"` | `"align"` | how reference and prediction residues correspond. `align` = sequence-align polymer chains (BLOSUM62, via biopython `Bio.Align`, lazy-imported) so a **homolog** ref maps on despite substitutions/indels/renumbering; non-polymer atoms always pair by ordinal. `identity` = strict (chain, resid, name) ordinal pairing. |
 | `best_effort` | bool | `true` | skip atoms with no match in the ref (instead of raising); `false` = strict |
 
@@ -1504,32 +560,23 @@ superpose on the backbone but measure over a pocket. Under `pairing: align`, res
 
 ## `custom_restraints_config` (list)
 
-### Authoring methods
+### Formula definition
 
-Define a custom restraint as a differentiable energy. Both authoring methods use
-the same vocabulary and run on every backend (torch / jax):
-
-- **config only (expression DSL)**: write the energy as a math **formula** string over named atom
-  selections. No Python.
-- **code (ctx function)**: write `energy(ctx) -> scalar` in Python and either register it
-  (`@custom_restraint("name")`, then reference it here with `use:`) or pass the callable directly
-  (`CombinedRestraints.add_custom(fn=...)`, or a `fn:` entry for the Python-dict tools).
+Write a differentiable energy as a mathematical formula over named atom
+selections. The same expression runs on Torch and JAX.
 
 Each entry's energy (× `weight`) is added to the CG objective, gated by the usual
 `start_sigma` / `stop_sigma` window.
 
 | key | type | default | meaning |
 |---|---|---|---|
-| `energy` | str | — | the formula (DSL). Exactly one of `energy` / `use` / `fn` is required |
-| `use` | str | — | name of a function registered with `@custom_restraint` |
-| `fn` | callable | — | a Python `energy(ctx) -> scalar` (Python-dict input only) |
+| `energy` | str | — | the required formula (DSL) |
 | `selections` | dict | `{}` | `name -> selection string`; use `refN and <selection>` for a group selected from `refs.refN` |
 | `refs` | dict | `{}` | `refN -> {ref_pdb`\|`ref_cif, atom_selection_ref_fit, atom_selection_target_fit, pairing, best_effort}`; names are reserved as `ref1`, `ref2`, ... |
 | `move` | `"all"` / `"both"` / str / list[str] | `"all"` | prediction selection name(s) that receive this restraint's gradient. Omitted/`all`/`both` moves every prediction selection. Reference-backed selections are always fixed and cannot be named |
 | `weight` | float | `1.0` | scales the whole energy |
 | `name` | str | `"custom"` | label shown in the `finalize` per-term log |
 | `start_sigma` / `stop_sigma` | float | `+inf` / `-1` | sigma gating (as everywhere) |
-| `start_step` / `stop_step` | int | `-inf` / `+inf` | step gating (mutually exclusive with the sigma window; see Step gating) |
 
 ### Evaluation model
 
@@ -1551,7 +598,7 @@ energy), and **math** (elementwise / reduction helpers) — plus operators.
 #### Geometry
 
 Geometry functions operate on selection **centroids**; angular results are in **radians** (note: the
-built-in `angle` / `dihedral` / `improper` configs take *degrees*, but a custom formula is in radians).
+built-in `angle` / `dihedral` configs take *degrees*, but a custom formula is in radians).
 $\lVert\cdot\rVert$ is the Euclidean norm:
 
 | call | result | definition | use it for |
@@ -1560,40 +607,14 @@ $\lVert\cdot\rVert$ is the Euclidean norm:
 | `distance(A,B)` | scalar | $\lVert c_A - c_B \rVert$ | a separation between two groups; a **difference of two distances** encodes symmetry / equidistance |
 | `angle(A,B,C)` | scalar (rad) | $`\arccos\big( (c_A - c_B)\cdot(c_C - c_B) / (\lVert c_A - c_B \rVert\,\lVert c_C - c_B \rVert) \big)`$, vertex $B$ | the bend of three groups about the vertex $B$ |
 | `dihedral(A,B,C,D)` | scalar (rad) | torsion about the B–C centroid axis, range $\pm\pi$ | the twist / handedness across four groups — a **periodic** quantity: wrap its deviation, see below |
-| `improper(A,B,C,D)` | scalar (rad) | same signed torsion as `dihedral(A,B,C,D)`, about the B–C centroid axis, range $\pm\pi$ | the custom-form counterpart of `improper_restraints_config`; wrap its deviation |
-| `chiral(A,B,C,D)` | scalar (Angstrom cubed) | $(c_B-c_A)\cdot((c_C-c_A)\times(c_D-c_A))$ | signed volume about A, identical to conformer chiral for single atoms; no division by six |
-| `rg(A)` | scalar | $\sqrt{\frac{1}{\lvert A\rvert}\sum_i \lVert x_i - c_A \rVert^2}$ — radius of gyration | the compactness of one group (collapse vs extension) |
 | `norm(v)` | scalar | $\lVert v \rVert$ | the length of a vector you built, e.g. `centroid(A) - centroid(B)` |
 | `dot(u,v)` | scalar | $u \cdot v$ | projections and cosine-like terms |
 | `coords(A)` | block $(k,3)$ | $A$'s atom coordinates | feed a bare selection into arithmetic with `kabsch` output (a bare name alone is a *selection identifier*, not coordinates) |
 | `kabsch(A,B)` | block $(k,3)$ | $A$ rigid-body-superposed onto $B$ (Kabsch) | align two moving groups, then measure the leftover per-atom deviation — see **Reference-backed selections** |
 | `rmsd(A,B)` | scalar | superposed RMSD of prediction selection `A` vs reference-backed selection `B` | pull a group onto an external reference; `B` must map to `refN and <selection>` — see **Reference-backed selections** |
-| `plane(A)` | scalar | $A$'s out-of-plane RMS deviation from its own best-fit plane, $\sqrt{\lambda_{\min}/N}$ | hold a group flat — the [`plane` restraint](#plane_restraints_config-list) as a formula term you can combine with others |
-| `plane(A,B)` | scalar | RMS distance of $A$'s atoms from the plane fitted to $B$ | bring $A$ into $B$'s plane (stacking, coplanarity with a fixed or reference-backed group) |
 
 Most geometry consumes selection **centroids**; `coords` / `kabsch` instead flow a whole
 **$(k,3)$ coordinate block**, so they compose: `centroid(kabsch(A,B))`, `norm(kabsch(A,B) - coords(B))`.
-`plane` also reads the whole block (a centroid has no plane), and either argument may be a
-reference-backed selection.
-
-`plane`, like `kabsch` and `rmsd`, detaches the fitted orientation from autodiff. For a
-nondegenerate least-squares fit measured on the same atoms, this still agrees with the derivative
-of the minimized scalar. That equivalence need not hold when one moving group defines the fit
-and another defines the residual; see [gradient conventions](SPEC.md#gradient-conventions).
-In `plane(A,B)` the plane's normal
-is fixed but its **centre is not**, so a free `B` is pulled toward `A` as well; list only `A` in
-`move` (or make `B` reference-backed) for a genuinely fixed plane.
-
-```yaml
-custom_restraints_config:
-  - name: flat_and_stacked
-    selections:
-      loop: "chain A and resid 40 to 46"
-      base: "chain B and resid 12 and not backbone"
-    move: loop
-    energy: "plane(loop)**2 + 4.0 * plane(loop, base)**2"
-```
-
 #### Reference-backed selections and superposition
 
 A reference-backed selection is declared in the ordinary `selections` map:
@@ -1618,7 +639,7 @@ stop-gradient values: they act as fixed landmarks and do not pull the fit anchor
 selections are omitted, the reference is used in its own coordinate frame.
 
 Reference-backed selections work with the normal geometry vocabulary: `distance(A,B)`,
-`angle(A,B,C)`, `dihedral(A,B,C,D)`, `improper(A,B,C,D)`, `centroid(A)`, `coords(A)`, and `kabsch(A,B)`. At least one
+`angle(A,B,C)`, `dihedral(A,B,C,D)`, `centroid(A)`, `coords(A)`, and `kabsch(A,B)`. At least one
 selection in the custom entry must come from the prediction; an all-reference expression is a
 constant and raises.
 
@@ -1634,21 +655,20 @@ numpy finite-difference through the SVD, matching the built-in RMSD restraint.
 
 #### Degenerate geometry
 
-`angle`, `dihedral`, and `improper` are ill-defined when the centroids collapse —
+`angle` and `dihedral` are ill-defined when the centroids collapse —
 coincident centroids, a collinear A–B–C for `angle`, or a `dihedral` whose central axis runs parallel
 to an arm. The value stays finite but its gradient is near-zero, so the term cannot push the
-structure; choose groups whose centroids are distinct and non-collinear. (`distance` / `rg` have no
-such caveat.)
+structure; choose groups whose centroids are distinct and non-collinear. (`distance` has no such caveat.)
 
-#### Dihedral and improper periodicity
+#### Dihedral periodicity
 
-Wrap every `dihedral` and `improper` deviation. These angles are periodic ($\phi$ and $\phi + 2\pi$
+Wrap every `dihedral` deviation. These angles are periodic ($\phi$ and $\phi + 2\pi$
 are the same geometry), so a penalty on its **deviation** must fold that deviation into
 $[-\pi, \pi]$ first. Write `wrap(dihedral(A,B,C,D) - t)**2` (harmonic), **not** the naïve
 `harmonic(dihedral(A,B,C,D), t)`: the naïve form counts $\phi = +179^\circ$ against $t = -179^\circ$
 as a $358^\circ$ deviation (huge energy, and a gradient pointing the *long way* round) instead of the
 correct $2^\circ$. `wrap(x)` $= \mathrm{atan2}(\sin x, \cos x)$ is exactly the fold the
-built-in `dihedral_restraints_config` / `improper_restraints_config` / conformer `cistrans` and `torsion` apply internally — see the Math table.
+built-in `dihedral_restraints_config` / conformer `cistrans` apply internally — see the Math table.
 For a window, wrap relative to the centre: `flat_bottomed(wrap(dihedral(...) - centre), -w, w)` — and
 because the deviation is wrapped, this window **can straddle $\pm 180^\circ$** (the built-in
 flat-bottomed dihedral cannot). Note `t` / `centre` are in **radians** (a custom formula does no degree
@@ -1709,10 +729,6 @@ custom_restraints_config:
       D: "chain B and resid 90"
     move: [A, C]  # B and D are pinned for this custom term
     weight: 1.0
-  # pull a domain's radius of gyration toward a target compactness
-  - name: compact
-    energy: "harmonic(rg(dom), 12.0)"            # (rg - 12)**2
-    selections: {dom: "chain A and resid 1 to 80"}
   # periodicity-safe dihedral toward 180deg (pi rad): wrap the deviation, NOT harmonic(dihedral, t)
   - name: planar_dihedral
     energy: "wrap(dihedral(A, B, C, D) - 3.14159)**2"
@@ -1728,10 +744,6 @@ custom_restraints_config:
     move: L        # only the ligand moves; both pockets are pinned
     # NOTE: the choice is re-made every step from the CURRENT coordinates — it is not
     # latched at the moment the restraint activates.
-  # NCS symmetry: drive two chains to the same shape via Kabsch superposition (|A| == |B|)
-  - name: ncs
-    energy: "norm(kabsch(A, B) - coords(B))"
-    selections: {A: "chain A and name CA", B: "chain B and name CA"}
   # composable RMSD: compare one moving domain with two reference states
   - name: rmsd_compose
     energy: "rmsd(dom, state1) - rmsd(dom, state2)"
@@ -1742,21 +754,4 @@ custom_restraints_config:
     refs:
       ref1: {ref_cif: "state1.cif", pairing: align}
       ref2: {ref_pdb: "state2.pdb", pairing: align}
-```
-
-#### Registered Python function
-
-The function can be reused via `use:` or passed directly with `add_custom`:
-
-```python
-from rgi_toolkit import custom_restraint, CombinedRestraints
-
-@custom_restraint("symmetric")                 # reusable: config can {use: "symmetric"}
-def energy(ctx):
-    return (ctx.distance("chain A and resid 10", "chain B and resid 10")
-          - ctx.distance("chain A and resid 90", "chain B and resid 90"))**2
-
-restr = CombinedRestraints()
-restr.add_custom(fn=energy, weight=1.0)          # throwaway: no registration
-restr.setup(adapter, config=restraints_config)   # call add_custom BEFORE setup
 ```

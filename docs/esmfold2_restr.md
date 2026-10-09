@@ -2,13 +2,7 @@
 
 [Documentation index](README.md) · [Configuration reference](config.md)
 
-ESMFold2 + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided inference. Full
-`restraints_config` schema & atom-selection DSL: [`config.md`](config.md).
-
-> **Or generate it automatically:** the `generate-rgi-config` skill in Claude Code
-> (`/generate-rgi-config`) or Codex (`$generate-rgi-config`) interviews you about the goal and
-> writes a validated `restraints_config` where this tool expects it. Use it when hand-writing the
-> full config below is unnecessary.
+ESMFold2 + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided inference. `restraints_config` reference & atom-selection DSL: [`config.md`](config.md).
 
 ESMFold2 supports single-sequence input and optional MSAs supplied through
 `ProteinInput(msa=...)`. The complete example below uses single-sequence input.
@@ -60,16 +54,14 @@ ESMFold2's API is **Pythonic**: `restraints_config` is a plain **Python dict** p
 schema is identical to the other tools.
 
 Conformer restraints are **per-input opt-in**: set `conformer_restraints=True` on
-each `ProteinInput`, `DNAInput`, `RNAInput`, or `LigandInput` to enable only
-that chain. Inputs left at the default (`False`) remain unrestrained.
+each `LigandInput` that needs conformer restraints. Ligands left at the
+default (`False`) remain unrestrained.
 
 A ligand = one token/atom, so `token_bonds` carries intra-ligand connectivity and bond ORDERS ride
 on `ChainInfo.ligand_bond_orders` (CCD via `get_ligand_ccd_bonds`, SMILES via Kekulized 3-tuples) —
-so the conformer cistrans term (and the non-ring sp2 half of `plane`) work for both CCD and SMILES
-ligands. `plane`'s ring half needs only ring topology + reference coplanarity, so it fires even without
-bond orders.
+so the conformer cistrans term works for both CCD and SMILES ligands.
 
-The `RESTRAINTS_CONFIG` dict below writes **every usable variable** with a concrete value (distance
+The `RESTRAINTS_CONFIG` dict below shows the documented restraint types with concrete values (distance
 / angle / dihedral / conformer / RMSD, plus config-only `custom`); see [`config.md`](config.md) for the
 alternatives (restraint types and the RMSD `atom_selection_ref` / `atom_selection_target`
 shorthand). `resid` is the **per-chain 1-based ordinal** (qualify protein groups with `chain A and
@@ -77,13 +69,9 @@ shorthand). `resid` is the **per-chain 1-based ordinal** (qualify protein groups
 
 ## Complete example (Python script)
 
-Save this as `restr_example.py`. Folds QBP + its GLN ligand **plus a short DNA duplex and an RNA
-duplex** with a centroid distance, group angle, group dihedral, GLN conformer, whole-structure RMSD,
-a custom (formula) restraint, and **Watson-Crick base pairs on the nucleic acids**, every variable
-spelled out. Chain ids are explicit (`id=`): protein **A**, ligand **B**, DNA strands **C**/**D**,
-RNA strands **E**/**F**; both duplex strands are self-complementary palindromes (`GCATGC` / `GCAUGC`).
-Because ESMFold2's API is already Python, the custom **code path**
-(`CombinedRestraints.add_custom(fn=...)`) is equally available — see config.md.
+Save this as `restr_example.py`. It folds QBP with its GLN ligand and combines
+distance, angle, dihedral, ligand conformer, reference RMSD, and custom restraints.
+Chain IDs are explicit: protein A and ligand B.
 
 ```python
 """ESMFold2 RGI (restraint-guided inference) example via rgi_toolkit."""
@@ -91,12 +79,10 @@ Because ESMFold2's API is already Python, the custom **code path**
 from __future__ import annotations
 
 from esm.models.esmfold2 import (
-    DNAInput,
     ESMFold2InputBuilder,
     EsmFold2Model,
     LigandInput,
     ProteinInput,
-    RNAInput,
     StructurePredictionInput,
 )
 
@@ -121,17 +107,6 @@ RESTRAINTS_CONFIG = {
             "weight": 1.0,
             "harmonic": {"target_distance": 25.0},
         }
-    ],
-    # Watson-Crick base pairs on the DNA (C·D) and RNA (E·F) duplexes. Config-time MACRO:
-    # each entry expands into one WC H-bond distance restraint per donor/acceptor pair,
-    # plus an inter-base coplanarity plane (coplanar=True default). The base is
-    # auto-detected from resname (DNA D-prefix stripped), so no "pair" override is needed.
-    # Setup logs `base_pair=4 pairs -> 10 h-bonds + 4 coplanar` (h-bonds also in `distances=`).
-    "base_pair_restraints_config": [
-        {"residue1": "chain C and resid 1", "residue2": "chain D and resid 6"},  # DNA G-C
-        {"residue1": "chain C and resid 3", "residue2": "chain D and resid 4"},  # DNA A-T
-        {"residue1": "chain E and resid 1", "residue2": "chain F and resid 6"},  # RNA G-C
-        {"residue1": "chain E and resid 3", "residue2": "chain F and resid 4"},  # RNA A-U
     ],
     "angle_restraints_config": [
         {
@@ -158,23 +133,12 @@ RESTRAINTS_CONFIG = {
             "harmonic": {"target_dihedral": 180.0},
         }
     ],
-    "plane_restraints_config": [
-        {
-            "atom_selection1": "chain A and (resid 5 to 20)",
-            "start_sigma": 99999999,
-            "stop_sigma": -1,
-            "move": "all",
-            "weight": 1.0,
-            "flat-bottomed2": {"target_plane2": 0.1},
-        }
-    ],
     "conformer_restraints_config": {
         "start_sigma": 99999999,
         "stop_sigma": -1,
         "bond": {"weight": 1.0, "slack": 0.0},
         "angle": {"weight": 1.0, "slack": 0.0},
         "chiral": {"weight": 1.0, "slack": 0.0},
-        "plane": {"weight": 1.0},  # best-fit-plane, rings + sp2 groups (opt-in); GLN -> plane=2
         "cistrans": {"weight": 1.0, "slack": 0.0},
         "vdw": {"weight": 1.0},
     },
@@ -196,7 +160,7 @@ RESTRAINTS_CONFIG = {
     # Define your OWN restraint as a formula (no Python beyond this dict). This one keeps
     # both lobe-halves (L1, L2) equidistant from the central domain (H) — a difference of
     # two distances, which no single built-in restraint can express. See config.md for the
-    # full vocabulary and the code (ctx-function) path.
+    # expression vocabulary.
     "custom_restraints_config": [
         {
             "name": "equidistant",
@@ -213,19 +177,14 @@ RESTRAINTS_CONFIG = {
     ],
 }
 
-
 def main() -> None:
     model = EsmFold2Model.from_pretrained("biohub/ESMFold2").cuda()
     model.train(False)  # inference / eval mode
 
     spi = StructurePredictionInput(
         sequences=[
-            ProteinInput(id="A", sequence=QBP, conformer_restraints=True),
+            ProteinInput(id="A", sequence=QBP),
             LigandInput(id="B", ccd=["GLN"], conformer_restraints=True),  # glutamine — QBP's natural ligand
-            DNAInput(id="C", sequence="GCATGC"),  # DNA duplex strand 1 (self-complementary palindrome)
-            DNAInput(id="D", sequence="GCATGC"),  # DNA duplex strand 2 (antiparallel partner of C)
-            RNAInput(id="E", sequence="GCAUGC"),  # RNA duplex strand 1 (self-complementary palindrome)
-            RNAInput(id="F", sequence="GCAUGC"),  # RNA duplex strand 2 (antiparallel partner of E)
         ]
     )
 
@@ -240,7 +199,6 @@ def main() -> None:
     with open("out_esm.cif", "w") as fh:
         fh.write(result.complex.to_mmcif())
     print("wrote out_esm.cif")
-
 
 if __name__ == "__main__":
     main()
@@ -269,13 +227,3 @@ If the hook is missing, confirm that `esm_restr` is on `rgi-integration` and
 that the model comes from `esm.models.esmfold2`. The sampler and API tests in
 `esm_restr/tests/models/` cover unchanged no-op sampling, pre-churn gates,
 per-input isolation, and distance optimization for multiple samples.
-
-## External restraint configuration
-
-The shared `config_path` wrapper can replace the whole `restraints_config` or any
-individual restraint section with a JSON/YAML file. Relative includes are resolved at
-the input-file boundary (the working directory for Python input). See
-[shared file-reference syntax](config.md#external-configuration-files).
-An empty `conformer_restraints_config: {}` enables bond/angle/chiral/cistrans/vdw at
-weight 1 on opted-in molecules; plane and torsion require an explicit positive weight.
-The cistrans term retains ligand E/Z; chi/omega/sp2 belong to torsion.

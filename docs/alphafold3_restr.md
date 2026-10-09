@@ -2,13 +2,7 @@
 
 [Documentation index](README.md) · [Configuration reference](config.md)
 
-AlphaFold 3 + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided inference. Full
-`restraints_config` schema & atom-selection DSL: [`config.md`](config.md).
-
-> **Or generate it automatically:** the `generate-rgi-config` skill in Claude Code
-> (`/generate-rgi-config`) or Codex (`$generate-rgi-config`) interviews you about the goal and
-> writes a validated `restraints_config` where this tool expects it. Use it when hand-writing the
-> full config below is unnecessary.
+AlphaFold 3 + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided inference. `restraints_config` reference & atom-selection DSL: [`config.md`](config.md).
 
 AF3 is the **JAX** tool: the restraint spec is built outside the `hk.scan` sampler and the pure
 JIT-able minimizer (`get_minimizer()`) runs inside the compiled loop on each x0 prediction.
@@ -40,10 +34,10 @@ uv pip install -e .                            # compiles the C++ chem component
 AF3 reads RGI from a **`restraints_config` key inside the fold-input JSON** (beside
 `sequences`/`modelSeeds`). Turn restraints on with:
 
-1. **Per sequence** — `"conformer_restraints": true` on each protein, DNA, RNA,
-   or ligand object enables only that chain.
+1. **Per ligand** — `"conformer_restraints": true` enables conformer
+   restraints for that ligand.
 2. **The `restraints_config` object** — the distance / angle / dihedral / conformer /
-   RMSD restraints, plus config-only `custom` restraints (define your own — see config.md). The example below writes **every usable variable** with a concrete value; see
+   RMSD restraints, plus config-only `custom` restraints (define your own — see config.md). The example below shows the documented restraint types with concrete values; see
    [`config.md`](config.md) for the alternatives (restraint types and the RMSD
    `atom_selection_ref` / `atom_selection_target` shorthand).
 
@@ -59,36 +53,15 @@ AF3 reads RGI from a **`restraints_config` key inside the fold-input JSON** (bes
   always runs on the model's device — to compute on CPU, run the whole process on the JAX CPU
   platform).
 - AF3's minimizer converges near-target (~24-25 Å for the distance example); `max_iter: 2000`.
-- **Nucleic residue names**: AF3 encodes `aatype` with the vocabulary that carries a GAP token
-  after `UNK` (`… 20:UNK, 21:'-', 22:A, 23:G …`), while the plain `POLYMER_TYPES` list has no gap
-  entry. Read with the wrong one, proteins stay correct (they sit below the gap) but every nucleic
-  name shifts by one — an adenine token reads as `G`, a uridine as `DA`. The adapter resolves this
-  from the batch's own `is_rna`/`is_dna` flags and logs a warning when it has to shift, so
-  base-pair auto-detection and monomer-library lookups see the real base either way.
-- **Nucleic-acid `conformer_restraints`**: prefer
-  [`monomer_library`](config.md#monomer_library--refinement-targets-for-polymers-not-a-term) over
-  the default reference-conformer targets. AF3 builds `ref_pos` by ETKDG-embedding the free CCD
-  component, which is not refinement geometry (unconjugated exocyclic C-N, P-OH phosphate, and a
-  seed-dependent embed), so plain `bond`/`angle` measurably *worsens* nucleotide geometry.
-- **Reference/link consistency**: free-CCD carbonyl angles can differ from ideal
-  peptide geometry. The shared polymer builder completes link angles against the
-  actual residue-local reference, avoiding impossible angle sums and incompatible
-  peptide planes. This applies to every adapter, including nucleic phosphate links
-  and reference fallbacks in a partially covered monomer library.
-
 `resid` is the **per-chain 1-based ordinal**; there is **no top-level `start_sigma`**.
 
 ## Complete example (input JSON)
 
-Save this as `restr_example.json`. The genetic-search data pipeline builds the MSA, so the JSON has
-no MSA/template fields. It folds QBP + GLN **plus a short DNA duplex and an RNA duplex** and sets a
-centroid distance, group angle, group dihedral, GLN conformer, whole-structure RMSD, a custom
-(formula) restraint, and **Watson-Crick base pairs on the nucleic acids**. The custom entry keeps
-both lobe-halves equidistant from the central domain — a difference of two distances, which no
-single built-in can express (JSON has no comments, so the rationale lives here in prose). Chain ids
-are explicit (`"id"`): protein **A**, ligand **B**, DNA strands **C**/**D**, RNA strands **E**/**F**;
-both duplex strands are self-complementary palindromes (`GCATGC` / `GCAUGC`). It all runs under the
-JAX minimizer (`lax.scan`) like every other restraint.
+Save this as `restr_example.json`. It folds QBP with its GLN ligand and combines
+distance, angle, dihedral, ligand conformer, reference RMSD, and custom restraints.
+The custom expression keeps the two lobe-centroid distances equal.
+Chain IDs are explicit: protein A and ligand B. The local genetic-search
+pipeline builds the MSA. All restraints run through the JAX minimizer.
 
 ```json
 {
@@ -101,8 +74,7 @@ JAX minimizer (`lax.scan`) like every other restraint.
       "protein": {
         "id": "A",
         "sequence": "ADKKLVVATDTAFVPFEFKQGDKYVGFDVDLWAAIAKELKLDYELKPMDFSGIIPALQTKNVDLALAGITITDERKKAIDFSDGYYKSGLLVMVKANNNDVKSVKDLDGKVVAVKSGTGSVDYAKANIKTKDLRQFPNIDNAYMELGTNRADAVLHDTPNILYFIKTAGNGQFKAVGDSLEAQQYGIAFPKGSDELRDKVNGALKTLRENGTYNEIYKKWFGTEPK",
-        "modifications": [],
-        "conformer_restraints": true
+        "modifications": []
       }
     },
     {
@@ -111,11 +83,7 @@ JAX minimizer (`lax.scan`) like every other restraint.
         "ccdCodes": ["GLN"],
         "conformer_restraints": true
       }
-    },
-    { "dna": { "id": "C", "sequence": "GCATGC", "modifications": [] } },
-    { "dna": { "id": "D", "sequence": "GCATGC", "modifications": [] } },
-    { "rna": { "id": "E", "sequence": "GCAUGC", "modifications": [] } },
-    { "rna": { "id": "F", "sequence": "GCAUGC", "modifications": [] } }
+    }
   ],
   "restraints_config": {
     "verbose": true,
@@ -132,12 +100,6 @@ JAX minimizer (`lax.scan`) like every other restraint.
         "weight": 1.0,
         "harmonic": { "target_distance": 25.0 }
       }
-    ],
-    "base_pair_restraints_config": [
-      { "residue1": "chain C and resid 1", "residue2": "chain D and resid 6" },
-      { "residue1": "chain C and resid 3", "residue2": "chain D and resid 4" },
-      { "residue1": "chain E and resid 1", "residue2": "chain F and resid 6" },
-      { "residue1": "chain E and resid 3", "residue2": "chain F and resid 4" }
     ],
     "angle_restraints_config": [
       {
@@ -164,23 +126,12 @@ JAX minimizer (`lax.scan`) like every other restraint.
         "harmonic": { "target_dihedral": 180.0 }
       }
     ],
-    "plane_restraints_config": [
-      {
-        "atom_selection1": "chain A and (resid 5 to 20)",
-        "start_sigma": 99999999,
-        "stop_sigma": -1,
-        "move": "all",
-        "weight": 1.0,
-        "flat-bottomed2": { "target_plane2": 0.1 }
-      }
-    ],
     "conformer_restraints_config": {
       "start_sigma": 99999999,
       "stop_sigma": -1,
       "bond": { "weight": 1.0, "slack": 0.0 },
       "angle": { "weight": 1.0, "slack": 0.0 },
       "chiral": { "weight": 1.0, "slack": 0.0 },
-      "plane": { "weight": 1.0 },
       "cistrans": { "weight": 1.0, "slack": 0.0 },
       "vdw": { "weight": 1.0 }
     },
@@ -252,8 +203,8 @@ The persistent JAX cache above also allows reuse across processes with a compati
 GPU and software environment; loading the executable still takes time.
 
 Changing the atom count, padded selection sizes, enabled terms, neighbour capacity,
-optimizer or line search can require compilation. A changed custom formula or
-Python callable is a program change; numbers written inside that code remain
+optimizer or line search can require compilation. A changed custom formula
+is a program change; numbers written inside the expression remain
 constants. Custom weights, windows, resolved reference targets and reference
 arrays are runtime data. Disabling a term can remove it from the prepared spec
 and change the compiled signature.
@@ -270,13 +221,3 @@ With `verbose: true`, the log prints `built spec: n_active=.. bonds=.. ... dista
 group_angle=.. group_dihedral=..` — confirm the counts are non-zero for what you requested. AF3's
 venv lacks gemmi, so run the workspace `check_dist.py` / `check_conf.py` with a gemmi-enabled venv
 (e.g. `../chai-lab_restr/.venv/bin/python ../check_dist.py <pred.cif>`).
-
-## External restraint configuration
-
-The shared `config_path` wrapper can replace the whole `restraints_config` or any
-individual restraint section with a JSON/YAML file. Relative includes are resolved at
-the input-file boundary (the working directory for Python input). See
-[shared file-reference syntax](config.md#external-configuration-files).
-An empty `conformer_restraints_config: {}` enables bond/angle/chiral/cistrans/vdw at
-weight 1 on opted-in molecules; plane and torsion require an explicit positive weight.
-The cistrans term retains ligand E/Z; chi/omega/sp2 belong to torsion.

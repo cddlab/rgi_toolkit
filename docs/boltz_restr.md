@@ -1,14 +1,8 @@
-# Boltz — Restraint-Guided Inference (RGI)
+# Boltz-2 — Restraint-Guided Inference (RGI)
 
 [Documentation index](README.md) · [Configuration reference](config.md)
 
-Boltz-1/2 + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided inference. Full
-`restraints_config` schema & atom-selection DSL: [`config.md`](config.md).
-
-> **Or generate it automatically:** the `generate-rgi-config` skill in Claude Code
-> (`/generate-rgi-config`) or Codex (`$generate-rgi-config`) interviews you about the goal and
-> writes a validated `restraints_config` where this tool expects it. Use it when hand-writing the
-> full config below is unnecessary.
+Boltz-2 + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided inference. `restraints_config` reference & atom-selection DSL: [`config.md`](config.md).
 
 ## Installation
 
@@ -30,10 +24,10 @@ uv pip install -e ".[cuda]"                     # also pulls the rgi_toolkit eng
 boltz reads RGI from a **top-level `restraints_config:` key nested inside the input YAML** (the
 same YAML that lists the sequences). Two things turn restraints on:
 
-1. **Per sequence** — add `conformer_restraints: true` to each protein, DNA, RNA, or
-   ligand to enable conformer restraints for only that chain.
+1. **Per ligand** — add `conformer_restraints: true` to each ligand
+   that needs conformer restraints.
 2. **The `restraints_config:` block** — the distance / angle / dihedral / conformer /
-   RMSD restraints, plus config-only `custom` restraints (define your own — see config.md). The example below writes **every usable variable** with a concrete value; see
+   RMSD restraints, plus config-only `custom` restraints (define your own — see config.md). The example below shows the documented restraint types with concrete values; see
    [`config.md`](config.md) for what each does, the alternative restraint types (`flat-bottomed`
    etc.), and the RMSD `atom_selection_ref`/`atom_selection_target` shorthand.
 
@@ -44,36 +38,19 @@ distance/RMSD/group entry and once for all conformer terms.
 
 ## Complete example (input YAML)
 
-Save this as `restr_example.yaml`. It folds QBP (glutamine-binding protein) with its natural ligand
-GLN **plus a short DNA duplex and an RNA duplex**, and the full RGI restraint set — centroid
-distance, group angle, group dihedral, GLN conformer, whole-structure RMSD, a custom (formula)
-restraint, and **Watson-Crick base pairs on the nucleic acids** — with every variable spelled out.
-The two nucleic strands of each duplex are self-complementary palindromes (`GCATGC` / `GCAUGC`), so
-identical antiparallel strands pair up. The run command passes `--use_msa_server`, so boltz fetches
-the MSA from the ColabFold server.
+Save this as `restr_example.yaml`. It folds QBP with its GLN ligand and combines
+distance, angle, dihedral, ligand conformer, reference RMSD, and custom restraints.
+The run command uses the ColabFold MSA server.
 
 ```yaml
 sequences:
   - protein:
       id: [A]
       sequence: ADKKLVVATDTAFVPFEFKQGDKYVGFDVDLWAAIAKELKLDYELKPMDFSGIIPALQTKNVDLALAGITITDERKKAIDFSDGYYKSGLLVMVKANNNDVKSVKDLDGKVVAVKSGTGSVDYAKANIKTKDLRQFPNIDNAYMELGTNRADAVLHDTPNILYFIKTAGNGQFKAVGDSLEAQQYGIAFPKGSDELRDKVNGALKTLRENGTYNEIYKKWFGTEPK
-      conformer_restraints: true
   - ligand:
       id: [B]
       ccd: GLN
       conformer_restraints: true
-  - dna:
-      id: [C]
-      sequence: GCATGC        # DNA duplex, strand 1 (self-complementary palindrome)
-  - dna:
-      id: [D]
-      sequence: GCATGC        # DNA duplex, strand 2 (antiparallel partner of C)
-  - rna:
-      id: [E]
-      sequence: GCAUGC        # RNA duplex, strand 1 (self-complementary palindrome)
-  - rna:
-      id: [F]
-      sequence: GCAUGC        # RNA duplex, strand 2 (antiparallel partner of E)
 
 restraints_config:
   verbose: true
@@ -89,21 +66,6 @@ restraints_config:
       weight: 1.0            # no-op for a lone restraint; balances over-constrained coupling only
       harmonic:
         target_distance: 25.0
-  base_pair_restraints_config:
-    # Watson-Crick base pairs on the DNA (C·D) and RNA (E·F) duplexes. This is a
-    # config-time MACRO: each entry expands into one WC H-bond distance restraint per
-    # donor/acceptor pair, plus an inter-base coplanarity plane (coplanar: true default).
-    # The base is auto-detected from resname (DNA D-prefix stripped), so no `pair:`
-    # override is needed. Setup logs `base_pair=4 pairs -> 10 h-bonds + 4 coplanar`
-    # (the h-bonds also land in the `distances=` count, the planes in `plane=`).
-    - residue1: "chain C and resid 1"   # DNA G  -- pairs G-C (3 h-bonds)
-      residue2: "chain D and resid 6"   # DNA C
-    - residue1: "chain C and resid 3"   # DNA A  -- pairs A-T (2 h-bonds)
-      residue2: "chain D and resid 4"   # DNA T
-    - residue1: "chain E and resid 1"   # RNA G  -- pairs G-C (3 h-bonds)
-      residue2: "chain F and resid 6"   # RNA C
-    - residue1: "chain E and resid 3"   # RNA A  -- pairs A-U (2 h-bonds)
-      residue2: "chain F and resid 4"   # RNA U
   angle_restraints_config:
     - atom_selection1: "chain A and (resid 5 to 84)"
       atom_selection2: "chain A and (resid 90 to 180)"
@@ -125,25 +87,12 @@ restraints_config:
       weight: 1.0
       harmonic:
         target_dihedral: 180.0
-  plane_restraints_config:
-    # best-fit-plane flatness of a SELECTED group (Angstrom). Two nucleobases pooled into
-    # ONE entry share a single plane; the type block is optional (omitted -> harmonic
-    # toward 0). Shows up as `n_group_plane=` at setup — NOT in the conformer `plane=`.
-    - atom_selection1: "chain C and resid 1"   # DNA G
-      atom_selection2: "chain D and resid 6"   # DNA C -- pooled: one shared plane
-      start_sigma: 99999999
-      stop_sigma: -1
-      move: "all"
-      weight: 1.0
-      flat-bottomed2:
-        target_plane2: 0.1                     # 0.1 A of pucker is free
   conformer_restraints_config:
     start_sigma: 99999999
     stop_sigma: -1
     bond: {weight: 1.0, slack: 0.0}
     angle: {weight: 1.0, slack: 0.0}
     chiral: {weight: 1.0, slack: 0.0}
-    plane: {weight: 1.0}   # best-fit-plane over rings + sp2 groups (opt-in); GLN's amide + carboxyl groups -> plane=2
     cistrans: {weight: 1.0, slack: 0.0}
     vdw: {weight: 1.0}
   rmsd_restraints_config:
@@ -162,7 +111,7 @@ restraints_config:
     # Define your OWN restraint as a formula (no Python). This one keeps both
     # lobe-halves (L1, L2) equidistant from the central domain (H) — a difference of
     # two distances, which no single built-in restraint can express. See config.md
-    # for the full vocabulary (distance/angle/dihedral/rg/...) and the code path.
+    # for the expression vocabulary.
     - name: equidistant
       energy: "(distance(L1, H) - distance(L2, H))**2"
       selections:
@@ -191,19 +140,9 @@ boltz predict restr_example.yaml \
 ## Verify results
 
 With `verbose: true`, the `setup` log prints `built spec: n_active=.. bonds=.. angles=.. chirals=..
-plane=.. cistrans=.. distances=.. rmsd=.. group_angle=.. group_dihedral=.. ...` — confirm the counts are non-zero for
+cistrans=.. distances=.. rmsd=.. group_angle=.. group_dihedral=.. ...` — confirm the counts are non-zero for
 what you requested (a `finalize` term reading `0.00000` because the spec has 0 of that restraint is
 a silent no-op, not "satisfied"). Cross-check with the workspace helper scripts (run with any
 gemmi/rdkit-enabled venv): `.venv/bin/python ../check_dist.py out_restr_example/**/*.cif` (centroid
 dist of the two groups vs 25 Å) and `.venv/bin/python ../check_conf.py out_restr_example/**/*.cif
 GLN` (ligand bond/angle RMS vs RDKit ideal).
-
-## External restraint configuration
-
-The shared `config_path` wrapper can replace the whole `restraints_config` or any
-individual restraint section with a JSON/YAML file. Relative includes are resolved at
-the input-file boundary (the working directory for Python input). See
-[shared file-reference syntax](config.md#external-configuration-files).
-An empty `conformer_restraints_config: {}` enables bond/angle/chiral/cistrans/vdw at
-weight 1 on opted-in molecules; plane and torsion require an explicit positive weight.
-The cistrans term retains ligand E/Z; chi/omega/sp2 belong to torsion.

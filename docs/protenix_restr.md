@@ -1,14 +1,8 @@
-# Protenix — Restraint-Guided Inference (RGI)
+# Protenix v2 — Restraint-Guided Inference (RGI)
 
 [Documentation index](README.md) · [Configuration reference](config.md)
 
-Protenix + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided inference. Full
-`restraints_config` schema & atom-selection DSL: [`config.md`](config.md).
-
-> **Or generate it automatically:** the `generate-rgi-config` skill in Claude Code
-> (`/generate-rgi-config`) or Codex (`$generate-rgi-config`) interviews you about the goal and
-> writes a validated `restraints_config` where this tool expects it. Use it when hand-writing the
-> full config below is unnecessary.
+Protenix v2 + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided inference. `restraints_config` reference & atom-selection DSL: [`config.md`](config.md).
 
 ## Installation
 
@@ -36,10 +30,10 @@ protenix reads RGI from a **`restraints_config` key nested inside each fold-inpu
 input JSON (the input is a JSON *list* of fold jobs; the key sits beside `name`/`sequences`). Turn
 restraints on with:
 
-1. **Per sequence** — `"conformer_restraints": true` on each protein, DNA, RNA, or
-   ligand object enables conformer restraints for only that chain.
+1. **Per ligand** — `"conformer_restraints": true` on each ligand object
+   enables its conformer restraints.
 2. **The `restraints_config` object** — the distance / angle / dihedral / conformer /
-   RMSD restraints, plus config-only `custom` restraints (define your own — see config.md). The example below writes **every usable variable** with a concrete value; see
+   RMSD restraints, plus config-only `custom` restraints (define your own — see config.md). The example below shows the documented restraint types with concrete values; see
    [`config.md`](config.md) for what each does, the alternative restraint types
    (`flat-bottomed` etc.), and the RMSD `atom_selection_ref`/`atom_selection_target` shorthand.
 
@@ -48,28 +42,19 @@ There is **no top-level `start_sigma`**.
 
 ## Complete example (input JSON)
 
-Save this as `restr_example.json`. Folds QBP + GLN **plus a short DNA duplex and an RNA duplex** with
-a centroid distance, group angle, group dihedral, GLN conformer, whole-structure RMSD, a custom
-(formula) restraint, and **Watson-Crick base pairs on the nucleic acids**, every variable spelled
-out. The custom entry keeps both lobe-halves equidistant from the central domain — a difference of
-two distances, which no single built-in can express (JSON has no comments, so the rationale lives
-here in prose). protenix takes **no `id` field** on sequences — it assigns chain letters **by list
-order**, so here the chains are protein **A**, ligand **B**, DNA strands **C**/**D**, RNA strands
-**E**/**F** (the `base_pair` selectors below reference exactly those). Both duplex strands are
-self-complementary palindromes (`GCATGC` / `GCAUGC`), so identical antiparallel strands pair. The run
-command passes `--use_msa true`, so protenix runs its (ColabFold-compatible) MSA search.
+Save this as `restr_example.json`. It folds QBP with its GLN ligand and combines
+distance, angle, dihedral, ligand conformer, reference RMSD, and custom restraints.
+The custom expression keeps the two lobe-centroid distances equal.
+Protenix assigns chain letters by sequence order: protein A and ligand B.
+The run command enables its MSA search.
 
 ```json
 [
   {
     "name": "qbp_rgi_example",
     "sequences": [
-      { "proteinChain": { "sequence": "ADKKLVVATDTAFVPFEFKQGDKYVGFDVDLWAAIAKELKLDYELKPMDFSGIIPALQTKNVDLALAGITITDERKKAIDFSDGYYKSGLLVMVKANNNDVKSVKDLDGKVVAVKSGTGSVDYAKANIKTKDLRQFPNIDNAYMELGTNRADAVLHDTPNILYFIKTAGNGQFKAVGDSLEAQQYGIAFPKGSDELRDKVNGALKTLRENGTYNEIYKKWFGTEPK", "count": 1, "conformer_restraints": true } },
-      { "ligand": { "ligand": "CCD_GLN", "count": 1, "conformer_restraints": true } },
-      { "dnaSequence": { "sequence": "GCATGC", "count": 1 } },
-      { "dnaSequence": { "sequence": "GCATGC", "count": 1 } },
-      { "rnaSequence": { "sequence": "GCAUGC", "count": 1 } },
-      { "rnaSequence": { "sequence": "GCAUGC", "count": 1 } }
+      { "proteinChain": { "sequence": "ADKKLVVATDTAFVPFEFKQGDKYVGFDVDLWAAIAKELKLDYELKPMDFSGIIPALQTKNVDLALAGITITDERKKAIDFSDGYYKSGLLVMVKANNNDVKSVKDLDGKVVAVKSGTGSVDYAKANIKTKDLRQFPNIDNAYMELGTNRADAVLHDTPNILYFIKTAGNGQFKAVGDSLEAQQYGIAFPKGSDELRDKVNGALKTLRENGTYNEIYKKWFGTEPK", "count": 1 } },
+      { "ligand": { "ligand": "CCD_GLN", "count": 1, "conformer_restraints": true } }
     ],
     "restraints_config": {
       "verbose": true,
@@ -86,12 +71,6 @@ command passes `--use_msa true`, so protenix runs its (ColabFold-compatible) MSA
           "weight": 1.0,
           "harmonic": { "target_distance": 25.0 }
         }
-      ],
-      "base_pair_restraints_config": [
-        { "residue1": "chain C and resid 1", "residue2": "chain D and resid 6" },
-        { "residue1": "chain C and resid 3", "residue2": "chain D and resid 4" },
-        { "residue1": "chain E and resid 1", "residue2": "chain F and resid 6" },
-        { "residue1": "chain E and resid 3", "residue2": "chain F and resid 4" }
       ],
       "angle_restraints_config": [
         {
@@ -118,23 +97,12 @@ command passes `--use_msa true`, so protenix runs its (ColabFold-compatible) MSA
           "harmonic": { "target_dihedral": 180.0 }
         }
       ],
-      "plane_restraints_config": [
-        {
-          "atom_selection1": "chain A and (resid 5 to 20)",
-          "start_sigma": 99999999,
-          "stop_sigma": -1,
-          "move": "all",
-          "weight": 1.0,
-          "flat-bottomed2": { "target_plane2": 0.1 }
-        }
-      ],
       "conformer_restraints_config": {
         "start_sigma": 99999999,
         "stop_sigma": -1,
         "bond": { "weight": 1.0, "slack": 0.0 },
         "angle": { "weight": 1.0, "slack": 0.0 },
         "chiral": { "weight": 1.0, "slack": 0.0 },
-        "plane": { "weight": 1.0 },
         "cistrans": { "weight": 1.0, "slack": 0.0 },
         "vdw": { "weight": 1.0 }
       },
@@ -183,23 +151,14 @@ set -e
 source .venv/bin/activate
 
 protenix pred -i restr_example.json -o out_restr_example \
-    --use_default_params true --use_msa true --seeds 0 --step 200 --sample 1 --cycle 4
+    --model_name protenix-v2 --use_default_params true --use_msa true \
+    --seeds 0 --step 200 --sample 1 --cycle 10
 ```
 
 ## Verify results
 
-With `verbose: true`, `setup` logs `built spec: n_active=.. bonds=.. angles=.. chirals=.. plane=..
+With `verbose: true`, `setup` logs `built spec: n_active=.. bonds=.. angles=.. chirals=..
 cistrans=.. distances=.. rmsd=.. group_angle=.. group_dihedral=..` — confirm the counts are non-zero for what you requested.
 Cross-check the result with the workspace helpers (any gemmi/rdkit venv): `../check_dist.py
 <pred.cif>` (centroid distance vs 25 Å) and `../check_conf.py <pred.cif> GLN` (ligand geometry). If
 the output is all-NaN, you almost certainly ran on Blackwell — re-run on an sm_89 GPU.
-
-## External restraint configuration
-
-The shared `config_path` wrapper can replace the whole `restraints_config` or any
-individual restraint section with a JSON/YAML file. Relative includes are resolved at
-the input-file boundary (the working directory for Python input). See
-[shared file-reference syntax](config.md#external-configuration-files).
-An empty `conformer_restraints_config: {}` enables bond/angle/chiral/cistrans/vdw at
-weight 1 on opted-in molecules; plane and torsion require an explicit positive weight.
-The cistrans term retains ligand E/Z; chi/omega/sp2 belong to torsion.

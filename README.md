@@ -3,83 +3,44 @@
 Restraint-Guided Inference (RGI) toolkit for diffusion-based structure predictors
 (PyTorch and JAX).
 
-The [ColabFold notebooks](docs/colabfold.md) provide forms for **distance, conformer,
-angle, custom and RMSD**, including repeated and mixed restraints with native atom
-selections. Leave `use_rgi` off for vanilla prediction.
+The documentation covers the six models and restraint types described in the
+RGI-Toolkit paper.
 
-**Implemented and available in the following 10 models** (across 8 predictor integrations):
-
-| Model           | Integration | Backend | Details                                              |
-| --------------- | ----------- | ------- | ---------------------------------------------------- |
-| **Boltz-1**     | boltz       | torch   | [`docs/boltz_restr.md`](docs/boltz_restr.md)           |
-| **Boltz-2**     | boltz       | torch   | [`docs/boltz_restr.md`](docs/boltz_restr.md)           |
-| **AlphaFold3**  | alphafold3  | jax     | [`docs/alphafold3_restr.md`](docs/alphafold3_restr.md) |
-| **Protenix v1** | protenix    | torch   | [`docs/protenix_restr.md`](docs/protenix_restr.md)     |
-| **Protenix v2** | protenix    | torch   | [`docs/protenix_restr.md`](docs/protenix_restr.md)     |
-| **ESMFold2**    | esmfold2    | torch   | [`docs/esmfold2_restr.md`](docs/esmfold2_restr.md)     |
-| **OpenFold-3**  | openfold-3  | torch   | [`docs/openfold-3_restr.md`](docs/openfold-3_restr.md) |
-| **Chai-1**      | chai-lab    | torch   | [`docs/chai-lab_restr.md`](docs/chai-lab_restr.md)     |
-| **OpenDDE v1**  | opendde     | torch   | [`docs/opendde_restr.md`](docs/opendde_restr.md)       |
-| **RF3**        | foundry     | torch   | [`docs/foundry_restr.md`](docs/foundry_restr.md)       |
+| Model | Integration | Backend | Details |
+| --- | --- | --- | --- |
+| **Boltz-2** | boltz | torch | [Boltz-2](docs/boltz_restr.md) |
+| **AlphaFold3** | alphafold3 | jax | [AlphaFold3](docs/alphafold3_restr.md) |
+| **Protenix v2** | protenix | torch | [Protenix v2](docs/protenix_restr.md) |
+| **ESMFold2** | esmfold2 | torch | [ESMFold2](docs/esmfold2_restr.md) |
+| **OpenFold-3** | openfold-3 | torch | [OpenFold-3](docs/openfold-3_restr.md) |
+| **Chai-1** | chai-lab | torch | [Chai-1](docs/chai-lab_restr.md) |
 
 See each tool's guide in [`docs/`](docs/) for install / run details, and
-[`docs/config.md`](docs/config.md) for the full `restraints_config` schema. For common failure modes
+[`docs/config.md`](docs/config.md) for the `restraints_config` reference. For common failure modes
 and troubleshooting guidance, see the [`FAQ`](docs/FAQ.md).
 The [`implementation specification`](docs/SPEC.md) covers API contracts, energy and
 gradient conventions, optimizer references, and independent SciPy/E2E validation.
 
 **Ready-to-run samples live in [`examples/`](examples/)** — 4 restraint types (`distance/`,
-`angle/`, `rmsd/`, `custom/dist-diff/`) × 7 predictors, each a real system with a `run.sh`
+`angle/`, `rmsd/`, `custom/dist-diff/`) × 6 documented predictors, each a real system with a `run.sh`
 that finds the matching fork's env and folds. Start there rather than from the snippets
 below: `bash examples/distance/boltz-2/run.sh`. It needs the matching fork checked out as a
 sibling of `RGI-toolkit/` and a GPU node; see [`examples/README.md`](examples/README.md) for the
 per-tool prerequisites.
 
-RF3 examples and their validation runner are maintained in the
-[`foundry_restr` fork](https://github.com/cddlab/foundry_restr/tree/rgi-integration/examples/rgi).
+The documented restraint types are minimized during the denoising loop:
 
-> **Stuck writing a config?** Run the `generate-rgi-config` skill in Claude Code
-> (`/generate-rgi-config`) or Codex (`$generate-rgi-config`). It interviews you about the
-> goal, picks the right restraint type / atom selection / target / sigma window, validates
-> the result, and writes the `restraints_config` to the correct place for your tool. Use it
-> instead of hand-writing from this README when you're unsure. (For adding RGI support to a
-> *new* tool's code, use the separate `implement-rgi` skill.)
-
-Nine **built-in** restraint types, all minimized during the denoising loop to guide coordinate optimization:
-
-- **conformer** — ligand and polymer-local bond / angle / chiral-volume / VdW;
-  ligand E/Z (`cistrans`), optional protein side-chain χ / peptide ω / acyclic sp2
-  torsions (`torsion`, off by default), and optional plane
-  ([servalcat](https://github.com/keitaroyam/servalcat)-style best-fit-plane flatness of aromatic rings + sp2 groups)
-  toward an ideal RDKit geometry, plus **VdW**
-  non-bonded clash avoidance (intramolecular and/or intermolecular; `mode`
-  defaults to `intermolecular`; RDKit elemental radius sums and optional ESD weighting). Near-linear conformer
-  angles use a stable cosine residual. For polymers the targets can instead come from a **CCP4 monomer
-  library** (`monomer_library: true` downloads and caches it) — dictionary targets and
-  optional ESD-based weights, with a local-path option for an existing snapshot.
-  ESD normalization is off by default; enable `conformer_restraints_config.use_esd: true`. Prefer dictionary targets
-  for nucleic acids: the predictor's own reference conformer is an ETKDG embedding of the
-  free CCD component, so restraining toward it *worsens* base geometry.
-- **RMSD** — Kabsch-superposed RMSD of a group toward a reference PDB.
-- **distance** — centroid distance between two atom groups (CG-minimised like every other restraint).
-- **angle** — the angle of three atom groups' centroids (vertex = group 2), in degrees;
-  the angular analogue of the distance restraint.
-- **dihedral** — the dihedral of four atom groups' centroids (axis = groups 2–3), in degrees.
-- **improper** — the same signed torsion as **dihedral**, with separate restraint settings;
-  four atom groups' centroids, axis = groups 2–3, in degrees.
-- **chiral** — the signed volume of four atom groups' centroids, centered on group 1,
-  in Angstrom cubed; the selection-driven counterpart of conformer `chiral`.
-- **plane** — best-fit-plane flatness of any atom group you select (out-of-plane RMS, Angstrom):
-  hold a nucleobase or aromatic side chain flat, make two groups share one plane, or pull a group
-  onto a plane taken from a reference structure. The selection-driven form of the conformer `plane`
-  term (both follow the plane restraints of
-  [servalcat](https://github.com/keitaroyam/servalcat) / Refmac — see
-  [References](#references)), with its own per-entry weight / tolerance / activation window.
-- **base-pair** — a named Watson–Crick nucleotide pair expanded into H-bond distance
-  restraints and an optional base-coplanarity restraint.
-
-Beyond these nine built-ins you can define your **own** restraint — see
-[Custom restraints](#custom-restraints) below.
+- **conformer** — ligand bond lengths, bond angles, chiral volumes, acyclic
+  double-bond E/Z geometry (`cistrans`), and intermolecular VdW repulsion.
+  Geometry targets come from an ideal reference conformer relaxed with RDKit UFF.
+  Each term has an independently adjustable weight.
+- **RMSD** — Kabsch-superposed RMSD of selected atoms to a reference PDB or mmCIF.
+  Multiple reference restraints can be applied simultaneously.
+- **distance** — centroid distance between two atom groups.
+- **angle** — angle between three atom-group centroids, with group 2 at the vertex.
+- **dihedral** — dihedral angle between four atom-group centroids, about groups 2–3.
+- **custom** — a differentiable mathematical expression over named atom selections;
+  see [Custom restraints](#custom-restraints).
 
 The default `method='CG'` solver (a nonlinear conjugate gradient with autodiff gradients)
 runs on GPU or CPU through torch or jax. For Torch, `gpu: false` forces CPU optimization;
@@ -162,10 +123,8 @@ restraints_config = {
         }
     ],
     "conformer_restraints_config": {
-        # Applied only to sequence/chain objects with conformer_restraints: true.
+        # Applied to ligand objects with conformer_restraints: true.
         # An empty mapping enables bond/angle/chiral/cistrans/vdw at weight 1.
-        # "torsion": {"weight": 1.0},        # optional chi / omega / sp2 torsions
-        # "plane": {"weight": 1.0},          # optional; overlapping cistrans/torsion takes priority
     },
     "custom_restraints_config": [            # custom energy formula (DSL)
         {"name": "symmetric",               # keep two inter-domain distances equal
@@ -175,8 +134,6 @@ restraints_config = {
     ],
     # "rmsd_restraints_config": [{"ref_pdb": "ref.pdb", "harmonic": {"target_rmsd": 0.0}}],
     # "dihedral_restraints_config": [...],   # group-centroid dihedral: 4 groups, axis = 2-3
-    # "improper_restraints_config": [...],   # same torsion as dihedral, separate settings
-    # "chiral_restraints_config": [...],     # signed volume: 4 groups, center = 1
 }
 
 # Create one instance per structure. setup() takes the config dict.
@@ -188,10 +145,6 @@ coords = restr.minimize(coords, step, sigma)   # torch/numpy: mutates in place +
 # After sampling (optional per-term energy log when verbose):
 restr.finalize(coords, step)
 ```
-
-Use `{"config_path": "configs/restraints.yaml"}` at the root or in an individual
-restraint section to load a JSON/YAML configuration. Includes resolve relative to
-their containing file; see [external configuration files](docs/config.md#external-configuration-files).
 
 For a **JAX** tool whose loop runs inside `lax.scan` (no Python callbacks), build the
 spec outside the scan and grab the pure closure with `restr.get_minimizer()`
@@ -249,96 +202,20 @@ reference-side value as `ref1 and <selection>`, and define `refs.ref1` with `ref
 `ref_cif`. The ref group stays fixed; `move` may name only prediction-side group indices
 (`all`/omitted = all prediction groups).
 
-### Angle / dihedral / improper restraints
+### Angle / dihedral restraints
 
-`angle_restraints_config` (3 groups, vertex = group 2), `dihedral_restraints_config`, and
-`improper_restraints_config` (both 4 groups, axis = group 2–3) restrain centroid geometry — distinct
-from the per-atom `angle` / `cistrans` / `torsion` *conformer* terms (internally these are the
-`group_angle` / `group_dihedral` / `group_improper` energy terms). Same four
-types as distance (`harmonic` / `flat-bottomed` / `flat-bottomed1` / `flat-bottomed2`),
-but targets are in **degrees** (`target_angle` / `target_dihedral` / `target_improper`). `weight` defaults to
-1.0 and translates any group size rigidly. `move` selects which groups are free (default:
-the arms move, the anchor group is pinned). With ref groups, references stay fixed and
-`move` selects prediction-side group indices; omitted/`all`/`both` moves every prediction group.
-
-### Chiral restraints
-
-`chiral_restraints_config` restrains `(c2-c1) dot ((c3-c1) cross (c4-c1))`, where each
-`c` is a selected atom group's geometric centroid. This is the same signed volume as
-conformer `chiral`, in **Angstrom cubed without division by six**. Single-atom selections
-use the same convention. All four groups move by default; `move` can pin any subset.
-The four distance-style penalties use `target_chiral` / `target_chiral1` / `target_chiral2`.
-Each entry has its own weight and sigma/step window and supports reference groups.
-
-```yaml
-chiral_restraints_config:
-  - atom_selection1: "chain A and resid 10 and name CA"
-    atom_selection2: "chain A and resid 10 and name N"
-    atom_selection3: "chain A and resid 10 and name C"
-    atom_selection4: "chain A and resid 10 and name CB"
-    harmonic: {target_chiral: 2.0}
-```
-
-Choose the sign for the ordered selections; swapping two groups reverses it.
-Custom formulas provide `chiral(A,B,C,D)`, for example `harmonic(chiral(A,B,C,D), 2.0)`;
-Python callables provide `ctx.chiral("A", "B", "C", "D")`. See
-[`docs/config.md`](docs/config.md#chiral_restraints_config-list) for group and reference examples.
-
-### Plane restraints
-
-`plane_restraints_config` restrains the **out-of-plane RMS deviation** of a group you select
-(internally the `group_plane` energy term). Several `atom_selectionN` in one entry are **pooled into
-a single plane** — that is how you say "keep these two groups coplanar":
-
-```yaml
-plane_restraints_config:
-  # hold one nucleobase flat, tolerating 0.1 A of pucker, only below sigma 2
-  - atom_selection1: "chain A and resid 5 and not backbone"
-    start_sigma: 2.0
-    flat-bottomed2: {target_plane2: 0.1}
-
-  # two stacked bases share one plane; only the first moves
-  - atom_selection1: "chain A and resid 10 and not backbone"
-    atom_selection2: "chain B and resid 24 and not backbone"
-    move: 1
-```
-
-The restraint-type block is **optional** (omitted ⇒ `harmonic` toward 0, since a plane's target is
-always 0); targets are in **Angstrom** (`target_plane` / `target_plane1` / `target_plane2`). `move`
-defaults to every group free — a plane has no anchor to pin. Writing one group as
-`refN and <selection>` switches the meaning: the plane is taken from the **reference** structure and
-held fixed, so the prediction group is pulled *onto* it. See
-[`docs/config.md`](docs/config.md#plane_restraints_config-list).
-
-### Base-pair restraints
-
-`base_pair_restraints_config` restrains two user-selected nucleotides to Watson–Crick geometry.
-Each entry expands into the appropriate donor/acceptor distance restraints and, by default, a
-best-fit plane over both bases. Standard GC/CG, AT/TA, and AU/UA orientations are detected from
-`resname`;
-set `pair: GU` explicitly for a wobble pair or when residue names are unavailable.
-
-```yaml
-base_pair_restraints_config:
-  - residue1: "chain A and resid 5"   # exactly one nucleotide
-    residue2: "chain B and resid 12"  # exactly one nucleotide
-    # pair: GC          # optional override; GU must be explicit
-    # target: [2.7, 3.1]  # H-bond distance window; scalar means harmonic
-    # coplanar: true    # add inter-base coplanarity (default true)
-    # move: both        # both / 1 / 2; choose which residue the H-bonds move
-```
-
-The sigma/step window and `move` apply to the generated H-bond distances **and** to the coplanarity
-plane (which is emitted as a `plane_restraints_config` restraint, so `stop_sigma` releases both
-together). See [`docs/config.md`](docs/config.md#base_pair_restraints_config-list) for atom pairs,
-validation rules, and gating details.
+`angle_restraints_config` uses three groups with group 2 at the vertex.
+`dihedral_restraints_config` uses four groups with groups 2–3 defining the axis.
+Both restrain centroid geometry and accept the same four penalty types as distance.
+Targets are in **degrees** (`target_angle` / `target_dihedral`); `weight` defaults
+to 1.0. `move` selects which groups are free. By default, the arms move and the
+anchor groups are pinned. Reference groups stay fixed; with references,
+omitted/`all`/`both` moves every prediction group.
 
 ### Custom restraints
 
-Define a custom restraint as a differentiable energy. Both authoring methods use
-the same vocabulary and run on every backend:
-
-**Config only** — write the energy as a math **formula** over named selections, no Python:
+Define a custom restraint as a differentiable mathematical expression over named
+selections. The same formula runs on Torch and JAX:
 
 ```yaml
 custom_restraints_config:
@@ -350,23 +227,8 @@ custom_restraints_config:
     weight: 1.0
 ```
 
-**Code** — write `energy(ctx) -> scalar` and pass it directly (or register it for config reuse):
-
-```python
-from rgi_toolkit import CombinedRestraints, custom_restraint
-
-restr = CombinedRestraints()
-restr.add_custom(                         # throwaway: a callable, no registration
-    fn=lambda ctx: (ctx.distance("chain A and resid 10", "chain B and resid 10")
-                  - ctx.distance("chain A and resid 90", "chain B and resid 90"))**2)
-restr.setup(adapter, config=restraints_config)   # add_custom must precede setup
-
-@custom_restraint("symmetric")            # reusable: config can {use: "symmetric"}
-def energy(ctx): ...
-```
-
-`ctx` / the formula expose one **vocabulary**: geometry (`distance` `angle` `dihedral` `improper` `chiral` `centroid`
-`rg` `norm` `dot`), penalty (`harmonic` `flat_bottomed` `flat_bottomed1` `flat_bottomed2`), and math
+The formula exposes geometry (`distance` `angle` `dihedral` `centroid`
+`norm` `dot`), penalty (`harmonic` `flat_bottomed` `flat_bottomed1` `flat_bottomed2`), and math
 (`sqrt` `exp` `log` `abs` `sin` `cos` `clip` `minimum` `maximum` `where` `sum` + arithmetic). Branch with
 `where(cond, a, b)` or the conditional expression `a if cond else b` (the same thing — `if` is lowered to
 `where`), combining conditions with `and` / `or` / `not`; branching is elementwise and **evaluates both
@@ -411,7 +273,7 @@ For a SMILES ligand, pass its source-graph molecule as `stereo_mol` after renumb
 to `mol`/`global_indices` order. This keeps the input `@`/`@@` and E/Z labels available
 when the framework's reference conformer has already inverted them.
 
-Tool-side adapters are tiny — see `src/rgi_toolkit/{boltz,protenix,chai,openfold3,opendde}/adapter.py`
+Tool-side adapters are tiny — see `src/rgi_toolkit/{boltz,protenix,chai,openfold3}/adapter.py`
 for worked examples, and the shared `implement-rgi` skill under `.claude/skills/` and
 `.agents/skills/` for the full integration recipe.
 
@@ -427,7 +289,7 @@ task test       # alias for test-local
 ```
 
 Prepare the development environment with
-`uv sync --extra torch --extra jax --extra notebook`. Test tasks use an activated
+`uv sync --extra torch --extra jax`. Test tasks use an activated
 environment when present and otherwise use the project environment, without
 resolving or replacing its dependencies. The short CI selection includes numerical
 parity and representative public-API minimization tests; exhaustive combinations,
@@ -453,24 +315,3 @@ for Controllable Biomolecular Structure Prediction.* bioRxiv, preprint, version 
   note    = {Preprint, version 1}
 }
 ```
-
-## References
-
-The **plane** restraints — both the conformer `plane` term and the standalone
-`plane_restraints_config` (`group_plane`) — follow the plane-restraint formulation of
-[**servalcat**](https://github.com/keitaroyam/servalcat) / Refmac: a whole planar *group* of atoms
-is restrained by the RMS deviation of its atoms from their own best-fit plane, instead of the
-per-centre improper (signed-volume) terms this project used before. The base-pair macro follows the
-same tools (a Watson–Crick pair is imposed as H-bond distances plus base coplanarity, not as a
-dedicated base-pair energy), and `monomer_library` reads the CCP4 monomer library that
-Refmac/servalcat refine against. The implementation here is independent — autodiff gradients through
-a stop-gradient plane normal, the four flat-bottomed penalty shapes, and sigma/step gating inside a
-diffusion sampler.
-
-- Yamashita, K., Palmer, C. M., Burnley, T. & Murshudov, G. N. (2021). *Cryo-EM single-particle
-  structure refinement and map calculation using Servalcat.* Acta Cryst. **D77**, 1282–1291.
-  <https://doi.org/10.1107/S2059798321009475>
-- Yamashita, K., Wojdyr, M., Long, F., Nicholls, R. A. & Murshudov, G. N. (2023).
-  *GEMMI and Servalcat restrain REFMAC5.* Acta Cryst. **D79**, 368–373.
-  <https://doi.org/10.1107/S2059798323002413>
-- CCP4 monomer library: <https://github.com/MonomerLibrary/monomers>

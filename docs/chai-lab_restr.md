@@ -2,13 +2,7 @@
 
 [Documentation index](README.md) · [Configuration reference](config.md)
 
-Chai-1 + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided inference. Full
-`restraints_config` schema & atom-selection DSL: [`config.md`](config.md).
-
-> **Or generate it automatically:** the `generate-rgi-config` skill in Claude Code
-> (`/generate-rgi-config`) or Codex (`$generate-rgi-config`) interviews you about the goal and
-> writes a validated `restraints_config` where this tool expects it. Use it when hand-writing the
-> full config below is unnecessary.
+Chai-1 + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided inference. `restraints_config` reference & atom-selection DSL: [`config.md`](config.md).
 
 ## Installation
 
@@ -36,12 +30,12 @@ the boltz/protenix style). chai loads it verbatim with `yaml.safe_load`. The seq
 separate FASTA (the ligand is a SMILES string).
 
 Chai's FASTA cannot carry the flag, so conformer opt-in lives **in the sidecar** as a
-`conformer_restraints` map keyed by chain id. Set each protein, DNA, RNA, or ligand
-chain independently; absent/false chains remain unrestrained. Chai drops
+`conformer_restraints` map keyed by ligand chain ID. Set each ligand
+independently; absent/false entries remain unrestrained. Chai drops
 intra-ligand bond orders at every layer, so the adapter rebuilds the molecule from the source SMILES
-(Kekulized → correct valence + aromaticity + stereo) — bond/angle/chiral/plane/cistrans/torsion are available when enabled.
+(Kekulized → correct valence + aromaticity + stereo) — bond/angle/chiral/cistrans targets retain the input chemistry.
 
-The sidecar below writes **every usable variable** with a concrete value; see
+The sidecar below shows the documented restraint types with concrete values; see
 [`config.md`](config.md) for the alternatives (restraint types, config-only `custom`
 restraints, and the RMSD `atom_selection_ref` / `atom_selection_target` shorthand). `resid` is the
 **per-chain 1-based ordinal** (qualify protein groups with `chain A and (...)`). There is **no
@@ -49,32 +43,20 @@ top-level `start_sigma`**.
 
 ## Complete example (FASTA and sidecar YAML)
 
-Save the FASTA as `restr_example.fasta`. chai assigns chain letters **by record order**, so here the
-chains are protein **A**, ligand **B**, DNA strands **C**/**D**, RNA strands **E**/**F** (the
-`base_pair` selectors in the sidecar reference exactly those). Both duplex strands are
-self-complementary palindromes (`GCATGC` / `GCAUGC`):
+Save the FASTA as `restr_example.fasta`. Chai assigns chain letters by record
+order, so the protein is chain A and the ligand is chain B:
 
 ```text
 >protein|name=qbp
 ADKKLVVATDTAFVPFEFKQGDKYVGFDVDLWAAIAKELKLDYELKPMDFSGIIPALQTKNVDLALAGITITDERKKAIDFSDGYYKSGLLVMVKANNNDVKSVKDLDGKVVAVKSGTGSVDYAKANIKTKDLRQFPNIDNAYMELGTNRADAVLHDTPNILYFIKTAGNGQFKAVGDSLEAQQYGIAFPKGSDELRDKVNGALKTLRENGTYNEIYKKWFGTEPK
 >ligand|name=gln
 N[C@@H](CCC(N)=O)C(=O)O
->dna|name=dna_strand1
-GCATGC
->dna|name=dna_strand2
-GCATGC
->rna|name=rna_strand1
-GCAUGC
->rna|name=rna_strand2
-GCAUGC
 ```
 
-Save the sidecar as `restr_example.yaml` (this whole file is the `restraints_config` dict, with a
-centroid distance, group angle, group dihedral, GLN conformer, whole-structure RMSD restraint, and
-**Watson-Crick base pairs on the DNA/RNA duplexes**). The `conformer_restraints` map opts in only
-the protein (A) and ligand (B); the base pairs need no per-chain flag on the nucleic acids (their
-coplanarity plane is injected with its own weight). The run command passes
-`--use-msa-server --use-templates-server`, so chai fetches MSAs/templates from the ColabFold server.
+Save the sidecar as `restr_example.yaml`. This file contains the restraint
+configuration directly, including distance, angle, dihedral, ligand conformer,
+reference RMSD, and custom restraints. The `conformer_restraints` map enables
+ligand B. The run command fetches MSAs/templates from the ColabFold server.
 
 ```yaml
 verbose: true
@@ -90,20 +72,6 @@ distance_restraints_config:
     weight: 1.0            # no-op for a lone restraint; balances over-constrained coupling only
     harmonic:
       target_distance: 25.0
-base_pair_restraints_config:
-  # Watson-Crick base pairs on the DNA (C·D) and RNA (E·F) duplexes. Config-time MACRO:
-  # each entry expands into one WC H-bond distance restraint per donor/acceptor pair, plus
-  # an inter-base coplanarity plane (coplanar: true default). The base is auto-detected
-  # from resname (DNA D-prefix stripped), so no `pair:` override is needed. Setup logs
-  # `base_pair=4 pairs -> 10 h-bonds + 4 coplanar` (h-bonds also land in `distances=`).
-  - residue1: "chain C and resid 1"   # DNA G  -- pairs G-C (3 h-bonds)
-    residue2: "chain D and resid 6"   # DNA C
-  - residue1: "chain C and resid 3"   # DNA A  -- pairs A-T (2 h-bonds)
-    residue2: "chain D and resid 4"   # DNA T
-  - residue1: "chain E and resid 1"   # RNA G  -- pairs G-C (3 h-bonds)
-    residue2: "chain F and resid 6"   # RNA C
-  - residue1: "chain E and resid 3"   # RNA A  -- pairs A-U (2 h-bonds)
-    residue2: "chain F and resid 4"   # RNA U
 angle_restraints_config:
   - atom_selection1: "chain A and (resid 5 to 84)"
     atom_selection2: "chain A and (resid 90 to 180)"
@@ -125,27 +93,14 @@ dihedral_restraints_config:
     weight: 1.0
     harmonic:
       target_dihedral: 180.0
-plane_restraints_config:
-  # best-fit-plane flatness of a SELECTED group (Angstrom); several atom_selectionN in one
-  # entry are POOLED into a single plane. The type block is optional (omitted -> harmonic
-  # toward 0). Reported as `n_group_plane=` at setup, separately from the conformer `plane=`.
-  - atom_selection1: "chain A and (resid 5 to 20)"
-    start_sigma: 99999999
-    stop_sigma: -1
-    move: "all"
-    weight: 1.0
-    flat-bottomed2:
-      target_plane2: 0.1
 conformer_restraints:
-  A: true                      # protein chain
-  B: true                      # ligand chain
+  B: true
 conformer_restraints_config:
   start_sigma: 99999999
   stop_sigma: -1
   bond: {weight: 1.0, slack: 0.0}
   angle: {weight: 1.0, slack: 0.0}
   chiral: {weight: 1.0, slack: 0.0}
-  plane: {weight: 1.0}   # best-fit-plane over rings + sp2 groups (opt-in); GLN's amide + carboxyl groups -> plane=2
   cistrans: {weight: 1.0, slack: 0.0}
   vdw: {weight: 1.0}
 rmsd_restraints_config:
@@ -164,7 +119,7 @@ custom_restraints_config:
   # Define your OWN restraint as a formula (no Python). This one keeps both
   # lobe-halves (L1, L2) equidistant from the central domain (H) — a difference of
   # two distances, which no single built-in restraint can express. See config.md
-  # for the full vocabulary (distance/angle/dihedral/rg/...) and the code path.
+  # for the expression vocabulary.
   - name: equidistant
     energy: "(distance(L1, H) - distance(L2, H))**2"
     selections:
@@ -203,17 +158,7 @@ python -m chai_lab.main fold \
 ## Verify results
 
 With `verbose: true`, `setup` logs `built spec: n_active=.. bonds=.. angles=.. chirals=..
-plane=.. cistrans=.. distances=.. rmsd=.. group_angle=.. group_dihedral=..` — confirm the counts are non-zero for what
+cistrans=.. distances=.. rmsd=.. group_angle=.. group_dihedral=..` — confirm the counts are non-zero for what
 you requested. Cross-check with the workspace helpers (chai's venv has gemmi/rdkit):
 `../check_dist.py <pred.cif>` (centroid distance vs 25 Å) and `../check_conf.py <pred.cif> GLN`
 (ligand geometry).
-
-## External restraint configuration
-
-The shared `config_path` wrapper can replace the whole `restraints_config` or any
-individual restraint section with a JSON/YAML file. Relative includes are resolved at
-the input-file boundary (the working directory for Python input). See
-[shared file-reference syntax](config.md#external-configuration-files).
-An empty `conformer_restraints_config: {}` enables bond/angle/chiral/cistrans/vdw at
-weight 1 on opted-in molecules; plane and torsion require an explicit positive weight.
-The cistrans term retains ligand E/Z; chi/omega/sp2 belong to torsion.

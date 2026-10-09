@@ -3,15 +3,15 @@
 `rgi_toolkit` is the shared **Restraint-Guided Inference (RGI)** engine — it injects
 differentiable distance / angle / dihedral / ligand-conformer / RMSD / custom restraints into
 the denoising loop of diffusion structure predictors, on both the **torch** and **jax**
-backends. One engine is integrated into eight models across six predictors (boltz, protenix,
-chai-lab, openfold-3, esmfold2, alphafold3).
+backends. The documentation covers six models: Boltz-2, Protenix-v2, Chai-1,
+OpenFold3, ESMFold2, and AlphaFold3.
 
 This guide is for people **hacking on the engine itself**. Start here, then:
 
 - [`README.md`](README.md) — user-facing usage and the restraint catalogue.
 - [`AGENTS.md`](AGENTS.md) (= `CLAUDE.md`) — the deep architecture reference and full list of
   design invariants.
-- [`docs/config.md`](docs/config.md) — the complete `restraints_config` schema and selection DSL.
+- [`docs/config.md`](docs/config.md) — the documented `restraints_config` keys and selection DSL.
 - [`docs/`](docs/) — one per-tool integration write-up (`boltz_restr.md`, `alphafold3_restr.md`, …).
 
 Adding RGI support to a **new** predictor is a different task — use the `implement-rgi` skill
@@ -73,10 +73,8 @@ tools. The full list is in [`AGENTS.md`](AGENTS.md) ("Key design points"); the e
   coordinate tensor handed to `minimize`** (after any reshape). These must match across tools.
 - **`CombinedRestraints` is instance-scoped** — one fresh instance per structure, never a
   singleton. This is what keeps batch runs from leaking the previous structure's config.
-- **Gating.** `minimize` is gated on the **pre-step schedule sigma** in every tool. A restraint
-  uses a **sigma window** (`start_sigma`/`stop_sigma`) **XOR** a **step window**
-  (`start_step`/`stop_step`) — mutually exclusive, enforced at config time. Prefer sigma windows;
-  step counts differ per tool, so step windows are not portable.
+- **Gating.** `minimize` is gated on the pre-step schedule sigma in every tool.
+  Use `start_sigma` and `stop_sigma` to control restraint activation.
 
 ## Adding or changing a restraint
 
@@ -86,11 +84,11 @@ The data flow is three layers plus autodiff (details in [`AGENTS.md`](AGENTS.md)
   `active_sites`.
 - `src/rgi_toolkit/energy/*` — the differentiable maths, one file per backend.
 - `src/rgi_toolkit/optim/{torch,jax}_optim.py` — the CG solver that minimises the active coords.
-- `src/rgi_toolkit/featurizer.py` — turns RDKit mols into bond/angle/chiral/cistrans/plane/VdW
+- `src/rgi_toolkit/featurizer.py` — turns RDKit mols into bond/angle/chiral/cistrans/VdW
   restraints.
 - `src/rgi_toolkit/config.py` — parses the shared `restraints_config`.
 - `src/rgi_toolkit/selection.py` — the atom-selection DSL.
-- `src/rgi_toolkit/custom/` — the extension point for user-defined (formula/`ctx`-fn) restraints.
+- `src/rgi_toolkit/custom/` — the extension point for user-defined formula restraints.
 
 The rule: a **new energy term** ⇒ implement it in all three backends **and** add a
 `tests/test_backend_parity.py` case. A new **per-entry gated** term additionally needs its gate
@@ -121,6 +119,6 @@ drift out of parity.
 | Doc                                    | Covers                                          |
 | -------------------------------------- | ----------------------------------------------- |
 | [`README.md`](README.md)               | user-facing usage, restraint catalogue          |
-| [`docs/config.md`](docs/config.md)       | full `restraints_config` schema + selection DSL |
+| [`docs/config.md`](docs/config.md)       | documented restraint configuration + selection DSL |
 | [`docs/`](docs/) `*_restr.md`            | per-tool integration notes                      |
 | [`AGENTS.md`](AGENTS.md) / `CLAUDE.md` | deep architecture + invariants                  |

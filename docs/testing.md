@@ -3,7 +3,7 @@
 Prepare the CPU development environment with:
 
 ```bash
-uv sync --extra torch --extra jax --extra notebook
+uv sync --extra torch --extra jax
 ```
 
 The test tasks use `uv run --active --no-sync`: an activated virtual environment
@@ -34,8 +34,8 @@ coverage. The selection includes:
   steps, and preservation of the last accepted coordinates.
 - VdW topology exclusions, dense versus neighbor-list energies and gradients,
   overflow, exact overlaps, and contact-cache validity.
-- Small public-API minimizations for distance, angle, dihedral, improper, plane,
-  RMSD, conformer stereochemistry, custom energies, and intra/intermolecular VdW.
+- Small public-API minimizations for distance, angle, dihedral, RMSD,
+  ligand conformer stereochemistry, custom energies, and intermolecular VdW.
   These retain independent SciPy/geometry assertions and selected JAX execution.
 - CPU compilation defaults, explicit opt-out, and simulated compiler failure
   fallback without changing CUDA failure state.
@@ -54,7 +54,7 @@ This is a curated subset, not a replacement for full validation.
 1. All ordinary numerical regressions, exhaustive solver/parameter combinations,
    large atom groups, and public-API end-to-end tests, using two file-grouped workers.
 2. All `cpu_compile` tests with compilation enabled, including compiled energy and
-   gradient parity, dynamic VdW modes, custom restraints, CG/L-BFGS, and dtype changes.
+   gradient parity, dynamic VdW, custom restraints, CG/L-BFGS, and dtype changes.
 
 The two stages together include every CI case. No existing regression is deleted or weakened.
 Actual compiler checks require a C++ compiler and Python development headers;
@@ -65,11 +65,6 @@ PyTorch and JAX plus the test dependencies, then run `task test-gpu` in a GPU
 allocation. The development lockfile installs CPU-only PyTorch, so it is not a
 GPU test environment. The task does not sync or replace an activated environment's
 framework packages. GPU tests are additional to the complete CPU suite.
-Native conditional graph tests additionally require the Linux `torch` extra's
-`cuda-bindings` dependency, CUDA >=12.8, and PyTorch 2.8. They exercise shared
-SciPy Strong Wolfe contracts, native L-BFGS limits, replay buffer freshness,
-capture failure cleanup, geometry-fit reconstruction and failure recovery, and
-the absence of per-iteration host scalar reads.
 All compiler-heavy checks remain outside short CI.
 
 ## Maintaining coverage

@@ -3,12 +3,7 @@
 [Documentation index](README.md) · [Configuration reference](config.md)
 
 OpenFold3-preview + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided inference.
-Full `restraints_config` schema & atom-selection DSL: [`config.md`](config.md).
-
-> **Or generate it automatically:** the `generate-rgi-config` skill in Claude Code
-> (`/generate-rgi-config`) or Codex (`$generate-rgi-config`) interviews you about the goal and
-> writes a validated `restraints_config` where this tool expects it. Use it when hand-writing the
-> full config below is unnecessary.
+`restraints_config` reference & atom-selection DSL: [`config.md`](config.md).
 
 ## Installation
 
@@ -33,12 +28,12 @@ export OPENFOLD_CACHE="$HOME/.openfold3"
 OpenFold reads RGI from a **`restraints_config` field per query** in the input JSON
 (`queries.<name>.restraints_config`). Two things turn conformer restraints on:
 
-1. **Per chain** — add `"conformer_restraints": true` to each protein, DNA, RNA, or
-   ligand chain to enable conformer restraints for only that chain.
+1. **Per ligand** — add `"conformer_restraints": true` to each ligand
+   chain that needs conformer restraints.
 2. **The `restraints_config` block** — the distance / angle / dihedral / conformer / RMSD
    restraints (below). Ligands are identified by `molecule_type_id == LIGAND` and accept `ccd_codes`.
 
-The example below writes **every usable variable** with a concrete value (distance / angle /
+The example below shows the documented restraint types with concrete values (distance / angle /
 dihedral / conformer / RMSD, plus config-only `custom`); see [`config.md`](config.md) for the alternatives
 (restraint types and the RMSD `atom_selection_ref` / `atom_selection_target` shorthand). `resid` is
 the **per-chain 1-based ordinal** (qualify protein groups with `chain A and (...)`). There is **no
@@ -46,15 +41,11 @@ top-level `start_sigma`**.
 
 ## Complete example (input JSON)
 
-Save this as `restr_example.json`. Folds QBP + GLN **plus a short DNA duplex and an RNA duplex** with
-a centroid distance, group angle, group dihedral, GLN conformer, whole-structure RMSD, a custom
-(formula) restraint, and **Watson-Crick base pairs on the nucleic acids**, every variable spelled
-out. The custom entry keeps both lobe-halves equidistant from the central domain — a difference of
-two distances, which no single built-in can express (JSON has no comments, so the rationale lives
-here in prose). Chain ids are explicit (`chain_ids`): protein **A**, ligand **B**, DNA strands
-**C**/**D**, RNA strands **E**/**F**; both duplex strands are self-complementary palindromes
-(`GCATGC` / `GCAUGC`). The run command passes `--use-msa-server true`, so OpenFold fetches the MSA
-from the ColabFold server.
+Save this as `restr_example.json`. It folds QBP with its GLN ligand and combines
+distance, angle, dihedral, ligand conformer, reference RMSD, and custom restraints.
+The custom expression keeps the two lobe-centroid distances equal.
+Chain IDs are explicit: protein A and ligand B. The run command fetches
+the MSA from the ColabFold server.
 
 ```json
 {
@@ -64,19 +55,14 @@ from the ColabFold server.
         {
           "molecule_type": "protein",
           "chain_ids": ["A"],
-          "sequence": "ADKKLVVATDTAFVPFEFKQGDKYVGFDVDLWAAIAKELKLDYELKPMDFSGIIPALQTKNVDLALAGITITDERKKAIDFSDGYYKSGLLVMVKANNNDVKSVKDLDGKVVAVKSGTGSVDYAKANIKTKDLRQFPNIDNAYMELGTNRADAVLHDTPNILYFIKTAGNGQFKAVGDSLEAQQYGIAFPKGSDELRDKVNGALKTLRENGTYNEIYKKWFGTEPK",
-          "conformer_restraints": true
+          "sequence": "ADKKLVVATDTAFVPFEFKQGDKYVGFDVDLWAAIAKELKLDYELKPMDFSGIIPALQTKNVDLALAGITITDERKKAIDFSDGYYKSGLLVMVKANNNDVKSVKDLDGKVVAVKSGTGSVDYAKANIKTKDLRQFPNIDNAYMELGTNRADAVLHDTPNILYFIKTAGNGQFKAVGDSLEAQQYGIAFPKGSDELRDKVNGALKTLRENGTYNEIYKKWFGTEPK"
         },
         {
           "molecule_type": "ligand",
           "chain_ids": ["B"],
           "ccd_codes": "GLN",
           "conformer_restraints": true
-        },
-        { "molecule_type": "dna", "chain_ids": ["C"], "sequence": "GCATGC" },
-        { "molecule_type": "dna", "chain_ids": ["D"], "sequence": "GCATGC" },
-        { "molecule_type": "rna", "chain_ids": ["E"], "sequence": "GCAUGC" },
-        { "molecule_type": "rna", "chain_ids": ["F"], "sequence": "GCAUGC" }
+        }
       ],
       "restraints_config": {
         "verbose": true,
@@ -93,12 +79,6 @@ from the ColabFold server.
             "weight": 1.0,
             "harmonic": { "target_distance": 25.0 }
           }
-        ],
-        "base_pair_restraints_config": [
-          { "residue1": "chain C and resid 1", "residue2": "chain D and resid 6" },
-          { "residue1": "chain C and resid 3", "residue2": "chain D and resid 4" },
-          { "residue1": "chain E and resid 1", "residue2": "chain F and resid 6" },
-          { "residue1": "chain E and resid 3", "residue2": "chain F and resid 4" }
         ],
         "angle_restraints_config": [
           {
@@ -125,23 +105,12 @@ from the ColabFold server.
             "harmonic": { "target_dihedral": 180.0 }
           }
         ],
-        "plane_restraints_config": [
-          {
-            "atom_selection1": "chain A and (resid 5 to 20)",
-            "start_sigma": 99999999,
-            "stop_sigma": -1,
-            "move": "all",
-            "weight": 1.0,
-            "flat-bottomed2": { "target_plane2": 0.1 }
-          }
-        ],
         "conformer_restraints_config": {
           "start_sigma": 99999999,
           "stop_sigma": -1,
           "bond": { "weight": 1.0, "slack": 0.0 },
           "angle": { "weight": 1.0, "slack": 0.0 },
           "chiral": { "weight": 1.0, "slack": 0.0 },
-          "plane": { "weight": 1.0 },
           "cistrans": { "weight": 1.0, "slack": 0.0 },
           "vdw": { "weight": 1.0 }
         },
@@ -203,13 +172,3 @@ With `verbose: true`, the log prints `built spec: n_active=.. bonds=.. ... dista
 group_angle=.. group_dihedral=..` — confirm the counts are non-zero for what you requested.
 Cross-check with the workspace helpers using a gemmi/rdkit-enabled venv: `../check_dist.py
 <pred.cif>` (centroid distance vs 25 Å) and `../check_conf.py <pred.cif> GLN` (ligand geometry).
-
-## External restraint configuration
-
-The shared `config_path` wrapper can replace the whole `restraints_config` or any
-individual restraint section with a JSON/YAML file. Relative includes are resolved at
-the input-file boundary (the working directory for Python input). See
-[shared file-reference syntax](config.md#external-configuration-files).
-An empty `conformer_restraints_config: {}` enables bond/angle/chiral/cistrans/vdw at
-weight 1 on opted-in molecules; plane and torsion require an explicit positive weight.
-The cistrans term retains ligand E/Z; chi/omega/sp2 belong to torsion.
