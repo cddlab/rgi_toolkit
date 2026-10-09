@@ -8,6 +8,7 @@ contracts, optimizer algorithms, and verification against independent implementa
 
 ## Tool guides
 
+For a form-based introduction, use the [ColabFold notebooks](colabfold.md).
 Guides are available for the following predictor integrations.
 
 | Predictor         | Backend | Config placement                                              | Guide                              |

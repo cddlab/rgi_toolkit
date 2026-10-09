@@ -6,6 +6,10 @@ Restraint-Guided Inference (RGI) toolkit for diffusion-based structure predictor
 The documentation covers the restraint types described in the RGI-Toolkit
 paper and the predictor integrations listed below.
 
+The [ColabFold notebooks](docs/colabfold.md) provide forms for **distance, conformer,
+angle, custom and RMSD**, including repeated and mixed restraints with native atom
+selections. Leave `use_rgi` off for vanilla prediction.
+
 | Model | Integration | Backend | Details |
 | --- | --- | --- | --- |
 | **Boltz-2** | boltz | torch | [Boltz-2](docs/boltz_restr.md) |
