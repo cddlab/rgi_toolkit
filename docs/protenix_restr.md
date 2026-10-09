@@ -152,7 +152,7 @@ source .venv/bin/activate
 
 protenix pred -i restr_example.json -o out_restr_example \
     --model_name protenix-v2 --use_default_params true --use_msa true \
-    --seeds 0 --step 200 --sample 1 --cycle 10
+    --seeds 0 --step 200 --sample 1
 ```
 
 ## Verify results
