@@ -14,18 +14,13 @@ no atom-order ambiguity. Multiple ligand chains yield disjoint global indices.
 
 from __future__ import annotations
 
-import logging
 from typing import Iterator
 
 import numpy as np
 
 from rgi_toolkit._biotite_adapter import biotite_get_elements, biotite_ligand_confs
 from rgi_toolkit._mol_build import align_stereo_mol
-from rgi_toolkit._mol_build import build_ligand_mol as _build_ligand_mol
 from rgi_toolkit.atom_context import AtomRecord, LigandConf
-
-logger = logging.getLogger(__name__)
-
 
 # Entity-derived mol_type already uses normalized names and preserves modified
 # residues' polymer identity. Unknown types map to None.
@@ -41,8 +36,7 @@ class ProtenixAdapter:
     def __init__(self, input_feature_dict: dict) -> None:
         self.feats = input_feature_dict
         self.atom_array = input_feature_dict.get("atom_array")
-        # {label_asym_id -> SMILES} for SMILES ligands (set by json_to_feature); used to
-        # build a stereo-correct ideal conformer as the restraint target.
+        # Source chemistry and stereo in the model's coordinate atom order.
         self._smiles_by_chain = input_feature_dict.get("smiles_by_chain", {}) or {}
         # padded atom count = coordinate length in the diffusion loop
         self._n_atom = int(input_feature_dict["atom_to_token_idx"].shape[-1])
@@ -121,15 +115,11 @@ class ProtenixAdapter:
         if aa is None:
             return
 
-        def _post_build(chain_id, mol, coords, idxs, elements_all, bonds_local):
-            # Embed the source SMILES to repair references with incorrect stereo.
-            # Align the source graph to the coordinate atom order below.
+        def _post_build(chain_id, mol, coords, idxs, _elements_all, _bonds_local):
             smiles = self._smiles_by_chain.get(str(chain_id))
             if smiles is None:
                 return mol, coords
             from rdkit import Chem
-
-            from rgi_toolkit._mol_build import generate_ideal_conformer
 
             smol = Chem.MolFromSmiles(smiles)  # carries the SMILES stereo
             stereo_mol = align_stereo_mol(smol, mol) if smol is not None else None
@@ -144,23 +134,11 @@ class ProtenixAdapter:
                         "stereochemistry to the model atom order"
                     )
                 return mol, coords, None
-            ideal = generate_ideal_conformer(stereo_mol)
-            if ideal is not None and len(ideal) == len(idxs):
-                return (
-                    _build_ligand_mol(elements_all[idxs], ideal, bonds_local),
-                    ideal,
-                    stereo_mol,
-                )
-            logger.warning(
-                "protenix chain %s: SMILES ETKDG failed; using model coords "
-                "as the restraint target",
-                chain_id,
-            )
             return mol, coords, stereo_mol
 
         # protenix marks ligand atoms with biotite hetero; chains are label_asym_id;
-        # the conformer target is atom_array.coord (overridden per-SMILES-ligand in
-        # _post_build); conformer_restraints defaults OFF when the annotation is absent.
+        # shared featurization prepares atom_array.coord using source stereo.
+        # conformer_restraints defaults OFF when the annotation is absent.
         yield from biotite_ligand_confs(
             aa,
             ligand_mask=np.asarray(aa.hetero, dtype=bool),

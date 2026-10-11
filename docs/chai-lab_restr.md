@@ -41,6 +41,11 @@ restraints, and the RMSD `atom_selection_ref` / `atom_selection_target` shorthan
 **per-chain 1-based ordinal** (qualify protein groups with `chain A and (...)`). There is **no
 top-level `start_sigma`**.
 
+Ligand targets start from Chai's reference coordinates. The adapter preserves
+source SMILES chemistry and atom mapping; shared RGI preparation performs the
+configured force-field relaxation and stereo validation, regenerating only when
+repair is needed.
+
 ## Complete example (FASTA and sidecar YAML)
 
 Save the FASTA as `restr_example.fasta`. Chai assigns chain letters by record
