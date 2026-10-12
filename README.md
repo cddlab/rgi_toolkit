@@ -34,6 +34,9 @@ below: `bash examples/distance/boltz-2/run.sh`. It needs the matching fork check
 sibling of `RGI-toolkit/` and a GPU node; see [`examples/README.md`](examples/README.md) for the
 per-tool prerequisites.
 
+The [benchmark scripts](benchmark/README.md) cover five protocols across six predictors,
+with dataset download, input preparation, inference, and CSV evaluation.
+
 RF3 examples and their validation runner are maintained in the
 [`foundry_restr` fork](https://github.com/cddlab/foundry_restr/tree/rgi-integration/examples/rgi).
 

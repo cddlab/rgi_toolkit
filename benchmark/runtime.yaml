@@ -1,0 +1,15 @@
+boltz2:
+  python: ${BOLTZ_PYTHON}
+protenix:
+  python: ${PROTENIX_PYTHON}
+  script: ${PROTENIX_ROOT}/runner/inference.py
+af3:
+  python: ${AF3_PYTHON}
+  script: ${AF3_ROOT}/run_alphafold.py
+  model_dir: ${AF3_MODEL_DIR}
+chai:
+  python: ${CHAI_PYTHON}
+of3:
+  python: ${OPENFOLD3_PYTHON}
+esm:
+  python: ${ESMFOLD2_PYTHON}
