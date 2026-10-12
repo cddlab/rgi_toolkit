@@ -85,7 +85,9 @@ inside extra CLI arguments are interpreted from the individual job directory.
 | `esm` | `ESMFOLD2_PYTHON` (the installed Pixi environment's Python) |
 
 All six use prepared MSAs; no model silently switches to an MSA server. AF3 skips
-its data pipeline. Protenix selects `protenix-v2`; this integration's verified GPU
+its data pipeline. Chai converts the A3M to `aligned.pqt`, verifies the query
+sequence, and logs its row count. Both arms use `--msa-directory`.
+Protenix selects `protenix-v2`; this integration's verified GPU
 architecture is sm_89. ESMFold2 uses 20 loops, 200 diffusion steps, MSA depth 1024,
 and column masking 0.1. Each job requests one sample. Model and toolkit versions
 are saved alongside predictions.

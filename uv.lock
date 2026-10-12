@@ -791,7 +791,7 @@ wheels = [
 
 [[package]]
 name = "rgi-toolkit"
-version = "0.4.2"
+version = "0.4.3"
 source = { editable = "." }
 dependencies = [
     { name = "biopython" },

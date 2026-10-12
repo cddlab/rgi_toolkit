@@ -134,14 +134,22 @@ def chai_msa(job):
 
     output = Path("msa")
     output.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory() as temporary:
-        Path(temporary, "uniref90.a3m").write_text(Path(job["msa"]).read_text())
-        merge_a3m_in_directory(temporary, output_directory=str(output))
-    query = pd.read_parquet(output / expected_basename(job["sequence"])).iloc[0][
-        "sequence"
-    ]
-    if query.upper().replace("-", "") != job["sequence"]:
-        raise ValueError("Chai MSA query mismatch")
+    with tempfile.TemporaryDirectory(dir=output) as temporary:
+        lines = Path(job["msa"]).read_text().splitlines()
+        Path(temporary, "uniref90.a3m").write_text(
+            "\n".join(line for line in lines if not line.startswith("#")) + "\n"
+        )
+        merge_a3m_in_directory(temporary, output_directory=temporary)
+        fresh = Path(temporary) / expected_basename(job["sequence"])
+        if not fresh.is_file():
+            raise ValueError(
+                "Chai MSA query mismatch: expected sequence hash not written"
+            )
+        table = pd.read_parquet(fresh)
+        if table.empty or table.iloc[0]["sequence"].upper() != job["sequence"].upper():
+            raise ValueError("Chai MSA query mismatch")
+        fresh.replace(output / fresh.name)
+    print(f"Chai MSA: rows={len(table)} query_ok=True", flush=True)
 
 
 def esm_fold(job):
