@@ -9,6 +9,7 @@ import urllib.request
 from pathlib import Path
 
 from common import coordinates, msa_query, protocol, slug
+from pose_inputs import pose_inputs
 
 
 def place(path, payload, size):
@@ -20,7 +21,7 @@ def place(path, payload, size):
     temporary.replace(path)
 
 
-def conformer(root, limit):
+def conformer(root, limit, receptor_root=None):
     from huggingface_hub import hf_hub_download
 
     dataset = protocol("conformer")["dataset"]
@@ -61,11 +62,15 @@ def conformer(root, limit):
                 "smiles": row["smiles"],
                 "msa": msa.as_posix(),
                 "sdf": sdf.as_posix(),
+                **pose_inputs(root, name, receptor_root),
             }
         )
     temporary = root / "index.csv.tmp"
     with temporary.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["id", "smiles", "msa", "sdf"])
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=["id", "smiles", "msa", "sdf", "receptor", "reference_ligand"],
+        )
         writer.writeheader()
         writer.writerows(output)
     temporary.replace(root / "index.csv")
@@ -93,12 +98,15 @@ def main():
     parser.add_argument("dataset", choices=["conformer", "references"])
     parser.add_argument("--output", type=Path)
     parser.add_argument("--limit", type=int)
+    parser.add_argument(
+        "--receptor-root", type=Path, help="Offline PLINDER systems directory"
+    )
     args = parser.parse_args()
     if args.limit is not None and args.limit < 1:
         parser.error("--limit must be positive")
     root = args.output or Path("data") / args.dataset
     if args.dataset == "conformer":
-        conformer(root, args.limit)
+        conformer(root, args.limit, args.receptor_root)
     else:
         references(root)
 

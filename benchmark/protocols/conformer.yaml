@@ -2,6 +2,8 @@ kind: conformer
 dataset:
   repo: wasarou/plinder-cistrans-209
   revision: main
+pose_reference:
+  url: https://plinderdata.org/2024-06/v2
 restraints:
   verbose: true
   gpu: true

@@ -23,7 +23,9 @@ from common import (
 )
 from confidence import plddt, ptm
 from metrics import conformer_metrics, predicted_ligand, state_metrics
+from pose import POSE_SETTINGS, ligand_pose_metrics
 from quality import MOLPROBITY_FIELDS, molprobity, settings, tm_scores
+from stereo import EZ_METHOD
 
 PASS_FIELDS = ("chiral_match", "ez_match", "clash_ok", "iclash_ok")
 CONFORMER_FIELDS = (
@@ -32,10 +34,15 @@ CONFORMER_FIELDS = (
     "crystal_bond_rms_A",
     "crystal_angle_rms_deg",
     "ligand_rmsd_A",
+    "ligand_fit_rmsd_A",
+    "protein_fit_rmsd_A",
+    "paired_ca_atoms",
+    "pocket_ca_atoms",
     "chiral_match",
     "ez_match",
     "chiral_sites",
     "ez_sites",
+    "ez_undefined_sites",
     *INTER_FIELDS,
     *INTRA_FIELDS,
 )
@@ -153,6 +160,12 @@ def evaluate(root, *, config_path=None, skip=(), make_report=True):
         collect("ptm", lambda: ptm(folder, job["model"]), "confidence")
         if conformer:
             collect(
+                "pose",
+                lambda: ligand_pose_metrics(
+                    predicted_ligand(atoms, xyz, job), job, folder
+                ),
+            )
+            collect(
                 "inter_clash",
                 lambda: intermolecular(predicted_ligand(atoms, xyz, job), path),
                 "clashes",
@@ -201,6 +214,8 @@ def evaluate(root, *, config_path=None, skip=(), make_report=True):
     write_json(
         root / "evaluation.json",
         {
+            "ez_method": EZ_METHOD,
+            "ligand_pose": POSE_SETTINGS,
             "versions": {
                 name: version(name)
                 for name in ("rgi-toolkit", "rdkit", "numpy", "posebusters")

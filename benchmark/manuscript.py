@@ -20,11 +20,13 @@ TARGET_FIELDS = {
 GEOMETRY_COLUMNS = {
     "chiral_match": "match",
     "ez_match": "ez_match",
+    "ez_undefined_sites": "ez_undefined_sites",
     "ideal_bond_rms_A": "emb_brms",
     "ideal_angle_rms_deg": "emb_arms",
     "crystal_bond_rms_A": "bond_rms",
     "crystal_angle_rms_deg": "angle_rms",
-    "ligand_rmsd_A": "ligand_rmsd",
+    "ligand_rmsd_A": "ligand_pose_rmsd_A",
+    "ligand_fit_rmsd_A": "ligand_fit_rmsd_A",
     "clash_ok": "clash_ok",
     "clash_rel": "clash_rel",
     "clash_min": "clash_min",
@@ -148,8 +150,9 @@ def export(runs, output):
         "Each predictor/arm CSV contains TM scores or ligand geometry; quality tables retain all ten protein quality/confidence columns. "
         "Full RGI checkout names identify models in filenames and method columns. "
         "Use the CSV tables and PNG/PDF figures directly in manuscript scripts; consumers using abbreviated model keys need to update their file/model mapping.\n\n"
-        "Missing results remain blank with their status. Pass-rate denominators exclude unmeasurable stereocenters or internal pairs. "
-        "Ligand RMSD is ligand-aligned, not receptor-aligned pose RMSD. "
+        "Missing results remain blank with their status. Undefined E/Z geometry fails preservation; ligands without eligible sites remain unscored. "
+        "Ligand pose RMSD uses sequence-paired receptor C-alpha atoms within 10 A of the crystal ligand, with symmetry-equivalent ligand maps and no ligand superposition. "
+        "Ligand-aligned RMSD is retained as a separate diagnostic. "
         "A bundle may contain selected protocols/models; the manifest records its scope. "
         "It does not include additional experiments, pose-recovery analysis, or automatically rebuild a complete paper.\n"
     )

@@ -133,8 +133,9 @@ def test_auto_fetch_and_conformer_opt_in(tmp_path, monkeypatch):
         root.mkdir()
         (root / "input.a3m").write_text(">query\nAG\n")
         (root / "ligand.sdf").write_text("placeholder")
+        (root / "receptor.pdb").write_text("placeholder")
         (root / "index.csv").write_text(
-            "id,smiles,msa,sdf\ntoy,C/C=C/C,input.a3m,ligand.sdf\n"
+            "id,smiles,msa,sdf,receptor\ntoy,C/C=C/C,input.a3m,ligand.sdf,receptor.pdb\n"
         )
 
     monkeypatch.setattr("fetch.conformer", fake_fetch)
@@ -144,6 +145,8 @@ def test_auto_fetch_and_conformer_opt_in(tmp_path, monkeypatch):
     for relative in verify_inputs(args.output)["jobs"]:
         path = args.output / relative
         job = read_json(path)
+        assert (path.parent / job["receptor"]).is_file()
+        assert job["pose_reference_sha256"]
         text = "\n".join(p.read_text() for p in path.parent.iterdir())
         if job["arm"] == "rgi":
             assert '"conformer_restraints_config"' in text
@@ -173,6 +176,13 @@ def test_fetch_refreshes_cached_files_of_the_same_size(tmp_path, monkeypatch):
         return remote / name
 
     monkeypatch.setattr("huggingface_hub.hf_hub_download", download)
+    monkeypatch.setattr(
+        "fetch.pose_inputs",
+        lambda *_args: {
+            "receptor": "receptor/toy.pdb",
+            "reference_ligand": "reference_ligand/toy.sdf",
+        },
+    )
     cache = tmp_path / "dataset"
     for sequence in (b">q\nAG\n", b">q\nAA\n"):
         (remote / "msa/toy.a3m.xz").write_bytes(lzma.compress(sequence))
@@ -311,9 +321,10 @@ def test_conformer_mapping_handles_reordered_atoms(tmp_path, model):
     result = conformer_metrics(
         records, coords, {"smiles": smiles, "model": model, "system": "toy"}, folder
     )
-    assert result["ligand_rmsd_A"] < 1e-3
+    assert result["ligand_fit_rmsd_A"] < 1e-3
     assert result["chiral_match"] is True
     assert result["ez_match"] is True
+    assert result["ez_undefined_sites"] == 0
 
 
 def test_evaluation_rejects_missing_samples_and_preserves_results(tmp_path):

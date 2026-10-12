@@ -82,9 +82,18 @@ uv run python evaluate.py runs/conformer-small
 `prepare.py conformer` downloads
 [`wasarou/plinder-cistrans-209`](https://huggingface.co/datasets/wasarou/plinder-cistrans-209)
 from `main` for each new run and caches files locally, preserving dataset order.
+Pocket-fit references are fetched from the public PLINDER `2024-06/v2` release.
+Only the requested receptor and its matching ligand are read from each remote ZIP
+using HTTP range requests. Pass `--receptor-root` to use an offline PLINDER systems
+directory instead. Receptor and ligand coordinates must share the crystal frame;
+evaluation verifies this against the matching PLINDER ligand before fitting.
 `--limit 1` fetches one system; omit it for all 209. No private dataset, token,
 or original PLINDER installation is required. `--dataset` changes the cache;
 `--index` accepts an existing CSV with `id,smiles,msa,sdf` and relative paths.
+Optional `receptor,reference_ligand` columns provide local pose references;
+otherwise references are fetched for the PLINDER system ID. Custom system IDs
+require a `receptor` column in the same coordinate frame as `sdf`.
+Prepared runs include these files and their SHA-256 checksums.
 
 ## Comparison arms and sampling
 
@@ -213,7 +222,7 @@ and available PNG/PDF figures. It retains full checkout names in filenames and
 method columns; existing manuscript scripts using abbreviated identifiers need
 their file/model mapping updated. Native guidance and RGI+guidance stay separate.
 A bundle records exactly the protocols/models exported; it does not silently
-supply additional paper experiments or receptor-aligned ligand pose measurements.
+supply additional paper experiments.
 
 ## Resuming and cluster jobs
 
@@ -239,4 +248,23 @@ uv run ruff check .
 ```
 
 Conformer references use RGI ETKDGv3/UFF preparation and stereo validation.
+E/Z preservation uses every heavy substituent pair around each eligible double
+bond. All pairs must agree with the input graph. Conflicting, collinear, or
+perpendicular geometry is undefined and fails preservation; it is not removed
+from the denominator. `ez_undefined_sites` records these sites, and `evaluation.json`
+records the method. Ligands without eligible E/Z sites remain unscored.
+
+`ligand_rmsd_A` is the ligand pose RMSD used in Figure S1F: fit sequence-paired
+receptor C-alpha atoms within 10 Å of any crystal ligand heavy atom, apply that
+transform to the predicted ligand, and minimize over symmetry-equivalent atom
+maps without fitting the ligand again. The sequence alignment uses global mode,
+match/mismatch scores 1/0, gap opening/extension scores -10/-0.5, and free end gaps.
+At least three non-collinear paired pocket atoms are required. Missing pose metadata
+or an unmeasurable fit leave pose RMSD unavailable and preserve the other metrics.
+`ligand_fit_rmsd_A` retains the separate ligand-aligned geometry diagnostic.
+The export column `ligand_pose_rmsd_A` contains the receptor-aligned value.
+
+Existing runs prepared before pose references were added must be prepared again
+in a new directory to include the reference files. Existing predictions can be
+reused; updating the evaluation does not require new inference.
 Inputs, downloads, predictions, reports, local settings, and external tools are ignored.

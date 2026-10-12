@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import copy
 import csv
+import hashlib
 import shutil
 from pathlib import Path
 
@@ -107,7 +108,11 @@ def prepare(args):
         if not args.index:
             from fetch import conformer
 
-            conformer(args.dataset, args.limit)
+            receptor_root = getattr(args, "receptor_root", None)
+            if receptor_root is None:
+                conformer(args.dataset, args.limit)
+            else:
+                conformer(args.dataset, args.limit, receptor_root)
             args.index = args.dataset / "index.csv"
         index = Path(args.index)
         with index.open() as handle:
@@ -119,6 +124,17 @@ def prepare(args):
             row["sequence"] = msa_query(row["msa"])
             row["sdf"] = index.parent / row["sdf"]
             slug(row["id"])
+            if not row.get("receptor"):
+                from pose_inputs import pose_inputs
+
+                row.update(
+                    pose_inputs(
+                        index.parent, row["id"], getattr(args, "receptor_root", None)
+                    )
+                )
+            for key in ("receptor", "reference_ligand"):
+                if row.get(key):
+                    row[key] = index.parent / row[key]
         if not systems or len({r["id"] for r in systems}) != len(systems):
             raise ValueError("Dataset must contain nonempty, unique system IDs")
         targets = [None]
@@ -136,6 +152,9 @@ def prepare(args):
             raise ValueError("MSA query differs from the benchmark sequence")
         if row.get("sdf") and not row["sdf"].is_file():
             raise ValueError(f"Missing SDF for {row['id']}")
+        for key in ("receptor", "reference_ligand"):
+            if row.get(key) and not row[key].is_file():
+                raise ValueError(f"Missing {key} for {row['id']}")
     references = list(
         dict.fromkeys(
             config.get("references", [])
@@ -161,6 +180,19 @@ def prepare(args):
             stage_msa(row["msa"], msa, row["sequence"])
         if row.get("sdf"):
             shutil.copyfile(row["sdf"], data / f"{system}.sdf")
+        pose_paths, pose_hashes = {}, {}
+        for key in ("receptor", "reference_ligand"):
+            if row.get(key):
+                filename = f"{system}.{key}{row[key].suffix}"
+                shutil.copyfile(row[key], data / filename)
+                pose_paths[key] = f"../../data/{filename}"
+                pose_hashes[pose_paths[key]] = hashlib.sha256(
+                    row[key].read_bytes()
+                ).hexdigest()
+        if row.get("sdf"):
+            pose_hashes[f"../../data/{system}.sdf"] = hashlib.sha256(
+                row["sdf"].read_bytes()
+            ).hexdigest()
         sampled = []
         if "ms" in arms:
             for depth in msa_depths:
@@ -197,6 +229,8 @@ def prepare(args):
                                 "system": system,
                                 "sequence": row["sequence"],
                                 "smiles": row.get("smiles"),
+                                **pose_paths,
+                                "pose_reference_sha256": pose_hashes,
                                 "arm": arm,
                                 "target": target if uses_rgi(arm) else None,
                                 "seed": actual_seed,
@@ -251,6 +285,9 @@ def main():
     parser.add_argument("--single-sequence", action="store_true")
     parser.add_argument("--index", type=Path)
     parser.add_argument("--dataset", type=Path, default=Path("data/conformer"))
+    parser.add_argument(
+        "--receptor-root", type=Path, help="Offline PLINDER systems directory"
+    )
     parser.add_argument("--references", type=Path, default=Path("data/references"))
     parser.add_argument(
         "--limit", type=int, help="First N targets or conformer systems"
