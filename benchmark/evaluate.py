@@ -22,10 +22,9 @@ from common import (
     write_json,
 )
 from confidence import plddt, ptm
-from metrics import conformer_metrics, predicted_ligand, state_metrics
+from metrics import EZ_METHOD, conformer_metrics, predicted_ligand, state_metrics
 from pose import POSE_SETTINGS, ligand_pose_metrics
 from quality import MOLPROBITY_FIELDS, molprobity, settings, tm_scores
-from stereo import EZ_METHOD
 
 PASS_FIELDS = ("chiral_match", "ez_match", "clash_ok", "iclash_ok")
 CONFORMER_FIELDS = (
@@ -42,7 +41,6 @@ CONFORMER_FIELDS = (
     "ez_match",
     "chiral_sites",
     "ez_sites",
-    "ez_undefined_sites",
     *INTER_FIELDS,
     *INTRA_FIELDS,
 )

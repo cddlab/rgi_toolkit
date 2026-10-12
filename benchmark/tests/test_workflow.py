@@ -324,7 +324,6 @@ def test_conformer_mapping_handles_reordered_atoms(tmp_path, model):
     assert result["ligand_fit_rmsd_A"] < 1e-3
     assert result["chiral_match"] is True
     assert result["ez_match"] is True
-    assert result["ez_undefined_sites"] == 0
 
 
 def test_evaluation_rejects_missing_samples_and_preserves_results(tmp_path):

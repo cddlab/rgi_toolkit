@@ -20,7 +20,6 @@ TARGET_FIELDS = {
 GEOMETRY_COLUMNS = {
     "chiral_match": "match",
     "ez_match": "ez_match",
-    "ez_undefined_sites": "ez_undefined_sites",
     "ideal_bond_rms_A": "emb_brms",
     "ideal_angle_rms_deg": "emb_arms",
     "crystal_bond_rms_A": "bond_rms",

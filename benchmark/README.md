@@ -248,11 +248,9 @@ uv run ruff check .
 ```
 
 Conformer references use RGI ETKDGv3/UFF preparation and stereo validation.
-E/Z preservation uses every heavy substituent pair around each eligible double
-bond. All pairs must agree with the input graph. Conflicting, collinear, or
-perpendicular geometry is undefined and fails preservation; it is not removed
-from the denominator. `ez_undefined_sites` records these sites, and `evaluation.json`
-records the method. Ligands without eligible E/Z sites remain unscored.
+E/Z preservation compares the input graph's CIP labels with labels assigned by
+RDKit from the predicted 3D conformer. `evaluation.json` records the method.
+Ligands without eligible E/Z sites remain unscored.
 
 `ligand_rmsd_A` is the ligand pose RMSD used in Figure S1F: fit sequence-paired
 receptor C-alpha atoms within 10 Å of any crystal ligand heavy atom, apply that

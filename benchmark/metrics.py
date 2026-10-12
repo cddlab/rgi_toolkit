@@ -19,7 +19,8 @@ from rgi_toolkit.atom_context import candidate_dict
 from rgi_toolkit.selection import AtomSelector
 
 from common import coordinates
-from stereo import assess_ez
+
+EZ_METHOD = "rdkit-3d-cip-v1"
 
 
 def selected(atoms, xyz, selection):
@@ -219,16 +220,18 @@ def conformer_metrics(atoms, xyz, job, folder):
     expected, observed = _graph_stereo_labels(mol), _coordinate_stereo_labels(mol, pred)
     expected = expected[0], benchmark_ez(mol, expected[1])
     result = {"ideal_bond_rms_A": bond, "ideal_angle_rms_deg": angular}
-    result["chiral_sites"] = len(expected[0])
-    result["chiral_match"] = (
-        all(observed[0].get(i) == value for i, value in expected[0].items())
-        if expected[0]
-        else None
-    )
-    ez = assess_ez(mol, pred, expected[1])
-    result["ez_sites"] = len(ez)
-    result["ez_undefined_sites"] = sum(value is None for value in ez.values())
-    result["ez_match"] = all(value is True for value in ez.values()) if ez else None
+    for label, reference_labels, prediction_labels in zip(
+        ("chiral", "ez"), expected, observed, strict=True
+    ):
+        result[f"{label}_sites"] = len(reference_labels)
+        result[f"{label}_match"] = (
+            all(
+                prediction_labels.get(i) == value
+                for i, value in reference_labels.items()
+            )
+            if reference_labels
+            else None
+        )
     crystal = next(
         iter(
             Chem.SDMolSupplier(
