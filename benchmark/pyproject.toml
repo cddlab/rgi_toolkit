@@ -10,6 +10,8 @@ dependencies = [
   "rdkit>=2024.3.2",
   "huggingface-hub>=0.23",
   "filelock>=3",
+  "posebusters>=0.6",
+  "matplotlib>=3.9",
 ]
 
 [dependency-groups]

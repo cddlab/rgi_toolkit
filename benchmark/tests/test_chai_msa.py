@@ -7,7 +7,15 @@ from models import chai_msa, command
 
 @pytest.mark.parametrize("restraints", [None, {"conformer_restraints_config": {}}])
 def test_chai_command_always_uses_prepared_msa(restraints):
-    cmd = command({"model": "chai", "seed": 1, "restraints": restraints}, {})
+    cmd = command(
+        {
+            "model": "chai-lab_restr",
+            "seed": 1,
+            "restraints": restraints,
+            "arm": "rgi" if restraints else "vanilla",
+        },
+        {},
+    )
     assert cmd[cmd.index("--msa-directory") + 1] == "msa"
     assert ("--restraints-config-path" in cmd) == bool(restraints)
 

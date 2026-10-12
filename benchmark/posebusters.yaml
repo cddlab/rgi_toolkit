@@ -1,0 +1,31 @@
+modules:
+  - name: Distance to protein
+    function: intermolecular_distance
+    parameters:
+      radius_type: vdw
+      radius_scale: 1.0
+      clash_cutoff: 0.75
+      ignore_types: [hydrogens, organic_cofactors, inorganic_cofactors, waters]
+      max_distance: 5.0
+      search_distance: .inf
+    chosen_binary_test_output: [not_too_far_away, no_clashes]
+    rename_outputs:
+      not_too_far_away: Protein-ligand maximum distance
+      no_clashes: Minimum distance to protein
+    rename_suffix: _protein
+  - name: Geometry
+    function: distance_geometry
+    parameters:
+      bound_matrix_params:
+        set15bounds: true
+        scaleVDW: true
+        doTriangleSmoothing: true
+        useMacrocycle14config: false
+      threshold_bad_bond_length: 0.25
+      threshold_bad_angle: 0.25
+      threshold_clash: 0.3
+      ignore_hydrogens: true
+      sanitize: true
+    chosen_binary_test_output: [no_internal_clash]
+    rename_outputs:
+      no_internal_clash: Internal steric clash

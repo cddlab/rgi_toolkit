@@ -15,7 +15,9 @@ from pathlib import Path
 import yaml
 from filelock import FileLock
 
+from arms import uses_rgi
 from common import (
+    PREDICTION_PATTERNS,
     ROOT,
     read_json,
     validate_prediction,
@@ -23,14 +25,6 @@ from common import (
     write_json,
 )
 
-PATTERNS = {
-    "boltz2": "**/predictions/*/*_model_0.cif",
-    "protenix": "**/seed_*/predictions/*_sample_0.cif",
-    "af3": "**/seed-*_sample-0/model.cif",
-    "chai": "**/pred.model_idx_0.cif",
-    "of3": "**/*_model.cif",
-    "esm": "model.cif",
-}
 TERMS = {
     "distance": ("distances",),
     "angle": ("group_angle",),
@@ -65,7 +59,7 @@ def runtime_for(config, model, config_dir):
         if not exists:
             raise ValueError(f"Missing {model} {field}: {runtime[field]}")
         runtime[field] = str(path.absolute())
-    if model == "protenix":
+    if model == "protenix_restr":
         env = runtime.setdefault("env", {})
         env.setdefault("PROTENIX_ROOT_DIR", str(Path(runtime["script"]).parent.parent))
         env.setdefault("LAYERNORM_TYPE", "torch")
@@ -74,7 +68,7 @@ def runtime_for(config, model, config_dir):
 
 
 def check_restraints(log, job):
-    if job["arm"] != "rgi":
+    if not uses_rgi(job["arm"]):
         return
     inventories = [line for line in log.splitlines() if "built spec:" in line]
     for term in TERMS[job["benchmark"]]:
@@ -164,7 +158,7 @@ def run(args):
             )
         if read_json(folder / "software.json") != software:
             raise ValueError("Predictor software changed during execution")
-        matches = list((folder / "raw").glob(PATTERNS[job["model"]]))
+        matches = list((folder / "raw").glob(PREDICTION_PATTERNS[job["model"]]))
         if len(matches) != 1:
             raise ValueError(
                 f"Expected one prediction, found {len(matches)}: {job['id']}"

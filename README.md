@@ -35,7 +35,8 @@ sibling of `RGI-toolkit/` and a GPU node; see [`examples/README.md`](examples/RE
 per-tool prerequisites.
 
 The [benchmark scripts](benchmark/README.md) cover five protocols across six predictors,
-with dataset download, input preparation, inference, and CSV evaluation.
+with matched control arms, MSA subsampling, native guidance, USalign/MolProbity and
+ligand-clash evaluation, comparison figures, and manuscript source-data export.
 
 RF3 examples and their validation runner are maintained in the
 [`foundry_restr` fork](https://github.com/cddlab/foundry_restr/tree/rgi-integration/examples/rgi).

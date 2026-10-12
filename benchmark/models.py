@@ -11,6 +11,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from arms import GUIDANCE_MODELS, uses_guidance, uses_rgi
+
 
 def provenance():
     versions = {"python": sys.version.split()[0]}
@@ -37,7 +39,15 @@ def command(job, runtime):
     seed = str(job["seed"])
     model = job["model"]
     python = sys.executable
-    if model == "boltz2":
+    extra = runtime.get("args", [])
+    if any(
+        arg.split("=")[0] in {"--use_potentials", "--sample_diffusion.guidance.enable"}
+        for arg in extra
+    ):
+        raise ValueError("Select native guidance with --arms, not runtime args")
+    if uses_guidance(job["arm"]) and model not in GUIDANCE_MODELS:
+        raise ValueError(f"Native guidance is unsupported by {model}")
+    if model == "boltz_restr":
         cmd = [
             python,
             "-m",
@@ -53,7 +63,7 @@ def command(job, runtime):
             "--diffusion_samples",
             "1",
         ]
-    elif model == "protenix":
+    elif model == "protenix_restr":
         cmd = [
             python,
             runtime["script"],
@@ -74,7 +84,7 @@ def command(job, runtime):
             "--sample_diffusion.N_step",
             "200",
         ]
-    elif model == "af3":
+    elif model == "alphafold3_restr":
         cmd = [
             python,
             runtime["script"],
@@ -84,7 +94,7 @@ def command(job, runtime):
             "--num_diffusion_samples=1",
             f"--model_dir={runtime['model_dir']}",
         ]
-    elif model == "of3":
+    elif model == "openfold-3_restr":
         cmd = [
             python,
             "-m",
@@ -101,7 +111,7 @@ def command(job, runtime):
             "--use-templates",
             "false",
         ]
-    elif model == "chai":
+    elif model == "chai-lab_restr":
         cmd = [
             python,
             "-m",
@@ -122,7 +132,16 @@ def command(job, runtime):
             cmd.extend(["--restraints-config-path", "restraints.yaml"])
     else:
         raise ValueError(f"No CLI for {model}")
-    return cmd + runtime.get("args", [])
+    if model == "boltz_restr" and uses_guidance(job["arm"]):
+        cmd.append("--use_potentials")
+    elif model == "protenix_restr":
+        cmd.extend(
+            [
+                "--sample_diffusion.guidance.enable",
+                str(uses_guidance(job["arm"])).lower(),
+            ]
+        )
+    return cmd + extra
 
 
 def chai_msa(job):
@@ -169,7 +188,7 @@ def esm_fold(job):
     if job.get("smiles"):
         entities.append(
             LigandInput(
-                id="B", smiles=job["smiles"], conformer_restraints=job["arm"] == "rgi"
+                id="B", smiles=job["smiles"], conformer_restraints=uses_rgi(job["arm"])
             )
         )
     model = EsmFold2Model.from_pretrained("biohub/ESMFold2", device="cuda")
@@ -186,6 +205,16 @@ def esm_fold(job):
     )
     Path("raw").mkdir(exist_ok=True)
     Path("raw/model.cif").write_text(result.complex.to_mmcif())
+    Path("raw/model.confidence.json").write_text(
+        json.dumps(
+            {
+                "ptm": None if result.ptm is None else float(result.ptm),
+                "iptm": None if result.iptm is None else float(result.iptm),
+            },
+            allow_nan=False,
+        )
+        + "\n"
+    )
 
 
 def main():
@@ -201,9 +230,9 @@ def main():
     job = json.loads(args.job.read_text())
     os.chdir(args.job.resolve().parent)
     Path("software.json").write_text(json.dumps(provenance(), indent=2) + "\n")
-    if job["model"] == "chai":
+    if job["model"] == "chai-lab_restr":
         chai_msa(job)
-    if job["model"] == "esm":
+    if job["model"] == "esm_restr":
         esm_fold(job)
     else:
         subprocess.run(command(job, runtime), check=True)

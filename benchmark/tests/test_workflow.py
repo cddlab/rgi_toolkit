@@ -10,6 +10,7 @@ import yaml
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
+from arms import uses_rgi
 from common import MODELS, coordinates, read_json, verify_inputs, write_json
 from evaluate import evaluate
 from fetch import conformer, place
@@ -32,6 +33,11 @@ def arguments(tmp_path, benchmark="distance", **overrides):
         limit=1,
     )
     values.update(overrides)
+    values["references"].mkdir(exist_ok=True)
+    for name in ("1GGG", "1WDN", "4AKE", "1AKE", "6E9O", "6E9N"):
+        path = values["references"] / f"{name}.cif"
+        if not path.exists():
+            path.write_text("data_ref\n")
     return argparse.Namespace(**values)
 
 
@@ -47,12 +53,22 @@ def write_cif(path, atoms):
         "Cartn_x",
         "Cartn_y",
         "Cartn_z",
+        "label_alt_id",
+        "occupancy",
+        "B_iso_or_equiv",
+        "auth_asym_id",
+        "auth_seq_id",
+        "auth_atom_id",
+        "auth_comp_id",
+        "pdbx_PDB_model_num",
+        "pdbx_PDB_ins_code",
     ]
     lines = ["data_test", "loop_", *["_atom_site." + f for f in fields]]
     for i, (name, element, chain, resid, resname, xyz) in enumerate(atoms, 1):
         lines.append(
             f"ATOM {i} {element} {name} {resname} {chain} {resid} "
             + " ".join(str(v) for v in xyz)
+            + f" . 1.0 90.0 {chain} {resid} {name} {resname} 1 ?"
         )
     path.write_text("\n".join(lines) + "\n")
 
@@ -70,10 +86,10 @@ def test_prepared_runs_are_relocatable(tmp_path, benchmark):
         path = moved / relative
         job = read_json(path)
         assert (path.parent / job["msa"]).is_file()
-        assert job["restraints"] is None if job["arm"] == "off" else job["restraints"]
+        assert bool(job["restraints"]) == uses_rgi(job["arm"])
         for file in path.parent.iterdir():
             assert str(tmp_path) not in file.read_text()
-        if job["model"] == "of3":
+        if job["model"] == "openfold-3_restr":
             assert read_json(path.with_name("input.json"))["seeds"] == [job["seed"]]
 
 
@@ -93,7 +109,7 @@ def test_rmsd_preserves_targets_and_relative_references(tmp_path):
     refs.mkdir()
     for name in ["1GGG.cif", "1WDN.cif"]:
         (refs / name).write_text("data_ref\n")
-    args = arguments(tmp_path, "rmsd", models=["af3"], limit=None)
+    args = arguments(tmp_path, "rmsd", models=["alphafold3_restr"], limit=None)
     prepare(args)
     manifest = verify_inputs(args.output)
     jobs = [read_json(args.output / path) for path in manifest["jobs"]]
@@ -131,7 +147,7 @@ def test_auto_fetch_and_conformer_opt_in(tmp_path, monkeypatch):
         text = "\n".join(p.read_text() for p in path.parent.iterdir())
         if job["arm"] == "rgi":
             assert '"conformer_restraints_config"' in text
-            if job["model"] == "chai":
+            if job["model"] == "chai-lab_restr":
                 sidecar = yaml.safe_load(path.with_name("restraints.yaml").read_text())
                 assert sidecar["conformer_restraints"] == {"B": True}
         else:
@@ -169,7 +185,7 @@ def test_run_resumes_and_retries_invalid_predictions(tmp_path, monkeypatch):
     folder = root / "jobs/toy"
     job = {
         "id": "toy",
-        "model": "boltz2",
+        "model": "boltz_restr",
         "benchmark": "distance",
         "arm": "off",
         "sequence": "A",
@@ -180,7 +196,7 @@ def test_run_resumes_and_retries_invalid_predictions(tmp_path, monkeypatch):
         {"jobs": ["jobs/toy/job.json"], "files": ["jobs/toy/job.json"]},
     )
     runtime = tmp_path / "runtime.yaml"
-    runtime.write_text(yaml.safe_dump({"boltz2": {"python": sys.executable}}))
+    runtime.write_text(yaml.safe_dump({"boltz_restr": {"python": sys.executable}}))
     software = {"python": "test"}
     calls = []
 
@@ -248,7 +264,7 @@ def test_ez_excludes_rings_and_exchangeable_hydrogens():
     assert len(benchmark_ez(mol, _graph_stereo_labels(mol)[1])) == 1
 
 
-def test_af3_runtime_paths_are_relative_to_config(tmp_path):
+def test_alphafold3_runtime_paths_are_relative_to_config(tmp_path):
     from models import command
 
     (tmp_path / "python").touch()
@@ -256,16 +272,16 @@ def test_af3_runtime_paths_are_relative_to_config(tmp_path):
     (tmp_path / "model weights").mkdir()
     runtime = runtime_for(
         {
-            "af3": {
+            "alphafold3_restr": {
                 "python": "python",
                 "script": "run_alphafold.py",
                 "model_dir": "model weights",
             }
         },
-        "af3",
+        "alphafold3_restr",
         tmp_path,
     )
-    cmd = command({"model": "af3", "seed": 0}, runtime)
+    cmd = command({"model": "alphafold3_restr", "seed": 0, "arm": "vanilla"}, runtime)
     assert f"--model_dir={tmp_path / 'model weights'}" in cmd
     assert runtime["script"] == str(tmp_path / "run_alphafold.py")
 
@@ -301,7 +317,7 @@ def test_conformer_mapping_handles_reordered_atoms(tmp_path, model):
 
 
 def test_evaluation_rejects_missing_samples_and_preserves_results(tmp_path):
-    args = arguments(tmp_path, models=["boltz2"])
+    args = arguments(tmp_path, models=["boltz_restr"])
     prepare(args)
     manifest = verify_inputs(args.output)
     job_path = args.output / manifest["jobs"][0]
@@ -347,7 +363,12 @@ def test_evaluation_rejects_missing_samples_and_preserves_results(tmp_path):
             "seconds": 1.0,
         },
     )
-    assert evaluate(args.output) == 1
+    assert (
+        evaluate(
+            args.output, skip=("usalign", "molprobity", "confidence"), make_report=False
+        )
+        == 1
+    )
     saved = (args.output / "results.csv").read_bytes()
     job_path.with_name("complete.json").unlink()
     with pytest.raises(ValueError, match="preserved"):

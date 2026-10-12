@@ -107,7 +107,7 @@ def state_metrics(atoms, xyz, job, config, folder):
 def ligand_names(mol, model):
     expanded = Chem.AddHs(mol)
     symbols = [atom.GetSymbol().upper() for atom in expanded.GetAtoms()]
-    if model in {"boltz2", "esm"}:
+    if model in {"boltz_restr", "esm_restr"}:
         ranks = list(Chem.CanonicalRankAtoms(expanded))
         names = [
             f"{symbol}{rank + 1}" for symbol, rank in zip(symbols, ranks, strict=True)
@@ -182,7 +182,7 @@ def benchmark_ez(mol, labels):
     return result
 
 
-def conformer_metrics(atoms, xyz, job, folder):
+def predicted_ligand(atoms, xyz, job):
     mol = Chem.MolFromSmiles(job["smiles"])
     ligand = [(a, p) for a, p in zip(atoms, xyz, strict=True) if a.chain == "B"]
     by_name = {a.name.upper(): (a, p) for a, p in ligand}
@@ -197,6 +197,16 @@ def conformer_metrics(atoms, xyz, job, folder):
     ]:
         raise ValueError("Ligand element mapping mismatch")
     pred = np.array([p for _, p in ordered])
+    conformer = Chem.Conformer(mol.GetNumAtoms())
+    for i, point in enumerate(pred):
+        conformer.SetAtomPosition(i, point)
+    mol.AddConformer(conformer)
+    return mol
+
+
+def conformer_metrics(atoms, xyz, job, folder):
+    mol = predicted_ligand(atoms, xyz, job)
+    pred = np.asarray(mol.GetConformer().GetPositions())
     ref_mol, ref = ideal(Chem.MolToSmiles(mol))
     match = ref_mol.GetSubstructMatch(mol, useChirality=True)
     if len(match) != len(pred):

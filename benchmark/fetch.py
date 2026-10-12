@@ -74,7 +74,7 @@ def conformer(root, limit):
 
 def references(root):
     root.mkdir(parents=True, exist_ok=True)
-    for name in ("1GGG", "1WDN"):
+    for name in ("1GGG", "1WDN", "4AKE", "1AKE", "6E9O", "6E9N"):
         path = root / f"{name}.cif"
         if not path.exists():
             with urllib.request.urlopen(

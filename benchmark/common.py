@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import re
 from pathlib import Path
@@ -10,9 +11,24 @@ import numpy as np
 import yaml
 from rgi_toolkit.pdb_ref import read_cif_atoms
 
-MODELS = ("boltz2", "protenix", "af3", "chai", "of3", "esm")
+MODELS = (
+    "boltz_restr",
+    "protenix_restr",
+    "alphafold3_restr",
+    "chai-lab_restr",
+    "openfold-3_restr",
+    "esm_restr",
+)
 BENCHMARKS = ("conformer", "distance", "angle", "rmsd", "custom")
 ROOT = Path(__file__).resolve().parent
+PREDICTION_PATTERNS = {
+    "boltz_restr": "**/predictions/*/*_model_0.cif",
+    "protenix_restr": "**/seed_*/predictions/*_sample_0.cif",
+    "alphafold3_restr": "**/seed-*_sample-0/*model.cif",
+    "chai-lab_restr": "**/pred.model_idx_0.cif",
+    "openfold-3_restr": "**/*_model.cif",
+    "esm_restr": "model.cif",
+}
 
 
 def read_json(path):
@@ -24,6 +40,18 @@ def write_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(value, indent=2, allow_nan=False) + "\n")
+    temporary.replace(path)
+
+
+def write_csv(path, rows):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fields = list(dict.fromkeys(key for row in rows for key in row))
+    temporary = path.with_suffix(".tmp")
+    with temporary.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
     temporary.replace(path)
 
 

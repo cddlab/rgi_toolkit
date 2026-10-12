@@ -5,4 +5,7 @@ __pycache__/
 data/
 runs/
 runtime.local.yaml
+evaluation.local.yaml
+reports/
+tools/
 *.log
