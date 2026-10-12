@@ -12,8 +12,10 @@ selections. Leave `use_rgi` off for vanilla prediction.
 
 | Model | Integration | Backend | Details |
 | --- | --- | --- | --- |
+| **Boltz-1** | boltz | torch | [Boltz-1](docs/boltz_restr.md) |
 | **Boltz-2** | boltz | torch | [Boltz-2](docs/boltz_restr.md) |
 | **AlphaFold3** | alphafold3 | jax | [AlphaFold3](docs/alphafold3_restr.md) |
+| **Protenix v1** | protenix | torch | [Protenix v1](docs/protenix_restr.md) |
 | **Protenix v2** | protenix | torch | [Protenix v2](docs/protenix_restr.md) |
 | **ESMFold2** | esmfold2 | torch | [ESMFold2](docs/esmfold2_restr.md) |
 | **OpenFold-3** | openfold-3 | torch | [OpenFold-3](docs/openfold-3_restr.md) |
