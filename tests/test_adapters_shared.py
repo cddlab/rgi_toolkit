@@ -649,7 +649,7 @@ def test_all_adapters_preserve_source_chemistry(tool, smiles):
     assert _stereo_mismatch_counts(source, ligand.conf_coords, expected) == (0, 0)
 
 
-@pytest.mark.parametrize("tool", ["protenix", "chai"])
+@pytest.mark.parametrize("tool", ["protenix", "chai", "opendde"])
 def test_native_ligand_reference_reaches_shared_preparation(tool, monkeypatch):
     from unittest.mock import Mock
 
@@ -669,7 +669,7 @@ def test_native_ligand_reference_reaches_shared_preparation(tool, monkeypatch):
     assert Chem.MolToSmiles(ligand.stereo_mol) == smiles
 
 
-@pytest.mark.parametrize("tool", ["protenix", "chai"])
+@pytest.mark.parametrize("tool", ["protenix", "chai", "opendde"])
 @pytest.mark.parametrize("force_field", ["uff", "none"])
 @pytest.mark.parametrize(
     "smiles,opposite",

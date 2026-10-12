@@ -9,17 +9,13 @@ importing it does not import OpenDDE or torch.
 
 from __future__ import annotations
 
-import logging
 from typing import Iterator
 
 import numpy as np
 
 from rgi_toolkit._biotite_adapter import biotite_get_elements, biotite_ligand_confs
 from rgi_toolkit._mol_build import align_stereo_mol
-from rgi_toolkit._mol_build import build_ligand_mol as _build_ligand_mol
 from rgi_toolkit.atom_context import AtomRecord, LigandConf
-
-logger = logging.getLogger(__name__)
 
 _VALID_MOLTYPES = {"protein", "dna", "rna", "ligand"}
 
@@ -114,14 +110,12 @@ class OpenDDEAdapter:
         if aa is None:
             return
 
-        def _post_build(chain_id, mol, coords, idxs, elements_all, bonds_local):
+        def _post_build(chain_id, mol, coords, idxs, _elements_all, _bonds_local):
             smiles = self._smiles_by_chain.get(str(chain_id))
             if smiles is None:
                 return mol, coords
 
             from rdkit import Chem
-
-            from rgi_toolkit._mol_build import generate_ideal_conformer
 
             source_mol = Chem.MolFromSmiles(smiles)
             stereo_mol = (
@@ -138,18 +132,6 @@ class OpenDDEAdapter:
                         "stereochemistry to the model atom order"
                     )
                 return mol, coords, None
-            ideal = generate_ideal_conformer(stereo_mol)
-            if ideal is not None and len(ideal) == len(idxs):
-                return (
-                    _build_ligand_mol(elements_all[idxs], ideal, bonds_local),
-                    ideal,
-                    stereo_mol,
-                )
-            logger.warning(
-                "OpenDDE chain %s: SMILES ETKDG failed; using ref_pos as the "
-                "restraint target",
-                chain_id,
-            )
             return mol, coords, stereo_mol
 
         mol_types = np.asarray(aa.mol_type)
