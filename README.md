@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/rgi-toolkit-logo.svg" alt="RGI-toolkit" width="640">
+</p>
+
 # RGI-toolkit
 
 Restraint-Guided Inference (RGI) toolkit for diffusion-based structure predictors
