@@ -1,0 +1,4 @@
+usalign: USalign
+molprobity: phenix.molprobity
+timeout: 300
+# Optional: phenix_env: ${PHENIX_ENV}

@@ -1,14 +1,15 @@
 # RGI in ColabFold notebooks
 
-Open [ColabFold2 preview](https://colab.research.google.com/github/th2ch-g/ColabFold_restr/blob/rgi-integration/ColabFold2_preview.ipynb).
-Expand **RGI: Making restraint-guided protein folding inference accessible to all! (optional)**
+RGI is available in the upstream [ColabFold](https://github.com/sokrypton/ColabFold) notebooks.
+Open [ColabFold2 preview](https://colab.research.google.com/github/sokrypton/ColabFold/blob/main/ColabFold2_preview.ipynb).
+Use **RGI: Restraint-Guided Inference for manipulating molecular structures! (optional)**
 after **Input sequences** to edit the ordinary Colab form.
-The section starts collapsed; its fields are editable **before any cell runs**.
+Its fields are editable **before any cell runs**.
 It needs no widget, Add button or separate confirmation.
 
 1. Choose an RGI-supported model, for example **openbind0**, in **Install dependencies**.
 2. Enter your molecules in **Input sequences**.
-3. Expand the **RGI** form, check **use_rgi** and fill the fields for the restraints you need.
+3. In the **RGI** form, check **use_rgi** and fill the fields for the restraints you need.
 4. Use **Runtime → Run all**.
 
 For vanilla, leave **use_rgi** off. The preview's default model, OpenBind-0, supports
@@ -121,9 +122,9 @@ documented settings.
 
 | Notebook | RGI models |
 | --- | --- |
-| ColabFold2 preview | AlphaFold3, OpenBind-0, OpenFold3, Boltz2, Protenix2, RoseTTAFold3, Chai1, OpenDDE, ESMFold2 and LM600M/LM300M variants |
-| [AlphaFold3 / OpenFold3](https://colab.research.google.com/github/th2ch-g/ColabFold_restr/blob/rgi-integration/AlphaFold3_of3.ipynb) | AlphaFold3, OpenBind-0 and OpenFold3 |
-| [Boltz-1](https://colab.research.google.com/github/th2ch-g/ColabFold_restr/blob/rgi-integration/Boltz1.ipynb) | Native Boltz-1 |
+| [ColabFold2 preview](https://colab.research.google.com/github/sokrypton/ColabFold/blob/main/ColabFold2_preview.ipynb) | AlphaFold3, OpenBind-0, OpenFold3, Boltz2, Protenix2, RoseTTAFold3, Chai1, OpenDDE, ESMFold2 and LM600M/LM300M variants |
+| [AlphaFold3 / OpenFold3](https://colab.research.google.com/github/sokrypton/ColabFold/blob/main/AlphaFold3_of3.ipynb) | AlphaFold3, OpenBind-0 and OpenFold3 |
+| [Boltz-1](https://colab.research.google.com/github/sokrypton/ColabFold/blob/main/Boltz1.ipynb) | Native Boltz-1 |
 
 Preview uses `alphafold3-colabfold==3.1.11` and the shared JAX adapter. ESMFold2's
 language-model route requires exactly one protein chain. The Boltz-1 form is after

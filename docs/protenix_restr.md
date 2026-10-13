@@ -40,6 +40,11 @@ restraints on with:
 `resid` is the **per-chain 1-based ordinal** (qualify protein groups with `chain A and (...)`).
 There is **no top-level `start_sigma`**.
 
+Ligand targets start from Protenix's reference coordinates. The adapter preserves
+source SMILES chemistry and atom mapping; shared RGI preparation performs the
+configured force-field relaxation and stereo validation, regenerating only when
+repair is needed.
+
 ## Complete example (input JSON)
 
 Save this as `restr_example.json`. It folds QBP with its GLN ligand and combines

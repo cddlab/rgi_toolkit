@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+data/
+runs/
+runtime.local.yaml
+evaluation.local.yaml
+reports/
+tools/
+*.log

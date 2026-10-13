@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 from rdkit import Chem
 
-from rgi_toolkit._mol_build import _expected_stereo, _stereo_mismatch_counts
+from rgi_toolkit._mol_build import _expected_stereo
 from rgi_toolkit.chai.adapter import ChaiStructureAdapter
 
 
@@ -180,9 +180,7 @@ def test_chai_preserves_source_chemistry_in_reordered_atoms(smiles):
     np.testing.assert_allclose(
         ligand.mol.GetConformer().GetPositions(), ligand.conf_coords
     )
-    stereo = _expected_stereo(expected, sc.atom_ref_pos)
-    assert stereo[1]
-    assert _stereo_mismatch_counts(expected, ligand.conf_coords, stereo) == (0, 0)
+    np.testing.assert_array_equal(ligand.conf_coords, sc.atom_ref_pos)
 
 
 @pytest.mark.parametrize(

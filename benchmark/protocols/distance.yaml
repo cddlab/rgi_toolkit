@@ -1,0 +1,23 @@
+kind: distance
+name: qbp
+tm_references:
+- {file: 1GGG.cif, chain: A, label: open}
+- {file: 1WDN.cif, chain: A, label: closed}
+sequence: ADKKLVVATDTAFVPFEFKQGDKYVGFDVDLWAAIAKELKLDYELKPMDFSGIIPALQTKNVDLALAGITITDERKKAIDFSDGYYKSGLLVMVKANNNDVKSVKDLDGKVVAVKSGTGSVDYAKANIKTKDLRQFPNIDNAYMELGTNRADAVLHDTPNILYFIKTAGNGQFKAVGDSLEAQQYGIAFPKGSDELRDKVNGALKTLRENGTYNEIYKKWFGTEPK
+targets:
+- 25.0
+- 26.02
+- 27.05
+- 28.08
+- 29.1
+restraints:
+  verbose: true
+  gpu: true
+  max_iter: 100
+  method: CG
+  distance_restraints_config:
+  - atom_selection1: chain A and ((resid 4 to 83) or (resid 185 to 223))
+    atom_selection2: chain A and ((resid 89 to 179))
+    start_sigma: 99999999
+    harmonic:
+      target_distance: 25.0

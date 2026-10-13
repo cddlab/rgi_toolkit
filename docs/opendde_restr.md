@@ -41,6 +41,11 @@ DSL, `resid` is the **per-chain 1-based token ordinal** and resets for each chai
 groups with `chain A and (...)`. There is **no top-level `start_sigma`** — it is set per
 distance/RMSD/group entry and once for all conformer terms.
 
+Ligand targets start from OpenDDE's `ref_pos` coordinates. The adapter preserves
+source SMILES chemistry and atom mapping; shared RGI preparation performs the
+configured force-field relaxation and stereo validation, regenerating only when
+repair is needed.
+
 ## Complete example (input JSON)
 
 Save this as `restr_example.json`. It combines QBP and its GLN ligand with

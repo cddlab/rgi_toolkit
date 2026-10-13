@@ -1,0 +1,27 @@
+kind: conformer
+dataset:
+  repo: wasarou/plinder-cistrans-209
+  revision: main
+pose_reference:
+  url: https://plinderdata.org/2024-06/v2
+restraints:
+  verbose: true
+  gpu: true
+  max_iter: 100
+  method: CG
+  conformer_restraints_config:
+    start_sigma: 1.0
+    relax_force_field:
+      ligand: uff
+    bond:
+      weight: 1
+    angle:
+      weight: 1
+    chiral:
+      weight: 1
+    cistrans:
+      weight: 1
+    plane:
+      weight: 0
+    vdw:
+      weight: 1

@@ -649,6 +649,70 @@ def test_all_adapters_preserve_source_chemistry(tool, smiles):
     assert _stereo_mismatch_counts(source, ligand.conf_coords, expected) == (0, 0)
 
 
+@pytest.mark.parametrize("tool", ["protenix", "chai", "opendde"])
+def test_native_ligand_reference_reaches_shared_preparation(tool, monkeypatch):
+    from unittest.mock import Mock
+
+    smiles = "C[C@H](O)/C=C/Cl"
+    source = Chem.AddHs(Chem.MolFromSmiles(smiles))
+    assert AllChem.EmbedMolecule(source, randomSeed=19) == 0
+    source = Chem.RemoveHs(source)
+    coords = source.GetConformer().GetPositions().copy()
+    embed = Mock(wraps=AllChem.EmbedMolecule)
+    monkeypatch.setattr(AllChem, "EmbedMolecule", embed)
+
+    (ligand,) = _chemistry_adapter(tool, source, smiles).iter_ligand_confs()
+
+    embed.assert_not_called()
+    np.testing.assert_array_equal(ligand.conf_coords, coords)
+    np.testing.assert_array_equal(ligand.mol.GetConformer().GetPositions(), coords)
+    assert Chem.MolToSmiles(ligand.stereo_mol) == smiles
+
+
+@pytest.mark.parametrize("tool", ["protenix", "chai", "opendde"])
+@pytest.mark.parametrize("force_field", ["uff", "none"])
+@pytest.mark.parametrize(
+    "smiles,opposite",
+    [
+        ("C[C@H](O)F", "C[C@@H](O)F"),
+        ("C/C=C/Cl", r"C/C=C\Cl"),
+    ],
+)
+def test_shared_preparation_repairs_native_stereo(
+    tool, force_field, smiles, opposite, monkeypatch
+):
+    from rgi_toolkit import featurizer
+
+    source = Chem.AddHs(Chem.MolFromSmiles(opposite))
+    assert AllChem.EmbedMolecule(source, randomSeed=19) == 0
+    source = Chem.RemoveHs(source)
+    coords = source.GetConformer().GetPositions().copy()
+    (ligand,) = _chemistry_adapter(tool, source, smiles).iter_ligand_confs()
+    expected = _expected_stereo(ligand.stereo_mol, coords)
+    assert sum(_stereo_mismatch_counts(ligand.stereo_mol, coords, expected)) > 0
+    np.testing.assert_array_equal(ligand.conf_coords, coords)
+    prepared = []
+
+    def capture(function):
+        def wrapped(mol, positions, *args, **kwargs):
+            result = function(mol, positions, *args, **kwargs)
+            prepared.append(positions if result is None else result)
+            return result
+
+        return wrapped
+
+    monkeypatch.setattr(featurizer, "ff_relax", capture(featurizer.ff_relax))
+    monkeypatch.setattr(featurizer, "repair_stereo", capture(featurizer.repair_stereo))
+    _, _, chirals, cistrans, _ = featurizer._extract_conformer(
+        [ligand], force_field=force_field
+    )
+
+    assert chirals or cistrans
+    assert len(prepared) == 1
+    assert _stereo_mismatch_counts(ligand.stereo_mol, prepared[0], expected) == (0, 0)
+    np.testing.assert_array_equal(ligand.conf_coords, coords)
+
+
 def test_biotite_get_elements():
     aa = _fake_aa()
     # n_atom=5 padded: ['C','C','N'] -> [6,6,7], padding -> 0
@@ -711,7 +775,7 @@ def test_biotite_ligand_confs_annotation_overrides_default():
 
 
 def test_biotite_ligand_confs_post_build_hook():
-    """post_build replaces the target geometry (protenix's SMILES ideal-conformer)."""
+    """post_build can replace the target geometry before shared preparation."""
     aa = _fake_aa()
     moved = np.array([[7.0, 7, 7], [8, 8, 8]])
 

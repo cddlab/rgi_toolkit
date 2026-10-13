@@ -14,16 +14,12 @@ rgi_toolkit -> nothing, like the boltz/protenix adapters.
 
 from __future__ import annotations
 
-import logging
 from typing import Iterator
 
 import numpy as np
 
 from rgi_toolkit._mol_build import build_ligand_mol as _build_ligand_mol
-from rgi_toolkit._mol_build import generate_ideal_conformer as _generate_ideal_conformer
 from rgi_toolkit.atom_context import AtomRecord, LigandConf
-
-logger = logging.getLogger(__name__)
 
 _LIGAND_ENTITY = 3  # chai EntityType.LIGAND
 _TENSORCODE_PAD = 255  # chai TENSORCODE_PAD_TOKEN
@@ -244,26 +240,6 @@ class ChaiStructureAdapter:
                     raise ValueError(
                         f"chai ligand {ch}: cannot map source SMILES "
                         "stereochemistry to the model atom order"
-                    )
-            if mol is not None:
-                # Embed source stereo to repair inverted model references. Featurizer
-                # validation also covers fallback to model coordinates.
-                ideal = (
-                    _generate_ideal_conformer(stereo_mol)
-                    if stereo_mol is not None
-                    else None
-                )
-                if ideal is not None and len(ideal) == len(idxs):
-                    coords = ideal
-                    mol, rebuilt_stereo_mol = self._mol_from_smiles(
-                        smiles, idxs, ref_elem[idxs], ideal
-                    )
-                    if rebuilt_stereo_mol is not None:
-                        stereo_mol = rebuilt_stereo_mol
-                    logger.info("chai ligand %s: stereo-correct ETKDG target", ch)
-                else:
-                    logger.info(
-                        "chai ligand %s: ETKDG target unavailable, using ref_pos", ch
                     )
             if mol is None:
                 mol = _build_ligand_mol(ref_elem[idxs], coords, [], perceive_bonds=True)

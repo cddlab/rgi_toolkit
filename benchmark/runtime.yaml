@@ -1,0 +1,15 @@
+boltz_restr:
+  python: ${BOLTZ_PYTHON}
+protenix_restr:
+  python: ${PROTENIX_PYTHON}
+  script: ${PROTENIX_ROOT}/runner/inference.py
+alphafold3_restr:
+  python: ${ALPHAFOLD3_PYTHON}
+  script: ${ALPHAFOLD3_ROOT}/run_alphafold.py
+  model_dir: ${ALPHAFOLD3_MODEL_DIR}
+chai-lab_restr:
+  python: ${CHAI_PYTHON}
+openfold-3_restr:
+  python: ${OPENFOLD3_PYTHON}
+esm_restr:
+  python: ${ESMFOLD2_PYTHON}

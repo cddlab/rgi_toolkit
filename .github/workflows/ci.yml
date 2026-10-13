@@ -13,6 +13,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --project benchmark --frozen --group dev
+      - run: uv run --project benchmark --no-sync python -m pytest benchmark/tests -q
+
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 5
