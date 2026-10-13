@@ -1,8 +1,8 @@
-# Boltz-2 — Restraint-Guided Inference (RGI)
+# Boltz-1 / Boltz-2 — Restraint-Guided Inference (RGI)
 
 [Documentation index](README.md) · [Configuration reference](config.md)
 
-Boltz-2 + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided inference. `restraints_config` reference & atom-selection DSL: [`config.md`](config.md).
+Boltz-1/2 + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided inference. `restraints_config` reference & atom-selection DSL: [`config.md`](config.md).
 
 ## Installation
 
@@ -136,6 +136,9 @@ source .venv/bin/activate
 boltz predict restr_example.yaml \
     --seed 0 --out_dir out_restr_example --model boltz2 --use_msa_server
 ```
+
+For Boltz-1, replace `--model boltz2` with `--model boltz1`. Both versions use
+the same input YAML and `restraints_config` format.
 
 ## Verify results
 

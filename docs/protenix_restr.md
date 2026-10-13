@@ -1,8 +1,8 @@
-# Protenix v2 — Restraint-Guided Inference (RGI)
+# Protenix v1 / v2 — Restraint-Guided Inference (RGI)
 
 [Documentation index](README.md) · [Configuration reference](config.md)
 
-Protenix v2 + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided inference. `restraints_config` reference & atom-selection DSL: [`config.md`](config.md).
+Protenix v1/v2 + [RGI-toolkit](https://github.com/cddlab/rgi_toolkit) restraint-guided inference. `restraints_config` reference & atom-selection DSL: [`config.md`](config.md).
 
 ## Installation
 
@@ -159,6 +159,10 @@ protenix pred -i restr_example.json -o out_restr_example \
     --model_name protenix-v2 --use_default_params true --use_msa true \
     --seeds 0 --step 200 --sample 1
 ```
+
+For Protenix v1, replace `--model_name protenix-v2` with
+`--model_name protenix_base_default_v1.0.0`. Both versions use the same input JSON
+and `restraints_config` format.
 
 ## Verify results
 

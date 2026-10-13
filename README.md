@@ -104,8 +104,10 @@ The backends below refer to the local predictor integrations.
 
 | Model | Integration | Backend | Guide |
 | --- | --- | --- | --- |
+| **Boltz-1** | boltz | PyTorch | [Boltz-1](docs/boltz_restr.md) |
 | **Boltz-2** | boltz | PyTorch | [Boltz-2](docs/boltz_restr.md) |
 | **AlphaFold3** | alphafold3 | JAX | [AlphaFold3](docs/alphafold3_restr.md) |
+| **Protenix v1** | protenix | PyTorch | [Protenix v1](docs/protenix_restr.md) |
 | **Protenix v2** | protenix | PyTorch | [Protenix v2](docs/protenix_restr.md) |
 | **ESMFold2** | esmfold2 | PyTorch | [ESMFold2](docs/esmfold2_restr.md) |
 | **OpenFold-3** | openfold-3 | PyTorch | [OpenFold-3](docs/openfold-3_restr.md) |
