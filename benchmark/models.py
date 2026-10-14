@@ -14,6 +14,46 @@ from pathlib import Path
 from arms import GUIDANCE_MODELS, uses_guidance, uses_rgi
 
 
+def _pop_option(args, names):
+    remaining = []
+    value = None
+    iterator = iter(args)
+    for arg in iterator:
+        name, separator, inline = arg.partition("=")
+        if name in names:
+            value = inline if separator else next(iterator)
+        else:
+            remaining.append(arg)
+    return remaining, value
+
+
+def msa_recycle_command(cmd, model):
+    if model == "openfold-3_restr":
+        import yaml
+
+        cmd, source = _pop_option(cmd, {"--runner-yaml", "--runner_yaml"})
+        config = (yaml.safe_load(Path(source).read_text()) or {}) if source else {}
+        config.setdefault("model_update", {}).setdefault("presets", ["predict"])
+        shared = (
+            config.setdefault("model_update", {})
+            .setdefault("custom", {})
+            .setdefault("architecture", {})
+            .setdefault("shared", {})
+        )
+        shared["num_recycles"] = 1
+        runner = Path("ms_runner.yaml")
+        runner.write_text(yaml.safe_dump(config))
+        return cmd + ["--runner-yaml", str(runner)]
+    flag = {
+        "boltz_restr": "--recycling_steps",
+        "protenix_restr": "--model.N_cycle",
+        "alphafold3_restr": "--num_recycles",
+        "chai-lab_restr": "--num-trunk-recycles",
+    }[model]
+    cmd, _ = _pop_option(cmd, {flag})
+    return cmd + [flag, "1"]
+
+
 def provenance():
     versions = {"python": sys.version.split()[0]}
     for name in (
@@ -141,7 +181,8 @@ def command(job, runtime):
                 str(uses_guidance(job["arm"])).lower(),
             ]
         )
-    return cmd + extra
+    cmd += extra
+    return msa_recycle_command(cmd, model) if job["arm"] == "ms" else cmd
 
 
 def chai_msa(job):
@@ -197,7 +238,7 @@ def esm_fold(job):
         model,
         StructurePredictionInput(sequences=entities),
         seed=job["seed"],
-        num_loops=20,
+        num_loops=1 if job["arm"] == "ms" else 20,
         num_sampling_steps=200,
         msa_max_depth=1024,
         msa_column_mask_rate=0.1,

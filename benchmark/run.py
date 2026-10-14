@@ -126,6 +126,7 @@ def run(args):
         identity = {
             "runtime": runtime,
             "software": software,
+            "msa_subsample_recycles": 1,
         }
         record = root / f"software-{job['model']}.json"
         with FileLock(str(record.with_suffix(".lock"))):

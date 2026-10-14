@@ -120,6 +120,9 @@ and capped by available homologs. The manifest jobs record requested depth,
 actual retained row count, MSA seed, and prediction seed. The sampled files are
 shared across models. Shallow inputs can yield identical subsets at large depths.
 
+The `ms` arm uses one recycle for every model (`num_loops=1` for ESMFold2).
+Other arms retain their existing model settings.
+
 Override with `--seeds`, `--msa-depths`, `--msa-seeds`, and
 `--msa-prediction-seeds`. `--seeds` changes RGI/full-MSA arms only.
 `--limit N` restricts targets (or conformer systems); MSA subsampling has no target.
