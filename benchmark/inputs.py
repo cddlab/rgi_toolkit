@@ -83,13 +83,14 @@ def write_input(folder, job):
             obj["restraints_config"] = rc
         write_json(folder / "input.json", obj)
     elif model == "openfold-3_restr":
+        (folder / "uniref90_hits.a3m").symlink_to(msa)
         query = {
             "chains": [
                 {
                     "molecule_type": "protein",
                     "chain_ids": ["A"],
                     "sequence": seq,
-                    "main_msa_file_paths": [msa],
+                    "main_msa_file_paths": ["uniref90_hits.a3m"],
                 }
             ]
         }

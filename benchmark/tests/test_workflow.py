@@ -90,7 +90,13 @@ def test_prepared_runs_are_relocatable(tmp_path, benchmark):
         for file in path.parent.iterdir():
             assert str(tmp_path) not in file.read_text()
         if job["model"] == "openfold-3_restr":
-            assert read_json(path.with_name("input.json"))["seeds"] == [job["seed"]]
+            native = read_json(path.with_name("input.json"))
+            assert native["seeds"] == [job["seed"]]
+            msa = native["queries"]["prediction"]["chains"][0]["main_msa_file_paths"]
+            assert msa == ["uniref90_hits.a3m"]
+            assert (path.parent / msa[0]).read_bytes() == (
+                path.parent / job["msa"]
+            ).read_bytes()
 
 
 def test_missing_inputs_and_overwrite_are_rejected(tmp_path):
