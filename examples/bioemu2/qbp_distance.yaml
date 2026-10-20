@@ -1,0 +1,14 @@
+entities:
+  - entity_type: protein
+    sequence: ADKKLVVATDTAFVPFEFKQGDKYVGFDVDLWAAIAKELKLDYELKPMDFSGIIPALQTKNVDLALAGITITDERKKAIDFSDGYYKSGLLVMVKANNNDVKSVKDLDGKVVAVKSGTGSVDYAKANIKTKDLRQFPNIDNAYMELGTNRADAVLHDTPNILYFIKTAGNGQFKAVGDSLEAQQYGIAFPKGSDELRDKVNGALKTLRENGTYNEIYKKWFGTEPK
+    asym_ids: A
+restraints_config:
+  gpu: true
+  verbose: true
+  method: CG
+  max_iter: 1000
+  distance_restraints_config:
+    - atom_selection1: chain A and ((resid 5 to 84) or (resid 186 to 224))
+      atom_selection2: chain A and resid 90 to 180
+      harmonic:
+        target_distance: 25.0

@@ -66,8 +66,8 @@ cancels an older run for the same branch or pull request.
 
 **rgi_toolkit** — Restraint-Guided Inference (RGI): inject distance + ligand
 conformer + RMSD restraints into a structure-prediction diffusion loop via gradient
-optimization. Shared by **eight** integrations — boltz / protenix / chai-lab / openfold-3 /
-esmfold2 / opendde / rf3 (torch) and alphafold3 (jax), covering 10 model variants (boltz1+boltz2 and
+optimization. Shared by **nine** integrations — boltz / protenix / chai-lab / openfold-3 /
+esmfold2 / opendde / rf3 / bioemu2 (torch) and alphafold3 (jax), covering 11 model variants (boltz1+boltz2 and
 protenix v1+v2 each share one adapter). The end-to-end guide for integrating a new tool is the
 `implement-rgi` skill, shared from `.claude/skills/` to `.agents/skills/` (alongside
 `generate-rgi-config` for authoring a config, `sync-upstream`, `create-github-release`).
@@ -395,7 +395,7 @@ inert — to run AF3 restraints on CPU, run the whole process on the JAX CPU pla
 
 #### Framework adapters
 
-(`{boltz,protenix,chai,openfold3,esmfold2,opendde,rf3,alphafold3}/adapter.py` —
+(`{boltz,protenix,chai,openfold3,esmfold2,opendde,rf3,bioemu2,alphafold3}/adapter.py` —
 framework-free EXCEPT boltz, whose feats arrive as native torch tensors so its adapter
 imports torch (read at batch 0); the others import no framework. AF3's CCD/SMILES mol
 resolution lives in a thin in-tool shim
