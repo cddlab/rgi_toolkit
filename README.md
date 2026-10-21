@@ -114,7 +114,7 @@ The backends below refer to the local predictor integrations.
 | **Chai-1** | chai-lab | PyTorch | [Chai-1](docs/chai-lab_restr.md) |
 | **OpenDDE v1** | opendde | PyTorch | [OpenDDE](docs/opendde_restr.md) |
 | **RF3** | foundry | PyTorch | [RF3](docs/foundry_restr.md) |
-| **BioEmu2** | bioemu2 | PyTorch | [BioEmu2](docs/bioemu2.md) |
+| **BioEmu2** | bioemu2 | PyTorch | [BioEmu2](docs/bioemu2_restr.md) |
 
 Each guide covers installation, input configuration and the prediction command.
 The [documentation index](docs/README.md) also summarizes where each predictor
