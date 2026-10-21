@@ -17,13 +17,6 @@ cd bioemu2_restr
 uv sync --extra cuda
 ```
 
-The fork requires RGI-toolkit 0.4.7 from the `add_bioemu2` branch. For development
-with a sibling toolkit checkout:
-
-```bash
-uv pip install --python .venv/bin/python -e ../RGI-toolkit
-```
-
 BioEmu2 downloads its checkpoint when needed. See the
 [upstream guide](https://github.com/microsoft/bioemu2) for checkpoint and GPU
 requirements. Run prediction commands on a GPU compute node.

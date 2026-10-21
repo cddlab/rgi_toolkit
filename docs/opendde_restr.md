@@ -18,9 +18,6 @@ uv venv --python 3.12 .venv && source .venv/bin/activate
 uv pip install --torch-backend cu126 -e ".[gpu]"  # also pulls rgi_toolkit (declared in pyproject)
 ```
 
-> For co-development of the engine, override the declared dependency with a local editable
-> checkout in a SEPARATE step: `uv pip install -e ../RGI-toolkit` (sibling clone).
-
 OpenDDE also needs its checkpoint and common runtime data under `OPENDDE_ROOT_DIR`; follow the
 fork's `docs/inference_instructions.md` or run `scripts/download_opendde_data.sh`.
 

@@ -19,9 +19,6 @@ uv pip install --reinstall torch --index-url https://download.pytorch.org/whl/cu
 uv pip install pyyaml                                                                 # chai1.py imports yaml, not a chai dep
 ```
 
-> For co-development of the engine, override the pinned dependency with a local editable
-> checkout in a SEPARATE step: `uv pip install -e ../RGI-toolkit` (sibling clone).
-
 ## Configuration
 
 chai is the **odd one out**: the file you pass to `--restraints-config-path` **IS** the

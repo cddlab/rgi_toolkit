@@ -22,9 +22,6 @@ uv venv && source .venv/bin/activate           # Python 3.12+
 uv pip install -e .                            # compiles the C++ chem components (cmake/ninja) + pulls the rgi_toolkit engine
 ```
 
-> For co-development of the engine, override the pinned dependency with a local editable
-> checkout in a SEPARATE step: `uv pip install -e ../RGI-toolkit` (sibling clone).
-
 - **Model parameters** are not redistributable: request them via Google's form (see the repo's
   `WEIGHTS_TERMS_OF_USE.md`) and point `--model_dir` at them.
 - Run on a CUDA GPU.

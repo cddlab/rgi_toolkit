@@ -18,9 +18,6 @@ uv pip install --python .venv/bin/python --torch-backend cu128 \
 uv run --no-project --python .venv/bin/python foundry install rf3
 ```
 
-> For co-development of the engine, install a sibling checkout in a separate step:
-> `uv pip install --python .venv/bin/python -e ../RGI-toolkit`.
-
 The fork installs the shared RGI engine. RF3 supplies PyTorch, so no separate RGI
 backend extra is needed. `constraints-rf3.txt` pins the validated Linux CUDA
 dependencies. Inference requires the RF3 checkpoint and a CUDA GPU; use your
