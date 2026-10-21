@@ -95,7 +95,7 @@ in each parent directory:
 | ADK angle, 72.85° | [YAML](../examples/angle/bioemu2/adk_72.85.yaml) | `bash examples/angle/bioemu2/run.sh` |
 | QBP dual-reference RMSD, 2.65/2.65 Å | [YAML](../examples/rmsd/bioemu2/qbp_2.65.yaml) | `bash examples/rmsd/bioemu2/run.sh` |
 | DgoT distance difference, 0.8 Å | [YAML](../examples/custom/dist-diff/bioemu2/dgot_0.80.yaml) | `bash examples/custom/dist-diff/bioemu2/run.sh` |
-| MDM2–p53 dissociation, 13.0–70.0 Å | [Inputs and MSA setup](../examples/ligand-dissociation/README.md) | `bash examples/ligand-dissociation/bioemu2/run.sh mdm2_p53_13.00.yaml` |
+| MDM2–p53 dissociation, 13.0 Å | [Input and MSA setup](../examples/ligand-dissociation/README.md) | `bash examples/ligand-dissociation/bioemu2/run.sh` |
 
 The first four examples use BioEmu2's ColabFold MSA acquisition. The dissociation
 runner loads the supplied chain-A and chain-B A3Ms through the Python API.

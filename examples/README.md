@@ -2,8 +2,8 @@
 
 Examples of distance, angle, RMSD, custom, and ligand-dissociation restraints.
 Inputs are organized as `<type>/<tool>/`, with a `run.sh` for each model.
-Each input includes its restraint settings inline. The first four example
-types contain one setting per model; ligand dissociation contains ten.
+Each input includes its restraint settings inline. Each example type
+contains one setting per model.
 
 | Directory | System | Representative restraint |
 |---|---|---|
@@ -11,7 +11,7 @@ types contain one setting per model; ligand dissociation contains ten.
 | `angle/` | ADK, 214 residues | NMP–CORE–LID centroid angle of 72.85° |
 | `rmsd/` | QBP | Open/closed reference RMSD targets of 2.65/2.65 Å on 220 common Cα atoms |
 | `custom/dist-diff/` | DgoT, 419 residues | ΔD = D_in − D_out = 0.8 Å |
-| [`ligand-dissociation/`](ligand-dissociation/README.md) | MDM2–p53 | Chain-centroid distances from 13.0 to 70.0 Å |
+| [`ligand-dissociation/`](ligand-dissociation/README.md) | MDM2–p53 | Chain-centroid distance of 13.0 Å |
 
 The nine predictors covered here are `boltz-2`, `protenix-v2`, `alphafold3`,
 `openfold-3`, `chai`, `esmfold2`, `opendde`, `rf3`, and `bioemu2`.
