@@ -72,9 +72,10 @@ protenix v1+v2 each share one adapter). The end-to-end guide for integrating a n
 `implement-rgi` skill, shared from `.claude/skills/` to `.agents/skills/` (alongside
 `generate-rgi-config` for authoring a config, `sync-upstream`, `create-github-release`).
 Per-tool as-built integration write-ups live in `docs/<tool>.md` (one per tool); the shared
-config + selection-DSL surface is `docs/config.md`. `examples/` holds ready-to-run samples —
-4 restraint types × 7 predictors, each with a `run.sh` — so reuse those fixtures instead of
-authoring new ones.
+config + selection-DSL surface is `docs/config.md`. `examples/` holds ready-to-run samples
+organized by restraint type and predictor:
+distance, angle, RMSD, custom, and MDM2-p53 ligand dissociation for nine predictors,
+each with a `run.sh`. Reuse those fixtures instead of authoring new ones.
 
 Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
 

@@ -1,0 +1,44 @@
+{
+  "dialect": "alphafold3",
+  "version": 4,
+  "name": "mdm2_p53_19.33",
+  "modelSeeds": [
+    0
+  ],
+  "sequences": [
+    {
+      "protein": {
+        "id": "A",
+        "sequence": "NHISTSDQEKLVQPTPLLLSLLKSAGAQKETFTMKEVIYHLGQYIMAKQLYDEKQQHIVHCSNDPLGELFGVQEFSVKEPRRLYAMISRNLVSANVKESSEDIFGNV",
+        "unpairedMsaPath": "../msas/a3m/mdm2_p53.a3m",
+        "pairedMsa": "",
+        "templates": []
+      }
+    },
+    {
+      "protein": {
+        "id": "B",
+        "sequence": "PLSQETFSDLWKLLPEN",
+        "unpairedMsaPath": "../msas/a3m/p53.a3m",
+        "pairedMsa": "",
+        "templates": []
+      }
+    }
+  ],
+  "restraints_config": {
+    "verbose": true,
+    "max_iter": 1000,
+    "method": "CG",
+    "distance_restraints_config": [
+      {
+        "atom_selection1": "chain A",
+        "atom_selection2": "chain B",
+        "harmonic": {
+          "target_distance": 19.33
+        },
+        "start_sigma": 99999999
+      }
+    ],
+    "gpu": true
+  }
+}

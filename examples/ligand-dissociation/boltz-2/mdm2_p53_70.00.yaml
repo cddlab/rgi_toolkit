@@ -1,0 +1,20 @@
+sequences:
+- protein:
+    id: A
+    sequence: NHISTSDQEKLVQPTPLLLSLLKSAGAQKETFTMKEVIYHLGQYIMAKQLYDEKQQHIVHCSNDPLGELFGVQEFSVKEPRRLYAMISRNLVSANVKESSEDIFGNV
+    msa: ../msas/a3m/mdm2_p53.a3m
+- protein:
+    id: B
+    sequence: PLSQETFSDLWKLLPEN
+    msa: ../msas/a3m/p53.a3m
+restraints_config:
+  verbose: true
+  max_iter: 1000
+  method: CG
+  distance_restraints_config:
+  - atom_selection1: chain A
+    atom_selection2: chain B
+    harmonic:
+      target_distance: 70.0
+    start_sigma: 99999999
+  gpu: true

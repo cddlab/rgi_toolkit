@@ -200,6 +200,21 @@ adds no restraints. Each job receives its own configuration and every diffusion
 sample is optimized independently. Set `skip_existing=false` when comparing
 configurations in an output directory that already contains predictions.
 
+## Runnable examples
+
+The toolkit also provides the same individual settings used by the other models:
+
+| Example | Input | Run from the RGI-toolkit checkout |
+|---|---|---|
+| QBP distance, 25.0 Å | [JSON](../examples/distance/rf3/qbp_25.00.json) | `bash examples/distance/rf3/run.sh` |
+| ADK angle, 72.85° | [JSON](../examples/angle/rf3/adk_72.85.json) | `bash examples/angle/rf3/run.sh` |
+| QBP dual-reference RMSD, 2.65/2.65 Å | [JSON](../examples/rmsd/rf3/qbp_2.65.json) | `bash examples/rmsd/rf3/run.sh` |
+| DgoT distance difference, 0.8 Å | [JSON](../examples/custom/dist-diff/rf3/dgot_0.80.json) | `bash examples/custom/dist-diff/rf3/run.sh` |
+| MDM2–p53 dissociation, 13.0–70.0 Å | [Inputs and MSA setup](../examples/ligand-dissociation/README.md) | `bash examples/ligand-dissociation/rf3/run.sh mdm2_p53_13.00.json` |
+
+These runners request one sample with 50 diffusion steps and seed 0.
+The dissociation inputs supply a separate unpaired A3M for each protein chain.
+
 ## Verify results
 
 With `verbose: true`, the setup log prints `built spec: n_active=.. bonds=.. angles=..
