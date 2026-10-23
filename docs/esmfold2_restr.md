@@ -35,18 +35,6 @@ cd esm_restr
 pixi install
 ```
 
-### Co-development
-
-Clone `RGI-toolkit` alongside `esm_restr`, then install both editably in a uv
-environment. The native ESM source contains the sampling hook, so edits take
-effect directly:
-
-```bash
-uv venv --python 3.12
-uv pip install -e . -e ../RGI-toolkit
-uv run --no-project python restr_example.py
-```
-
 ## Configuration
 
 ESMFold2's API is **Pythonic**: `restraints_config` is a plain **Python dict** passed to

@@ -215,3 +215,4 @@ __marimo__/
 # User-supplied example alignments
 /examples/**/*.a3m
 /examples/**/*.aligned.pqt
+/examples/ligand-dissociation/msas/

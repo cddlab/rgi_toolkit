@@ -18,9 +18,6 @@ uv pip install --python .venv/bin/python --torch-backend cu128 \
 uv run --no-project --python .venv/bin/python foundry install rf3
 ```
 
-> For co-development of the engine, install a sibling checkout in a separate step:
-> `uv pip install --python .venv/bin/python -e ../RGI-toolkit`.
-
 The fork installs the shared RGI engine. RF3 supplies PyTorch, so no separate RGI
 backend extra is needed. `constraints-rf3.txt` pins the validated Linux CUDA
 dependencies. Inference requires the RF3 checkpoint and a CUDA GPU; use your
@@ -199,6 +196,21 @@ Omitted or null `restraints_config` retains ordinary RF3 sampling; an empty obje
 adds no restraints. Each job receives its own configuration and every diffusion
 sample is optimized independently. Set `skip_existing=false` when comparing
 configurations in an output directory that already contains predictions.
+
+## Runnable examples
+
+The toolkit also provides the same individual settings used by the other models:
+
+| Example | Input | Run from the RGI-toolkit checkout |
+|---|---|---|
+| QBP distance, 25.0 Å | [JSON](../examples/distance/rf3/qbp_25.00.json) | `bash examples/distance/rf3/run.sh` |
+| ADK angle, 72.85° | [JSON](../examples/angle/rf3/adk_72.85.json) | `bash examples/angle/rf3/run.sh` |
+| QBP dual-reference RMSD, 2.65/2.65 Å | [JSON](../examples/rmsd/rf3/qbp_2.65.json) | `bash examples/rmsd/rf3/run.sh` |
+| DgoT distance difference, 0.8 Å | [JSON](../examples/custom/dist-diff/rf3/dgot_0.80.json) | `bash examples/custom/dist-diff/rf3/run.sh` |
+| MDM2–p53 dissociation, 13.0 Å | [Input and MSA setup](../examples/ligand-dissociation/README.md) | `bash examples/ligand-dissociation/rf3/run.sh` |
+
+These runners request one sample with 50 diffusion steps and seed 0.
+The dissociation inputs supply a separate unpaired A3M for each protein chain.
 
 ## Verify results
 

@@ -3,8 +3,6 @@
 Use the tool-specific guide for installation, config placement, and the run command. Use the
 shared [`restraints_config` reference](config.md) for restraint semantics and defaults. See the
 [FAQ](FAQ.md) for common failure modes and troubleshooting guidance.
-The [implementation specification](SPEC.md) describes the toolkit's API, mathematical
-contracts, optimizer algorithms, and verification against independent implementations.
 
 ## Tool guides
 
@@ -21,6 +19,7 @@ Guides are available for the following predictor integrations.
 | Chai-1            | PyTorch | Top-level sidecar YAML passed with `--restraints-config-path` | [Chai-1](chai-lab_restr.md)        |
 | OpenDDE v1 | PyTorch | `restraints_config` in each fold-input JSON object | [OpenDDE](opendde_restr.md) |
 | RF3 (Foundry) | PyTorch | `restraints_config` in each input JSON job | [RF3](foundry_restr.md) |
+| BioEmu2 | PyTorch | `restraints_config` in the system YAML or `System` | [BioEmu2](bioemu2_restr.md) |
 
 ## Recommended workflow
 

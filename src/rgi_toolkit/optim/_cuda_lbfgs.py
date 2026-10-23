@@ -1,4 +1,4 @@
-"""CUDA control flow following PyTorch 2.8 L-BFGS and Wolfe rules.
+"""CUDA control flow following the supported PyTorch L-BFGS and Wolfe rules.
 
 Algorithm derived from torch.optim.lbfgs (BSD-3-Clause, PyTorch contributors).
 The host adapter retains the native optimizer for unsupported CUDA environments.
@@ -12,6 +12,7 @@ import triton.language as tl
 from torch.utils import _pytree
 
 from rgi_toolkit.optim._cuda_lbfgs_scalars import LibraryScalars
+from rgi_toolkit.optim._torch_lbfgs import BOUNDED_LINE_SEARCH
 
 
 @triton.jit
@@ -98,7 +99,7 @@ def cubic(first, second, bounds=None):
     )
 
 
-def wolfe(s, vg, x, direction, value, gradient, slope, step):
+def wolfe(s, vg, x, direction, value, gradient, slope, step, max_ls=25):
     def evaluate(t):
         g, f = vg(
             s.builder.call(torch.addcmul, x, direction, t.to(x.dtype), native=True)
@@ -120,7 +121,7 @@ def wolfe(s, vg, x, direction, value, gradient, slope, step):
     # Expansion stops as soon as a bracket or a Wolfe point is found.
     def bracket_condition(state):
         previous, current, iteration, done, bracketed, evaluations = state
-        return ~done & ~bracketed & (iteration < 25)
+        return ~done & ~bracketed & (iteration < max_ls)
 
     def bracket_body(state):
         previous, current, iteration, done, bracketed, evaluations = state
@@ -157,7 +158,7 @@ def wolfe(s, vg, x, direction, value, gradient, slope, step):
             s.integer(1),
         ),
     )
-    previous = choose(iteration == 25, initial, previous)
+    previous = choose(iteration == max_ls, initial, previous)
     previous = choose(done, trial, previous)
     low = choose(previous.f <= trial.f, previous, trial)
     high = choose(previous.f <= trial.f, trial, previous)
@@ -165,7 +166,7 @@ def wolfe(s, vg, x, direction, value, gradient, slope, step):
 
     def zoom_condition(state):
         low, high, iteration, done, insufficient, evaluations = state
-        return ~done & (iteration < 25) & ~((high.t - low.t).abs() * norm < 1e-9)
+        return ~done & (iteration < max_ls) & ~((high.t - low.t).abs() * norm < 1e-9)
 
     def zoom_body(state):
         low, high, iteration, done, insufficient, evaluations = state
@@ -314,7 +315,12 @@ def run_lbfgs(s, vg, x, max_iter=100, gtol=1e-5):
         )
 
         def search(_):
-            result, evaluations = wolfe(s, vg, state.x, d, state.f, state.g, slope, t)
+            max_ls = (
+                max_iter * 5 // 4 - state.evaluations if BOUNDED_LINE_SEARCH else 25
+            )
+            result, evaluations = wolfe(
+                s, vg, state.x, d, state.f, state.g, slope, t, max_ls=max_ls
+            )
             updated = s.builder.call(
                 torch.addcmul, state.x, d, result.t.to(x.dtype), native=True
             )

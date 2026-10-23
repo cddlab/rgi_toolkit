@@ -58,23 +58,23 @@ file-grouped workers, then all `cpu_compile` tests run with real compilation.
 `task test-gpu` retains the complete GPU selection. Run the comprehensive local
 suite before delivering code changes, and GPU checks when GPU behavior changes.
 Compiler checks need Python development headers and a C++ compiler; a skip is
-not evidence that compilation passed. See `docs/testing.md` for the coverage
-split and environment setup. Markdown-only changes skip CI, and a newer run
-cancels an older run for the same branch or pull request.
+not evidence that compilation passed. Markdown-only changes skip CI, and a newer
+run cancels an older run for the same branch or pull request.
 
 ## Architecture
 
 **rgi_toolkit** — Restraint-Guided Inference (RGI): inject distance + ligand
 conformer + RMSD restraints into a structure-prediction diffusion loop via gradient
-optimization. Shared by **eight** integrations — boltz / protenix / chai-lab / openfold-3 /
-esmfold2 / opendde / rf3 (torch) and alphafold3 (jax), covering 10 model variants (boltz1+boltz2 and
+optimization. Shared by **nine** integrations — boltz / protenix / chai-lab / openfold-3 /
+esmfold2 / opendde / rf3 / bioemu2 (torch) and alphafold3 (jax), covering 11 model variants (boltz1+boltz2 and
 protenix v1+v2 each share one adapter). The end-to-end guide for integrating a new tool is the
 `implement-rgi` skill, shared from `.claude/skills/` to `.agents/skills/` (alongside
 `generate-rgi-config` for authoring a config, `sync-upstream`, `create-github-release`).
 Per-tool as-built integration write-ups live in `docs/<tool>.md` (one per tool); the shared
-config + selection-DSL surface is `docs/config.md`. `examples/` holds ready-to-run samples —
-4 restraint types × 7 predictors, each with a `run.sh` — so reuse those fixtures instead of
-authoring new ones.
+config + selection-DSL surface is `docs/config.md`. `examples/` holds ready-to-run samples
+organized by restraint type and predictor:
+distance, angle, RMSD, custom, and MDM2-p53 ligand dissociation for nine predictors,
+each with a `run.sh`. Reuse those fixtures instead of authoring new ones.
 
 Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
 
@@ -216,8 +216,12 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
 
 - `_cuda_graph.py` records straight-line ATen regions and compiles them into native
   CUDA IF/WHILE graphs. `_cuda_graph_ops.py` adapts the existing shared CG algorithm;
-  do not fork Strong Wolfe or Armijo formulas. `_cuda_lbfgs.py` follows PyTorch 2.8
+  do not fork Strong Wolfe or Armijo formulas. `_cuda_lbfgs.py` follows the installed PyTorch
   L-BFGS, including its evaluation budget and first-iteration boundary cases.
+  PyTorch 2.13 bounds each line search by the remaining evaluation budget (2.8: 25);
+  `_torch_lbfgs.BOUNDED_LINE_SEARCH` applies the same bound to the graph and eager
+  CUDA paths. Native graph control is enabled only for PyTorch 2.8 and 2.13 with
+  CUDA >= 12.8; other releases (e.g. 2.12) use the ordinary optimizer.
 - `_cuda_minimize.py` supports all restraint families, batches, gates, custom
   closures, and mixed centroid maps within explicit memory/runtime limits. Complete
   pair sums must preserve every chemistry/topology exclusion and every new trial
@@ -395,7 +399,7 @@ inert — to run AF3 restraints on CPU, run the whole process on the JAX CPU pla
 
 #### Framework adapters
 
-(`{boltz,protenix,chai,openfold3,esmfold2,opendde,rf3,alphafold3}/adapter.py` —
+(`{boltz,protenix,chai,openfold3,esmfold2,opendde,rf3,bioemu2,alphafold3}/adapter.py` —
 framework-free EXCEPT boltz, whose feats arrive as native torch tensors so its adapter
 imports torch (read at batch 0); the others import no framework. AF3's CCD/SMILES mol
 resolution lives in a thin in-tool shim

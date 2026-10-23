@@ -1,8 +1,9 @@
 # rgi_toolkit RGI examples
 
-Examples of distance, angle, RMSD, and custom restraints for protein structures.
-Each `<type>/<tool>/` directory contains one restraint setting and a `run.sh` for
-one prediction. Each input includes its restraint settings inline.
+Examples of distance, angle, RMSD, custom, and ligand-dissociation restraints.
+Inputs are organized as `<type>/<tool>/`, with a `run.sh` for each model.
+Each input includes its restraint settings inline. Each example type
+contains one setting per model.
 
 | Directory | System | Representative restraint |
 |---|---|---|
@@ -10,14 +11,17 @@ one prediction. Each input includes its restraint settings inline.
 | `angle/` | ADK, 214 residues | NMP–CORE–LID centroid angle of 72.85° |
 | `rmsd/` | QBP | Open/closed reference RMSD targets of 2.65/2.65 Å on 220 common Cα atoms |
 | `custom/dist-diff/` | DgoT, 419 residues | ΔD = D_in − D_out = 0.8 Å |
+| [`ligand-dissociation/`](ligand-dissociation/README.md) | MDM2–p53 | Chain-centroid distance of 13.0 Å |
 
-The seven predictors covered here are `boltz-2`, `protenix-v2`, `alphafold3`,
-`openfold-3`, `chai`, `esmfold2`, and `opendde`.
+The nine predictors covered here are `boltz-2`, `protenix-v2`, `alphafold3`,
+`openfold-3`, `chai`, `esmfold2`, `opendde`, `rf3`, and `bioemu2`.
 
 ## Run
 
 ```bash
 bash examples/distance/boltz-2/run.sh
+bash examples/distance/rf3/run.sh
+bash examples/distance/bioemu2/run.sh
 
 # ESMFold2 requires the full ColabFold A3M for the selected protein.
 MSA_A3M=inputs/qbp.a3m bash examples/rmsd/esmfold2/run.sh
@@ -31,7 +35,9 @@ sm_89 GPU in this integration.
 
 All runners request one diffusion sample. OpenFold3 and Chai also request one
 model/trunk sample. The restraint minimizer is CG with the default strong-Wolfe
-line search and `gtol=1e-5`; `max_iter` is 1000 for RMSD and 100 otherwise.
+line search and `gtol=1e-5`; `max_iter` is 1000 for RMSD and ligand
+dissociation, and 100 otherwise. RF3 uses 50 diffusion steps; BioEmu2 uses
+200 EDM steps with structure conditioning.
 
 ## Restraint settings
 
@@ -67,7 +73,9 @@ For comparisons across predictors, use the same full ColabFold A3M for each
 protein. Reproducing a prediction also requires the same model checkpoint and
 seed.
 
-Boltz-2, Protenix-v2, OpenFold3, and Chai use an MSA server. AlphaFold3 uses its
+In the distance, angle, RMSD, and custom examples, Boltz-2, Protenix-v2,
+OpenFold3, Chai, and BioEmu2 use an MSA server. RF3 uses the supplied sequence;
+add `msa_paths` to its input to provide alignments. AlphaFold3 uses its
 local data pipeline and requires `MODEL_DIR` and `DB_DIR`. ESMFold2 reads the full
 A3M from `MSA_A3M`, checks its query against the example sequence, and uses
 `msa_max_depth=1024` and `msa_column_mask_rate=0.1`, with 20 recurrent
@@ -83,12 +91,18 @@ To reuse a precomputed MSA, provide it through the predictor's native input:
 | OpenFold3 | Chain `main_msa_file_paths`; use `--use-msa-server false` |
 | Chai | Aligned Parquet files through `--msa-directory`; omit `--use-msa-server` |
 | ESMFold2 | `MSA_A3M` |
+| RF3 | Job-level `msa_paths` mapping from chain IDs to A3M paths |
+| BioEmu2 | `get_msa(system, {chain_id: Path(...)})` passed to `EmuSession` |
 
-OpenDDE disables external MSA and template searches in its examples.
+OpenDDE disables external MSA and template searches in the first four
+example types. The [ligand-dissociation examples](ligand-dissociation/README.md)
+use the same two supplied, unpaired A3Ms for all nine models, with no MSA
+search. Chai converts those files to its aligned-Parquet format.
 
 ## Validation
 
-All protein selections are qualified with `chain A`. `resid` means a per-chain
+Protein selections include explicit chain IDs: `chain A` for the single-chain
+systems, and `chain A` / `chain B` for MDM2–p53. `resid` means a per-chain
 1-based ordinal, not the reference structure's author residue number. The
 [configuration guide](../docs/config.md) describes the schema and selection DSL.
 
