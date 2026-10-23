@@ -5,7 +5,8 @@
 Every RGI tool is driven by one `restraints_config` dict: a YAML/JSON block
 for Boltz, Protenix, Chai, AlphaFold3, OpenFold3, OpenDDE, RF3, and BioEmu2, or a Python
 dict for ESMFold2. See each tool's guide for where to place it.
-This page covers built-in geometry, conformer and RMSD restraints, and custom expressions,
+This page covers built-in geometry, conformer and RMSD restraints, and custom
+expressions or Python functions,
 including optional terms beyond the paper's benchmark configuration.
 Each documented key includes its type, default, allowed values, and meaning.
 
@@ -28,11 +29,13 @@ Standalone planes use `plane_restr_data.py`; polymer targets use `polymer.py`,
 - [Group improper](#improper_restraints_config-list), [group chirality](#chiral_restraints_config-list),
   and [standalone planes](#plane_restraints_config-list)
 - [Conformer geometry and VdW](#conformer_restraints_config-single-dict)
+- [Ligand force-field selection](#ligand-force-field-selection)
 - [Conformer planes and torsions](#plane-and-torsion-terms),
   [polymer dictionary targets](#polymer-targets-and-monomer_library),
   and [VdW modes](#van-der-waals-repulsion)
 - [RMSD](#rmsd_restraints_config-list)
 - [Custom restraints](#custom_restraints_config-list)
+- [Python custom restraints](#python-functions-and-registration)
 
 ## Shape
 
@@ -55,16 +58,16 @@ restraints_config:
   plane_restraints_config:    [ ... ]   # list  (selected atoms, not centroids)
   conformer_restraints_config: { ... }  # single dict (ligand or polymer geometry)
   rmsd_restraints_config:     [ ... ]   # list
-  custom_restraints_config:   [ ... ]   # list  (define your OWN restraint — see below)
+  custom_restraints_config:   [ ... ]   # list  (formula or Python function)
 ```
 
 A restraint type is active only if its block is present (and, for conformer terms, the term's
 `weight > 0`).
 
 The documented restraint types are distance, angle, dihedral, improper, chiral,
-plane, conformer, RMSD, and custom expressions. Standalone chiral and plane entries
+plane, conformer, RMSD, and custom energies. Standalone chiral and plane entries
 do not require conformer opt-in. `custom_restraints_config` defines a differentiable
-loss as a mathematical formula.
+loss as a mathematical formula or a Python function.
 
 ## Top-level keys
 
@@ -598,13 +601,12 @@ control all conformer terms together; a shared step window is also supported.
 
 ### Reference geometry
 
-For ligands, targets are measured from the predictor's reference conformer after RDKit
-UFF relaxation. The source molecular graph supplies tetrahedral chirality and
-acyclic double-bond E/Z labels. If the relaxed coordinates disagree with these
-labels, the toolkit retries stereo-aware ETKDG embedding and UFF relaxation with
-up to four deterministic seeds. If UFF changes an initially correct conformer
-and all retries fail, that original conformer is retained. If no reference with
-the source stereochemistry can be recovered, setup raises an error.
+For ligands, targets are measured from the predictor's reference conformer after
+optional force-field relaxation. RDKit UFF is the default; the
+[force-field setting](#ligand-force-field-selection) selects MMFF or disables
+relaxation. The source molecular graph supplies tetrahedral chirality and
+acyclic double-bond E/Z labels. Stereo validation and, when necessary,
+regeneration happen before the target geometry is measured.
 
 Relaxation operates on a copy. It requires evidence of real bond orders
 (an aromatic or double bond); stereo validation also covers saturated chiral
@@ -620,6 +622,63 @@ used to evaluate predictions.
 | `plane` | `weight` (0.0), `slack` (0.0 Å) | Flatness of automatically generated planar atom groups |
 | `torsion` | `weight` (0.0), `slack` (0.0 rad) | Periodic chi, peptide omega, and supported sp²-axis torsions |
 | `vdw` | `weight` (1.0), `mode` (`"intermolecular"`), `scale` (0.75), `dmax` (5.0 Å), `max_neighbors` (32), `neighbor_skin` (2.0 Å) | Repulsion within molecules, between molecules, or both; see the mode table below |
+
+### Ligand force-field selection
+
+`conformer_restraints_config.relax_force_field` is a mapping with one supported
+key, `ligand`. It selects the preparation of ligand restraint targets, not the
+optimizer used during denoising. Polymer reference coordinates and monomer-library
+targets are unaffected. Each ligand still needs its usual conformer opt-in.
+
+| `relax_force_field.ligand` | target preparation | failure policy |
+| --- | --- | --- |
+| `uff` (default) | RDKit UFF relaxation when the graph has an aromatic or double bond | Unavailable or failed force-field preparation falls back to the unrelaxed reference; stereo failures follow the rules below |
+| `mmff94` | RDKit MMFF94 relaxation | An explicit request raises on missing parameters, invalid chemistry, force-field failure, or unrecoverable stereochemistry |
+| `mmff94s` | RDKit MMFF94s relaxation | Same strict failure policy as `mmff94` |
+| `none` | Skip force-field relaxation | Keep a stereo-consistent reference unchanged; source-stereo repair can still regenerate it, without force-field relaxation, or raise if repair fails |
+
+Values are case-insensitive. Omitting `relax_force_field`, omitting its `ligand`
+key, or setting `ligand: null` selects `uff`. Use the string `none` to disable
+relaxation. The whole `relax_force_field` value must be a mapping; a scalar such
+as `relax_force_field: mmff94` or a null mapping is rejected. Unknown keys and
+values fail during configuration parsing, even if no ligand opts in.
+
+```yaml
+conformer_restraints_config:
+  relax_force_field:
+    ligand: mmff94s
+  bond: {weight: 1.0}
+  angle: {weight: 1.0}
+```
+
+To skip force-field relaxation:
+
+```yaml
+conformer_restraints_config:
+  relax_force_field: {ligand: none}
+```
+
+Normal relaxation requires at least one aromatic or double bond as evidence of
+bond orders. UFF skips this step when neither is present. An explicit MMFF
+request raises instead of silently skipping, including for a genuinely saturated
+ligand. MMFF also raises when RDKit lacks parameters, for example for unsupported
+metal-containing molecules; it does not automatically switch to UFF.
+
+Both UFF and MMFF run for at most 200 iterations. RDKit return codes 0 and 1 are
+accepted; code 1 means the iteration limit was reached and does not certify
+convergence. Preparation uses molecule copies so MMFF typing does not change
+the aromatic flags or bond orders used to build restraints. Relaxation can
+change the conformer's overall shape and the detected planar groups.
+
+When prepared coordinates disagree with source chirality or E/Z labels, the
+toolkit tries up to four deterministic stereo-aware ETKDG embeddings, applying
+the selected force field to each candidate unless `ligand: none`. If UFF
+changes an initially stereo-consistent reference and every retry fails, that
+original reference is retained. The corresponding MMFF failure raises. If the
+input reference already disagrees with the source graph and regeneration cannot
+repair it, setup raises. Setting `none` does not disable source-stereo validation,
+and saturated chiral ligands are also checked when the adapter supplies the
+source graph.
 
 ### Energy terms
 
@@ -878,23 +937,129 @@ superpose on the backbone but measure over a pocket. Under `pairing: align`, res
 
 ## `custom_restraints_config` (list)
 
-### Formula definition
+<a id="formula-definition"></a>
+
+### Definition paths
 
 Write a differentiable energy as a mathematical formula over named atom
-selections. The same expression runs on Torch and JAX.
+selections, or supply a Python function using the same geometry vocabulary.
+Each entry must provide exactly one of `energy`, `fn`, or `use`. Formula and
+function paths both produce Torch/JAX energy closures.
 
-Each entry's energy (× `weight`) is added to the CG objective, gated by the usual
-`start_sigma` / `stop_sigma` window.
+Each entry's energy (× `weight`) is added to the optimizer objective, gated by
+a sigma window or a step window.
 
 | key | type | default | meaning |
 |---|---|---|---|
-| `energy` | str | — | the required formula (DSL) |
+| `energy` | str | — | Formula in the expression DSL; mutually exclusive with `fn` and `use` |
+| `fn` | callable | — | Python `energy(ctx)` function, supplied in a Python dict; mutually exclusive with `energy` and `use` |
+| `use` | str | — | Name registered with `@custom_restraint("name")` in the current Python process; mutually exclusive with `energy` and `fn` |
 | `selections` | dict | `{}` | `name -> selection string`; use `refN and <selection>` for a group selected from `refs.refN` |
 | `refs` | dict | `{}` | `refN -> {ref_pdb`\|`ref_cif, atom_selection_ref_fit, atom_selection_target_fit, pairing, best_effort}`; names are reserved as `ref1`, `ref2`, ... |
 | `move` | `"all"` / `"both"` / str / list[str] | `"all"` | prediction selection name(s) that receive this restraint's gradient. Omitted/`all`/`both` moves every prediction selection. Reference-backed selections are always fixed and cannot be named |
 | `weight` | float | `1.0` | scales the whole energy |
 | `name` | str | `"custom"` | label shown in the `finalize` per-term log |
 | `start_sigma` / `stop_sigma` | float | `+inf` / `-1` | sigma gating (as everywhere) |
+| `start_step` / `stop_step` | float | `-inf` / `+inf` | inclusive diffusion-step window; cannot be combined with explicit sigma-window keys |
+
+### Python functions and registration
+
+A Python function receives a context `ctx`. Use `ctx.distance("A", "B")`,
+`ctx.angle(...)`, `ctx.harmonic(...)`, and the other documented vocabulary as
+methods. Selection arguments are strings: an alias from `selections`, or a raw
+selection such as `"chain A and resid 1"`. The usual `refs`, `move`, `weight`,
+and activation windows apply to functions as well as formulas. Return the
+unweighted energy; the closure sums any batch dimensions and applies `weight`.
+
+The function runs once with a discovery context during setup to identify its
+selections, then repeatedly during energy and gradient evaluation. Keep it
+free of side effects and use `ctx` operations for coordinate-dependent work.
+Python `if` on a computed geometry, `float(...)`, NumPy conversion, or
+backend-specific tensor operations can break selection discovery or tracing.
+Use `ctx.where(condition, a, b)` for an elementwise choice; both arguments are
+evaluated, so both must be numerically defined.
+
+The following alternatives define the same 5 Å centroid-distance target.
+`adapter` is the predictor's atom adapter; after setup, use the normal
+[`minimize`/`get_minimizer` lifecycle](SPEC.md#public-lifecycle).
+
+Pass a callable directly in a Python configuration:
+
+```python
+from rgi_toolkit import CombinedRestraints
+
+
+def pull5(ctx):
+    return (ctx.distance("A", "B") - 5.0) ** 2
+
+
+restraints_config = {
+    "custom_restraints_config": [
+        {
+            "name": "pull5",
+            "fn": pull5,
+            "selections": {"A": "chain A and resid 1", "B": "chain A and resid 2"},
+            "weight": 1.0,
+        }
+    ]
+}
+restraints = CombinedRestraints()
+restraints.setup(adapter, config=restraints_config)
+```
+
+For reuse from YAML/JSON, register the function in Python:
+
+```python
+from rgi_toolkit import custom_restraint
+
+
+@custom_restraint("pull5")
+def pull5(ctx):
+    return (ctx.distance("A", "B") - 5.0) ** 2
+```
+
+Then select it by name:
+
+```yaml
+custom_restraints_config:
+  - name: pull5
+    use: pull5
+    selections:
+      A: chain A and resid 1
+      B: chain A and resid 2
+    weight: 1.0
+```
+
+Import the module containing the decorated function before the configuration is
+parsed in the same process. `use` looks up a registered name; it does not import
+a module or load a Python file. A predictor CLI therefore needs application code
+that performs registration. An unknown name raises during parsing. Registration
+is process-wide and registering the same name again replaces its function;
+resolved restraint state remains local to each `CombinedRestraints` instance.
+`fn` accepts a callable object in a Python dict, not a function name serialized
+as YAML/JSON.
+
+Alternatively, add the `pull5` function above directly to an instance **before
+`setup`**:
+
+```python
+restraints = CombinedRestraints()
+restraints.add_custom(
+    fn=pull5,
+    name="pull5",
+    selections={"A": "chain A and resid 1", "B": "chain A and resid 2"},
+    weight=1.0,
+)
+restraints.setup(adapter, config={})
+```
+
+`add_custom()` accepts exactly one of `fn=` or `energy=`; for a formula, replace
+`fn=pull5` with `energy="(distance(A,B) - 5.0)**2"`. It also accepts `selections`,
+`refs`, `move`, `weight`, `name`, and the four window keys from the table above,
+with the same defaults. It returns the instance for chaining. Entries added
+this way persist across later `setup` calls, including calls with a new config,
+and are merged with configured custom entries without being duplicated by
+setup. Add each restraint once; repeated `add_custom` calls add separate terms.
 
 ### Evaluation model
 

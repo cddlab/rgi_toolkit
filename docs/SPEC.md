@@ -46,6 +46,13 @@ restraints.finalize(coords, istep=step)
 the two-call `set_config` then `setup` form is the deprecated equivalent of
 `setup(config=...)`.
 
+`add_custom(fn=..., ...)` or `add_custom(energy=..., ...)` queues a custom
+restraint before setup. Queued entries persist across repeated setup calls,
+including calls with a new config; setup merges them with configured entries
+without mutating or duplicating the configured list. Each explicit
+`add_custom` call adds one term. See the
+[Python custom-restraint examples](config.md#python-functions-and-registration).
+
 `setup` clears the previous derived spec and optimizer before resolving the new
 input. A successful setup leaves backend selection lazy. `is_active()` reports
 whether the constructed spec has work; empty configurations leave coordinates
@@ -202,13 +209,25 @@ has a 0.02 Angstrom floor. This branch does not alter standalone or custom angle
 
 ### Target provenance and weights
 
-Ligand targets come from a copy of the predictor reference relaxed by RDKit UFF,
-followed by geometric measurement. Relaxation requires an aromatic or double
-bond as evidence of real bond orders. Stereo validation also covers saturated
-chiral molecules and can retry four deterministic ETKDG seeds. UFF can retain a
-correct reference when relaxation fails. An unrecoverable reference with
-incorrect source stereochemistry raises instead of enforcing the wrong isomer.
-Relaxation does not mutate the source molecular graph.
+Ligand targets come from a copy of the predictor reference after preparation
+selected by `conformer_restraints_config.relax_force_field.ligand`: `uff`
+(default), `mmff94`, `mmff94s`, or `none`. Normal relaxation requires an aromatic
+or double bond as evidence of real bond orders. UFF skips otherwise; an
+explicit MMFF request raises, including for saturated ligands. UFF force-field
+failures can retain the reference; MMFF failures, including missing parameters,
+raise instead of silently falling back. Both force fields accept RDKit return
+codes 0 and 1 at a 200-iteration limit, so an accepted target is not necessarily
+a converged force-field minimum. Polymer references are not force-field relaxed.
+
+Source-stereo validation also covers saturated chiral molecules and `none` when
+the adapter supplies a source graph. A mismatch can retry four deterministic
+ETKDG seeds with the selected force field, or without relaxation for `none`.
+UFF retains an initially stereo-consistent reference when stereo retries fail;
+MMFF raises. An unrecoverable reference with incorrect source stereochemistry
+raises. `none` preserves an already-correct reference but permits stereo repair.
+Preparation does not mutate the source molecular graph. Configuration shapes
+and failure cases are detailed in
+[Ligand force-field selection](config.md#ligand-force-field-selection).
 
 Conformer plane groups come from prepared reference geometry or polymer/dictionary
 definitions. The normal is the smallest-eigenvalue covariance eigenvector, held
@@ -272,10 +291,19 @@ the reference atoms and measures prediction atoms against that fixed plane;
 it does not pool prediction atoms into the fitted plane. References and their
 alignment transforms are fixed for differentiation, and `move` may select only
 prediction groups.
-Custom entries use restricted mathematical expressions. They resolve named
-selections and references during setup and create backend closures returning a
-scalar, including reduction over batches. The parser permits the documented
-geometry, math, and penalty vocabulary and rejects arbitrary Python evaluation.
+Custom entries choose exactly one source: a restricted mathematical expression
+(`energy`), a Python callable (`fn`), or a registered function name (`use`).
+`@custom_restraint("name")` populates a process-wide function registry; `use`
+looks up a name during config parsing and does not import code. Registration
+must occur before parsing. Direct `fn` entries require a Python dict.
+All paths resolve named selections and references during setup and create
+backend closures returning a scalar, including reduction over batches and
+application of the entry weight. A callable receives a discovery context at
+setup and a backend context during evaluation; it uses the same geometry,
+math, and penalty methods as the DSL. Coordinate-dependent Python branching or
+conversion to NumPy/scalars can invalidate discovery or tracing. The formula
+parser rejects arbitrary Python evaluation; callable code belongs to the host
+application and bypasses that parser.
 Custom angular functions return radians. Custom `move` stops gradients through
 unlisted prediction selections; reference coordinates remain fixed. Custom
 centroid functions and built-in groups use ordinary mean derivatives.

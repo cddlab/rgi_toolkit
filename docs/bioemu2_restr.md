@@ -39,35 +39,100 @@ conformer block. There is no top-level `start_sigma`.
 
 ## Complete example (system YAML)
 
-Save this as `restr_example.yaml`. It enables bond, angle, chirality, E/Z,
-and van der Waals restraints for a SMILES ligand:
+Save this as `restr_example.yaml` in the predictor checkout. Like the other
+predictor guides, it folds QBP with its GLN ligand and combines distance, angle,
+dihedral, ligand conformer, reference RMSD, and custom restraints. The custom
+expression keeps the two lobe-centroid distances equal. The run section below
+downloads the QBP reference structure and uses BioEmu2's ColabFold MSA acquisition.
 
 ```yaml
 entities:
   - entity_type: protein
-    sequence: GYDPETGTWG
+    sequence: ADKKLVVATDTAFVPFEFKQGDKYVGFDVDLWAAIAKELKLDYELKPMDFSGIIPALQTKNVDLALAGITITDERKKAIDFSDGYYKSGLLVMVKANNNDVKSVKDLDGKVVAVKSGTGSVDYAKANIKTKDLRQFPNIDNAYMELGTNRADAVLHDTPNILYFIKTAGNGQFKAVGDSLEAQQYGIAFPKGSDELRDKVNGALKTLRENGTYNEIYKKWFGTEPK
     asym_ids: A
   - entity_type: ligand
-    smiles: "O=C(O)/C=C/[C@@H](O)C"
-    asym_ids: L
+    ccd_code: GLN
+    asym_ids: B
     conformer_restraints: true
 restraints_config:
-  gpu: true
   verbose: true
+  gpu: true
   method: CG
-  max_iter: 100
+  max_iter: 1000
+  distance_restraints_config:
+    - atom_selection1: "chain A and ((resid 5 to 84) or (resid 186 to 224))"
+      atom_selection2: "chain A and (resid 90 to 180)"
+      start_sigma: 99999999
+      stop_sigma: -1
+      move: both
+      weight: 1.0
+      harmonic:
+        target_distance: 25.0
+  angle_restraints_config:
+    - atom_selection1: "chain A and (resid 5 to 84)"
+      atom_selection2: "chain A and (resid 90 to 180)"
+      atom_selection3: "chain A and (resid 186 to 224)"
+      start_sigma: 99999999
+      stop_sigma: -1
+      move: "1,3"
+      weight: 1.0
+      harmonic:
+        target_angle: 90.0
+  dihedral_restraints_config:
+    - atom_selection1: "chain A and (resid 5 to 50)"
+      atom_selection2: "chain A and (resid 51 to 100)"
+      atom_selection3: "chain A and (resid 101 to 150)"
+      atom_selection4: "chain A and (resid 151 to 224)"
+      start_sigma: 99999999
+      stop_sigma: -1
+      move: "1,4"
+      weight: 1.0
+      harmonic:
+        target_dihedral: 180.0
   conformer_restraints_config:
-    start_sigma: 1.0
-    bond: {weight: 1}
-    angle: {weight: 1}
-    chiral: {weight: 1}
-    cistrans: {weight: 1}
-    vdw: {weight: 1}
+    start_sigma: 99999999
+    stop_sigma: -1
+    bond: {weight: 1.0, slack: 0.0}
+    angle: {weight: 1.0, slack: 0.0}
+    chiral: {weight: 1.0, slack: 0.0}
+    cistrans: {weight: 1.0, slack: 0.0}
+    vdw: {weight: 1.0}
+  rmsd_restraints_config:
+    - ref_pdb: rmsd_ref.pdb
+      harmonic: {target_rmsd: 0.0}
+      weight: 1.0
+      start_sigma: 99999999
+      stop_sigma: 1.0
+      pairing: align
+      best_effort: true
+      atom_selection_ref_fit: "chain A and (resid 5 to 220)"
+      atom_selection_target_fit: "chain A and (resid 5 to 220)"
+      atom_selection_ref_calc: "chain A and (resid 90 to 180)"
+      atom_selection_target_calc: "chain A and (resid 90 to 180)"
+  custom_restraints_config:
+    - name: equidistant
+      energy: "(distance(L1, H) - distance(L2, H))**2"
+      selections:
+        L1: "chain A and (resid 5 to 84)"
+        L2: "chain A and (resid 186 to 224)"
+        H: "chain A and (resid 90 to 180)"
+      start_sigma: 99999999
+      stop_sigma: -1
+      weight: 1.0
 ```
 
-From the predictor checkout:
+## Run
+
+Save this as `run_restr_example.sh` beside the YAML in the predictor checkout,
+then run `bash run_restr_example.sh` on a GPU compute node. It downloads the
+1GGG reference used by the RMSD entry into the working directory:
 
 ```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+curl -fLsS https://files.rcsb.org/download/1GGG.pdb -o rmsd_ref.pdb
+
 uv run --no-sync bioemu2 predict-structure \
   --system restr_example.yaml --out out_restr_example \
   --num-samples 1 --num-steps 200 --sampler edm --seed 0
@@ -121,9 +186,12 @@ equilibrium ensemble.
 
 ## Verify results
 
-With `verbose: true`, check nonzero counts in `built spec:` for the requested
-restraints. The conformer example has both a tetrahedral center and an E/Z
-bond. The dissociation example must build one distance between chains A and B.
+With `verbose: true`, check nonzero counts for distance, group angle, group
+dihedral, RMSD, ligand bond/angle/chirality, and the custom expression in the
+complete example. GLN has a tetrahedral center but no eligible E/Z dihedral,
+so `cistrans=0` is expected even though its weight is enabled. Check that VdW
+includes the ligand against the protein background. The separate dissociation
+example must build one distance between chains A and B.
 
 Measure the requested geometry in the saved structures. Reference coordinates
 and RGI distance targets use angstroms; MDTraj trajectory coordinates use
