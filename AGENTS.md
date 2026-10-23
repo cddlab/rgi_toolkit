@@ -58,9 +58,8 @@ file-grouped workers, then all `cpu_compile` tests run with real compilation.
 `task test-gpu` retains the complete GPU selection. Run the comprehensive local
 suite before delivering code changes, and GPU checks when GPU behavior changes.
 Compiler checks need Python development headers and a C++ compiler; a skip is
-not evidence that compilation passed. See `docs/testing.md` for the coverage
-split and environment setup. Markdown-only changes skip CI, and a newer run
-cancels an older run for the same branch or pull request.
+not evidence that compilation passed. Markdown-only changes skip CI, and a newer
+run cancels an older run for the same branch or pull request.
 
 ## Architecture
 

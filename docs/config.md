@@ -117,7 +117,7 @@ the number of atoms.
 Tightening `gtol` does not increase `max_iter`, remove other stopping rules,
 or guarantee a zero loss for competing restraints or a local minimum.
 L-BFGS uses the backend library's line search; an explicit `line_search` key with
-L-BFGS raises an error. See the [solver specification](SPEC.md#optimizers).
+L-BFGS raises an error.
 
 **There is no `backend` key** — the compute backend (torch / jax) is **inferred from how the
 engine is invoked**, not configured: a JAX tool (AF3) grabs the pure minimizer via
@@ -290,7 +290,7 @@ d = \lVert c_2 - c_1 \rVert, \qquad c_k = \frac{1}{|G_k|}\sum_{a \in G_k} x_a
 
 (a plain masked-mean centroid), shaped by one of the penalty blocks below (see Penalty shapes).
 `harmonic` drives the distance toward $d = t$ with CG (gradient tolerance `gtol`;
-see [termination semantics](SPEC.md#nonlinear-conjugate-gradient)).
+see [optimizer settings](#top-level-keys)).
 
 | key | type | default | meaning |
 |---|---|---|---|
@@ -886,7 +886,7 @@ objective. Inactive conformer windows skip list construction.
 CG, L-BFGS, and energy diagnostics evaluate the same dynamic VdW objective.
 Rebuilds preserve the objective, conjugate direction, and counters. Exact or
 near-exact overlaps use a deterministic pair-dependent separation direction in
-the gradient. See the [solver specification](SPEC.md#nonlinear-conjugate-gradient).
+the gradient.
 
 ## `rmsd_restraints_config` (list)
 
@@ -981,7 +981,7 @@ evaluated, so both must be numerically defined.
 
 The following alternatives define the same 5 Å centroid-distance target.
 `adapter` is the predictor's atom adapter; after setup, use the normal
-[`minimize`/`get_minimizer` lifecycle](SPEC.md#public-lifecycle).
+[`minimize`/`get_minimizer` lifecycle](../README.md#python-api).
 
 Pass a callable directly in a Python configuration:
 

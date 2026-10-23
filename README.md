@@ -148,9 +148,9 @@ groups and custom expressions.
 
 The default optimizer is nonlinear conjugate gradient with a strong-Wolfe line
 search; Armijo and L-BFGS are also available. For PyTorch, `gpu: false` runs the
-restraint optimizer on CPU. JAX uses its selected device. Solver behavior and
-termination diagnostics are documented in the
-[implementation specification](docs/SPEC.md#optimizers).
+restraint optimizer on CPU. JAX uses its selected device. Optimizer settings and
+convergence criteria are described in the
+[configuration reference](docs/config.md#top-level-keys).
 
 ## Python API
 
@@ -173,8 +173,6 @@ restraints.finalize(coords, step)
 Here, `adapter`, `multiplicity`, `coords`, `step` and `sigma` come from the
 predictor, and `restraints_config` is the configuration dictionary. JAX integrations
 inside `lax.scan` use the pure closure returned by `get_minimizer()`.
-See the [public API lifecycle](docs/SPEC.md#public-lifecycle) and
-[adapter contracts](docs/SPEC.md#atom-and-array-contracts) for the complete interface.
 
 ## Output
 
@@ -195,10 +193,8 @@ the preview notebook also includes `rgi_report.json`. See the
 | Restraints, atom selections and defaults | [Configuration reference](docs/config.md) |
 | Browser-based prediction | [Colab notebooks](docs/colabfold.md) |
 | Example systems and run commands | [Examples](examples/README.md) |
-| API, energy definitions and optimizer contracts | [Implementation specification](docs/SPEC.md) |
 | Benchmark protocols and analysis | [Benchmark guide](benchmark/README.md) |
 | Common problems | [FAQ](docs/FAQ.md) |
-| Test coverage and environment setup | [Testing](docs/testing.md) |
 
 ## Agent Skills
 
@@ -236,8 +232,7 @@ task test       # Alias for test-local.
 ```
 
 Test tasks use an activated environment when present and otherwise use the project
-environment. Run GPU checks on a GPU compute node. See [Testing](docs/testing.md)
-for coverage, compiler requirements and environment setup.
+environment. Run GPU checks on a GPU compute node.
 
 ## Citation
 
