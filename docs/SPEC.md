@@ -1,7 +1,8 @@
 # RGI-toolkit implementation specification
 
 This document describes implementation contracts and verification for the
-restraint types covered in the RGI-Toolkit paper.
+documented restraint types, including optional geometry and polymer-target
+features beyond the RGI-Toolkit paper's benchmark configuration.
 The [configuration reference](config.md) defines accepted keys, defaults, selection
 syntax, and complete examples. The [predictor guides](README.md) describe where each
 host invokes RGI; the maintained [example workflows](../examples/README.md) are the
@@ -120,7 +121,9 @@ number. Atom names, normalized molecule types, residue names, and per-chain
 ligand conformer opt-ins support atom selection and reference matching.
 
 Conformer adapters additionally expose the padded atom count, atomic numbers
-(`0` for padding), and ligand reference conformers.
+(`0` for padding), and ligand reference conformers. Polymer conformer support
+also requires residue identities, reference coordinates, and per-chain opt-ins;
+reference-space identifiers distinguish independently positioned residue components.
 Each `LigandConf` maps RDKit atom order to coordinates through `global_indices`;
 different molecules must have disjoint global indices. Source chemistry retains
 formal charges, hydrogen counts, isotopes, and stereochemistry when a coordinate
@@ -167,18 +170,30 @@ the exact constants and branch rules live in `_geometry.py` and `_kernels.py`.
 
 | Array term | Measured quantity and target | Units and penalty | Gate |
 | --- | --- | --- | --- |
-| `bond` | Interatomic length; reference conformer length | Angstrom; symmetric slack | Shared conformer |
-| `angle` | Three-atom angle; reference conformer angle | Radians internally; symmetric slack with the linear-target branch below | Shared conformer |
-| `chiral` | Signed scalar triple product about the first atom; reference target | Angstrom cubed; no division by six; symmetric slack | Shared conformer |
+| `bond` | Interatomic length; reference or dictionary length | Angstrom; symmetric slack | Shared conformer |
+| `angle` | Three-atom angle; reference or dictionary angle | Radians internally; symmetric slack with the linear-target branch below | Shared conformer |
+| `chiral` | Signed scalar triple product about the first atom; reference or dictionary target | Angstrom cubed; no division by six; symmetric slack | Shared conformer |
 | `cistrans` | Ligand acyclic double-bond E/Z; reference target, period 1 | Radians; `wrap(phi - target)`, then symmetric slack | Shared conformer |
+| `plane` | Automatically generated group's best-fit-plane RMS departure; target zero | Angstrom; one-sided slack, atom-count weight factor | Shared conformer |
+| `torsion` | Chi, peptide omega, and supported sp²-axis torsions | Radians; `wrap(p * (phi - target)) / p`, then symmetric slack | Shared conformer |
 | `vdw` | Pair distance relative to the elemental radius sum | Angstrom; repulsive overlap | Shared conformer |
 | `distance` | Distance between two geometric centroids; user target/bounds | Angstrom; four shared shapes | Per entry |
 | `rmsd` | Proper-rotation Kabsch fit followed by RMS measurement; reference structure and user target/bounds | Angstrom; four shared shapes | Per entry |
 | `group_angle` | Three centroids, vertex at group 2; user target/bounds | Radians internally; config defaults to degrees; four shared shapes | Per entry |
 | `group_dihedral` | Ordered four-centroid torsion about groups 2-3 | Same angular units; harmonic deviation wraps at pi | Per entry |
+| `group_improper` | Same ordered four-centroid angle calculation, stored as a separate term | Same angular units and wrapping as group dihedral | Per entry |
+| `group_chiral` | `(c2-c1) dot ((c3-c1) cross (c4-c1))` | Angstrom cubed; four shared shapes, no `unit` conversion | Per entry |
+| `group_plane` | Best-fit-plane RMS over all selected atoms, pooled across groups | Angstrom; four shared shapes, implicit harmonic target zero | Per entry |
 
-Dihedral flat intervals are ordinary ordered intervals and cannot cross the
+Dihedral/improper flat intervals are ordinary ordered intervals and cannot cross the
 minus-pi/pi boundary. Each term has its own user-specified weight.
+
+Standalone chiral entries default to all four groups free. Improper entries
+default to groups 1 and 4 free, with 2 and 3 pinned. Standalone plane entries
+pool 1–4 contiguous selection groups, default to all groups free, and use all
+selected atoms in the fit even when some are pinned. They require at least
+three atoms; three non-collinear atoms have no nonplanarity to correct.
+These standalone terms do not depend on conformer opt-in or its shared gate.
 
 For conformer angles strictly within 0.5 degrees of a 180-degree target, the
 zero-slack penalty is `2 * weight * (1 + cos(theta))`. Nonzero slack uses a chord
@@ -193,9 +208,52 @@ bond as evidence of real bond orders. Stereo validation also covers saturated
 chiral molecules and can retry four deterministic ETKDG seeds. UFF can retain a
 correct reference when relaxation fails. An unrecoverable reference with
 incorrect source stereochemistry raises instead of enforcing the wrong isomer.
-Relaxation does not mutate the source molecular graph. Bond, angle, chiral, and
-cistrans weights are the user-specified linear multipliers of their squared
-residuals.
+Relaxation does not mutate the source molecular graph.
+
+Conformer plane groups come from prepared reference geometry or polymer/dictionary
+definitions. The normal is the smallest-eigenvalue covariance eigenvector, held
+fixed during differentiation. Its penalty is
+`N * weight * max(0, plane_rms - slack)**2` for `N` atoms, before optional ESD
+normalization. Standalone and custom plane penalties do not add the `N` factor.
+Active cistrans/torsion quartets suppress conformer plane groups containing
+their four atoms, with local peptide conditions where required; topology plane
+membership remains available for exclusions.
+
+Ligand E/Z terms remain in `cistrans` with period 1. Conjugated single sp²–sp²
+ligand axes use period-2 `torsion` terms. Polymer torsions use dictionary periods
+or standard-residue reference fallbacks for chi, omega, and supported sp² axes.
+They do not constitute complete backbone phi/psi or nucleic-acid torsion models.
+
+### Polymer dictionary targets
+
+`polymer.py` builds residue-local reference geometry and canonical peptide or
+phosphodiester links for opted-in protein/DNA/RNA chains. With
+`conformer_restraints_config.monomer_library`, `monlib_geom.py` replaces covered
+polymer targets with CCP4 dictionary bond, angle, chiral, plane, and supported
+torsion records. Covered reference terms are replaced rather than duplicated.
+Dictionary torsion signs are converted to the toolkit's ordered-angle convention.
+Supported peptide cis/trans alternatives include their associated local link
+geometry and modifications. Each sample selects its state at the start of a
+minimizer invocation; masks remain fixed through optimizer trials and neighbor
+rebuilds, then are selected again on the next invocation.
+
+An omitted/null/false library setting disables dictionary loading. `true`, or a
+mapping without `path`, requests the automatic cache; a path string or mapping
+with `path` uses a local library without downloading. Parsing performs no I/O.
+The first required setup acquires a versioned snapshot; completed caches are
+reused offline without automatic updates, and provenance is logged.
+`on_missing: fallback` is the default; `error` raises on missing required
+dictionary geometry. Uncovered geometry retains the available reference or
+built-in fallback under the fallback policy.
+
+`use_esd` defaults to false. It independently controls inverse-variance scaling
+of all seven conformer terms: when true, the effective multiplier is
+`weight / ESD**2`, with dictionary ESDs or reference/fallback estimates and the
+existing plane atom-count factor. VdW uses ESD 0.2 Angstrom. ESD does not replace
+explicit slack, change target values, or affect standalone/custom terms.
+Nonpositive dictionary ESDs disable their energy rows while preserving topology;
+invalid active nonfinite targets/ESDs raise. Plane and torsion remain off until
+their weights are positive, even when a library is configured.
 
 ### Reference and custom restraints
 
@@ -208,6 +266,12 @@ normalized, and polymer selectors do not classify ligands by atom name alone.
 
 Built-in geometry containing `refN and ...` is routed to a reference closure.
 A configured reference fit can align its coordinates to the live prediction.
+Reference-backed improper and chiral entries preserve their ordinary measured
+quantity and native target units. A reference-backed plane instead fits only
+the reference atoms and measures prediction atoms against that fixed plane;
+it does not pool prediction atoms into the fitted plane. References and their
+alignment transforms are fixed for differentiation, and `move` may select only
+prediction groups.
 Custom entries use restricted mathematical expressions. They resolve named
 selections and references during setup and create backend closures returning a
 scalar, including reduction over batches. The parser permits the documented
@@ -215,6 +279,13 @@ geometry, math, and penalty vocabulary and rejects arbitrary Python evaluation.
 Custom angular functions return radians. Custom `move` stops gradients through
 unlisted prediction selections; reference coordinates remain fixed. Custom
 centroid functions and built-in groups use ordinary mean derivatives.
+
+Custom `improper` shares the ordered dihedral primitive and returns radians;
+`chiral` returns the ordered scalar triple product in Angstrom cubed. Custom
+`rg` is the equal-atom-weight radius of gyration around the geometric centroid,
+not a mass-weighted radius. `plane(A)` measures A's own flatness;
+`plane(A,B)` measures A against B's fitted plane. Only the plane normal is
+detached; B's center remains differentiable unless B is pinned or reference-backed.
 
 Torch custom closures prepare reference-coordinate tensors before differentiation
 and compilation, avoiding NumPy conversion inside a grad transform. Evaluation casts
@@ -241,6 +312,9 @@ how they should be checked:
   least-squares fit measured on the same atoms, the envelope theorem makes this
   consistent with differentiating the minimized scalar; it need not agree when
   RMSD fit/calc sets differ.
+- Plane normals are also recomputed at every evaluation and detached from
+  autodiff. Centers retain gradients. The same primitive serves conformer,
+  standalone, reference-backed, and custom planes.
 - Near-exact VdW overlaps use a deterministic pair-dependent separation direction
   with a straight-through derivative. Finite differences of the raw radial
   function do not validate this escape rule at the singularity.
@@ -250,7 +324,7 @@ are distinct checks. CG can stall on a surrogate direction even when its reporte
 energy is finite; general convergence proofs for smooth gradients do not establish
 convergence for every RGI combination.
 
-Conformer chiral geometry uses the signed scalar triple product. An odd
+Conformer, standalone, and custom chiral geometry use the signed scalar triple product. An odd
 permutation of the four atoms reverses its sign; proper rotations and
 translations preserve it. Degenerate arrangements can have zero volume and
 zero gradient.
@@ -261,7 +335,10 @@ A restraint is active when `stop_sigma <= sigma <= start_sigma`, with both
 endpoints included. Defaults are positive infinity for `start_sigma` and minus
 one for `stop_sigma`. NaN bounds and empty windows are rejected at parsing.
 Conformer terms share a window; distance, RMSD, group-angle, group-dihedral,
-and custom/reference entries have individual windows.
+group-improper, group-chiral, group-plane, and custom/reference entries have
+individual windows. Each entry may instead use an inclusive `start_step` /
+`stop_step` window (defaults negative/positive infinity); explicit step and sigma
+windows are mutually exclusive.
 
 Gates multiply masks/energies; they do not rebuild the spec. If sigma exceeds all
 start thresholds, minimization returns immediately. Inactive terms contribute no
@@ -273,17 +350,27 @@ so its energy reports are not necessarily the objective of the last denoising st
 ## VdW execution
 
 VdW is enabled at weight 1 when a conformer block is present. Its default mode
-is `intermolecular`. In the protein–ligand setting, restrained ligand atoms move
-against the fixed protein background. Each eligible contact contributes
+is `intermolecular`, which includes contacts with other molecules, including
+other restrained ligands. `intramolecular` selects contacts within a ligand or
+polymer chain; `both` selects their union. Entity opt-in and the shared conformer
+gate still apply. With the default `use_esd: false`, each eligible contact contributes
 `weight * min(d - scale * (r_i + r_j), 0)**2`, using RDKit elemental
 `GetRvdw` radii and a default scale of 0.75. Covalent 1–2, 1–3, and 1–4 pairs are
-excluded even if the corresponding geometry energies are disabled.
+excluded even if the corresponding geometry energies are disabled. Optional
+`use_esd: true` divides each residual by 0.2 Angstrom before squaring. A positive
+penalty below the threshold does not guarantee every final contact satisfies it.
+
+Intramolecular ligand and restrained-ligand cross pairs are explicit static
+terms. Fixed-background contacts and active-active contacts involving restrained
+polymer atoms use dynamic evaluation. Nonactive partners are fixed for one
+minimizer invocation; gradients reach both endpoints of eligible moving pairs.
 
 A sorted cell list filters eligible contacts before filling a fixed-width sparse
 buffer. Capacity overflow invokes complete pair sums in bounded chunks. Every
 trial validates its cache before value/gradient evaluation. The search radius is
 `max(dmax, max_contact + neighbor_skin)`, with default skin 2 Å. For fixed
-partners, the cache rebuilds when maximum ligand displacement exceeds the skin.
+partners, the cache rebuilds when maximum moving-atom displacement exceeds the skin.
+For two moving endpoints, the displacement threshold is half the skin.
 Returning from a rejected distant trial also validates the cache.
 
 Rebuilds preserve the complete objective, so CG history and counters remain
@@ -539,6 +626,9 @@ global minimum for general molecular objectives.
 | Public state, adapters, and scan wrapper | [`test_combined_restraints.py`](../tests/test_combined_restraints.py), [`test_adapters_shared.py`](../tests/test_adapters_shared.py), [`test_scan_runner.py`](../tests/test_scan_runner.py) |
 | Chemical targets, relaxation, stereochemistry | [`test_featurizer.py`](../tests/test_featurizer.py), [`test_conformer_chemistry.py`](../tests/test_conformer_chemistry.py), [`test_relax_force_field.py`](../tests/test_relax_force_field.py), [`test_ideal_conformer.py`](../tests/test_ideal_conformer.py) |
 | Group geometry and custom move/gradient rules | [`test_group_geom_data.py`](../tests/test_group_geom_data.py), [`test_custom.py`](../tests/test_custom.py), [`test_custom_move.py`](../tests/test_custom_move.py) |
+| Standalone plane, chiral, and improper terms | [`test_plane_restr_data.py`](../tests/test_plane_restr_data.py), [`test_chiral.py`](../tests/test_chiral.py), [`test_improper.py`](../tests/test_improper.py) |
+| Polymer targets, dictionary replacement, and optional normalization | [`test_polymer_conformer.py`](../tests/test_polymer_conformer.py), [`test_monlib_geom.py`](../tests/test_monlib_geom.py), [`test_monlib_dictionary.py`](../tests/test_monlib_dictionary.py), [`test_monlib_esd.py`](../tests/test_monlib_esd.py), [`test_monlib_cache.py`](../tests/test_monlib_cache.py), [`test_reference_esd.py`](../tests/test_reference_esd.py) |
+| Separate cistrans/torsion terms and default activation | [`test_torsion_separation.py`](../tests/test_torsion_separation.py), [`test_conformer_defaults.py`](../tests/test_conformer_defaults.py) |
 | Dtype/device caches, VdW lists, compiled objectives | [`test_optim.py`](../tests/test_optim.py) |
 
 Run the mandatory CPU suite and code checks with:
@@ -560,5 +650,7 @@ sampling and structural/scientific validation remain separate from toolkit E2E.
 
 `RestraintsConfig.conformer_config` is `None` for an absent/null block and a
 dictionary for an explicit block, including `{}`. Bond, angle, chiral, cistrans,
-and VdW have default weight 1. Explicit nonpositive or null weights disable a
-term. Ligand opt-in remains mandatory.
+and VdW have default weight 1. Plane and torsion default to 0, including with
+empty sub-blocks. Explicit nonpositive or null weights disable a term.
+Ligand/polymer entity opt-in remains mandatory; configuring a monomer library
+does not opt in entities or enable the optional terms.
