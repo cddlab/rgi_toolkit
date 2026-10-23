@@ -12,6 +12,7 @@ import triton.language as tl
 from torch.utils import _pytree
 
 from rgi_toolkit.optim._cuda_lbfgs_scalars import LibraryScalars
+from rgi_toolkit.optim._torch_lbfgs import BOUNDED_LINE_SEARCH
 
 
 @triton.jit
@@ -223,8 +224,6 @@ class State(NamedTuple):
 
 
 def run_lbfgs(s, vg, x, max_iter=100, gtol=1e-5):
-    version = tuple(map(int, torch.__version__.split("+")[0].split(".")[:2]))
-    bounded_search = version >= (2, 13)
     s = LibraryScalars(s.builder, x)
     history_size = 100
     g, f = vg(x)
@@ -316,8 +315,9 @@ def run_lbfgs(s, vg, x, max_iter=100, gtol=1e-5):
         )
 
         def search(_):
-            # Torch 2.13 passes the remaining evaluation budget to its line search.
-            max_ls = max_iter * 5 // 4 - state.evaluations if bounded_search else 25
+            max_ls = (
+                max_iter * 5 // 4 - state.evaluations if BOUNDED_LINE_SEARCH else 25
+            )
             result, evaluations = wolfe(
                 s, vg, state.x, d, state.f, state.g, slope, t, max_ls=max_ls
             )

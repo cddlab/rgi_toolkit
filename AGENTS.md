@@ -216,8 +216,12 @@ Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
 
 - `_cuda_graph.py` records straight-line ATen regions and compiles them into native
   CUDA IF/WHILE graphs. `_cuda_graph_ops.py` adapts the existing shared CG algorithm;
-  do not fork Strong Wolfe or Armijo formulas. `_cuda_lbfgs.py` follows PyTorch 2.8
+  do not fork Strong Wolfe or Armijo formulas. `_cuda_lbfgs.py` follows the installed PyTorch
   L-BFGS, including its evaluation budget and first-iteration boundary cases.
+  PyTorch 2.13 bounds each line search by the remaining evaluation budget (2.8: 25);
+  `_torch_lbfgs.BOUNDED_LINE_SEARCH` applies the same bound to the graph and eager
+  CUDA paths. Native graph control is enabled only for PyTorch 2.8 and 2.13 with
+  CUDA >= 12.8; other releases (e.g. 2.12) use the ordinary optimizer.
 - `_cuda_minimize.py` supports all restraint families, batches, gates, custom
   closures, and mixed centroid maps within explicit memory/runtime limits. Complete
   pair sums must preserve every chemistry/topology exclusion and every new trial

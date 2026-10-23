@@ -1,7 +1,8 @@
 """PyTorch L-BFGS with device-resident coefficients for CUDA vector updates.
 
 The step follows torch.optim.LBFGS (PyTorch 2.8.0, BSD-3-Clause; see LICENSE).
-History, line search, stopping rules and scalar precision are unchanged.
+History, line search, stopping rules and scalar precision are unchanged, including
+the line-search evaluation bound of the installed PyTorch release.
 """
 
 import logging
@@ -13,6 +14,10 @@ from torch.optim.lbfgs import _strong_wolfe
 from rgi_toolkit.optim._torch_cg_gpu import _COMPILE_DISABLED
 
 logger = logging.getLogger(__name__)
+# PyTorch 2.13 bounds each line search by the remaining evaluation budget.
+BOUNDED_LINE_SEARCH = tuple(
+    map(int, torch.__version__.split("+")[0].split(".")[:2])
+) >= (2, 13)
 _ADD = None
 _ADD_FAILED = False
 _DIRECTION_FAILED = False
@@ -188,6 +193,7 @@ class CudaLBFGS(torch.optim.LBFGS):
                 loss,
                 _SearchGradient(flat_grad),
                 gtd,
+                max_ls=max_eval - current_evals if BOUNDED_LINE_SEARCH else 25,
             )
             flat_grad = gradient.tensor
             self._add_grad(t, d)
