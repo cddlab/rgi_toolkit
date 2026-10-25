@@ -311,8 +311,11 @@ class FusedConditionalGraph:
                 else rt.cudaGraphConditionalNodeType.cudaGraphCondTypeWhile
             )
             parameters.conditional.size = len(bodies)
+            # CUDA 13 promoted the edge-data variant to the unversioned API.
+            add_node = getattr(rt, "cudaGraphAddNode_v2", rt.cudaGraphAddNode)
+            edge_data = [rt.cudaGraphEdgeData() for _ in last]
             last[:] = [
-                checked(rt.cudaGraphAddNode(native, last, len(last), parameters))
+                checked(add_node(native, last, edge_data, len(last), parameters))
             ]
             for body, body_graph in zip(bodies, parameters.conditional.phGraph_out):
                 end = self.emit(body, body_graph, required)

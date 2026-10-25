@@ -16,9 +16,6 @@ uv venv && source .venv/bin/activate           # Python 3.11+
 uv pip install -e ".[cuda]"                     # also pulls the rgi_toolkit engine (declared in pyproject)
 ```
 
-> For co-development of the engine, override the pinned dependency with a local editable
-> checkout in a SEPARATE step: `uv pip install -e ../RGI-toolkit` (sibling clone).
-
 ## Configuration
 
 boltz reads RGI from a **top-level `restraints_config:` key nested inside the input YAML** (the

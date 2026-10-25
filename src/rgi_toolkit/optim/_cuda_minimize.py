@@ -45,11 +45,11 @@ def eligible(optimizer, coords, max_iter, conformer_in_window):
         pairs += n_active * n_active
     if pairs * batch > MAX_PAIRS:
         return False
-    # Private FX/Inductor APIs and CUDA IF/ELSE capture are validated for Torch 2.8.
+    # Private FX/Inductor APIs and CUDA IF/ELSE capture are validated on these releases.
     # Other versions keep the existing optimizer instead of assuming compatibility.
     version = torch.__version__.split("+")[0].split(".")[:2]
     cuda = (torch.version.cuda or "0.0").split(".")[:2]
-    return version == ["2", "8"] and tuple(map(int, cuda)) >= (12, 8)
+    return version in (["2", "8"], ["2", "13"]) and tuple(map(int, cuda)) >= (12, 8)
 
 
 class GraphSolve:

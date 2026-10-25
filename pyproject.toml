@@ -1,6 +1,6 @@
 [project]
 name = "rgi-toolkit"
-version = "0.4.6"
+version = "0.4.7"
 description = "Restraint-Guided Inference toolkit for PyTorch/JAX-based structure prediction models"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -19,7 +19,7 @@ dependencies = [
 # PyTorch backend; CUDA bindings enable native solver graph control flow on Linux.
 torch = [
     "torch>=2.2",
-    "cuda-bindings>=12.8,<13; sys_platform == 'linux'",
+    "cuda-bindings>=12.8,<14; sys_platform == 'linux'",
 ]
 # JAX backend (alphafold3). Pure JAX CG by default; jaxopt for optional L-BFGS.
 jax = [

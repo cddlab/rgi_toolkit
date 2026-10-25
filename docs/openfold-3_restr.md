@@ -20,9 +20,6 @@ printf '\n\n\nno\n' | pixi run -e openfold3-cuda12 setup_openfold   # fetch mode
 export OPENFOLD_CACHE="$HOME/.openfold3"
 ```
 
-> For co-development of the engine, override with a local editable checkout AFTER pixi install:
-> `pixi run -e openfold3-cuda12 python -m pip install -e ../RGI-toolkit` (sibling clone).
-
 ## Configuration
 
 OpenFold reads RGI from a **`restraints_config` field per query** in the input JSON

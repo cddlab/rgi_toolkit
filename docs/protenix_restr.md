@@ -16,9 +16,6 @@ uv venv && source .venv/bin/activate           # Python 3.11+
 uv pip install -e .                             # also pulls the rgi_toolkit engine (declared in requirements.txt)
 ```
 
-> For co-development of the engine, override the pinned dependency with a local editable
-> checkout in a SEPARATE step: `uv pip install -e ../RGI-toolkit` (sibling clone).
-
 > **Run protenix on sm_89 (e.g. RTX 4090), NOT on Blackwell (sm_120).** On Blackwell its
 > cuequivariance fused kernels **silently** emit all-NaN coordinates (no crash, exit 0) even for a
 > bare fold with no restraints. A NaN output is almost always this, not the restraint; confirm by

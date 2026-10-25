@@ -94,6 +94,28 @@ def test_cuda_lbfgs_matches_upstream_minimum_with_history_and_resumption(
 
 
 @pytest.mark.gpu
+@pytest.mark.parametrize("max_iter", [1, 2, 3, 8])
+def test_cuda_lbfgs_matches_upstream_line_search_budget(max_iter):
+    initial = torch.tensor([-1.2, 1.0], dtype=torch.float64, device="cuda")
+    results = []
+    for optimizer in (torch.optim.LBFGS, impl.CudaLBFGS):
+        x = initial.clone().requires_grad_()
+        opt = optimizer([x], max_iter=max_iter, line_search_fn="strong_wolfe")
+
+        def closure():
+            opt.zero_grad()
+            loss = 100 * (x[1] - x[0] ** 2) ** 2 + (1 - x[0]) ** 2
+            loss.backward()
+            return loss
+
+        opt.step(closure)
+        results.append((x.detach(), opt.state[x]["func_evals"]))
+    (expected, expected_evals), (actual, actual_evals) = results
+    assert actual_evals == expected_evals
+    torch.testing.assert_close(actual, expected, atol=1e-12, rtol=0)
+
+
+@pytest.mark.gpu
 def test_failed_cuda_kernels_use_original_updates_and_do_not_retry(monkeypatch):
     calls = []
 

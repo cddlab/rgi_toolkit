@@ -208,22 +208,41 @@ EXAMPLES = sorted(
     for path in (ROOT / "examples").glob(pattern)
     if path.suffix in {".json", ".yaml", ".yml", ".py"} and path.is_file()
 )
+PYTHON_CONFIGS = {
+    path: [
+        ast.literal_eval(node.value)
+        for node in ast.parse(path.read_text(), filename=str(path)).body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "RESTRAINTS_CONFIG"
+            for target in node.targets
+        )
+    ]
+    for path in EXAMPLES
+    if path.suffix == ".py"
+}
+CONFIG_EXAMPLES = [
+    path for path in EXAMPLES if path.suffix != ".py" or PYTHON_CONFIGS[path]
+]
 
 
-@pytest.mark.parametrize("path", EXAMPLES, ids=lambda p: str(p.relative_to(ROOT)))
+@pytest.mark.parametrize("path", PYTHON_CONFIGS, ids=lambda p: str(p.relative_to(ROOT)))
+def test_python_examples_compile_without_importing_predictors(path):
+    compile(path.read_text(), str(path), "exec")
+
+
+def test_each_example_directory_has_a_config():
+    assert {path.parent for path in CONFIG_EXAMPLES} == {
+        path.parent for path in EXAMPLES
+    }
+
+
+@pytest.mark.parametrize(
+    "path", CONFIG_EXAMPLES, ids=lambda p: str(p.relative_to(ROOT))
+)
 def test_example_configs_pass_validator(validator, path):
     if path.suffix == ".py":
-        tree = ast.parse(path.read_text())
-        config = next(
-            ast.literal_eval(node.value)
-            for node in tree.body
-            if isinstance(node, ast.Assign)
-            and any(
-                isinstance(t, ast.Name) and t.id == "RESTRAINTS_CONFIG"
-                for t in node.targets
-            )
-        )
-        data = config
+        data = PYTHON_CONFIGS[path]
     else:
         data = validator["_load"](path)
     found = list(validator["_find_configs"](data))

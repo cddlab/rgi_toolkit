@@ -1,4 +1,5 @@
 tests/test_adapters_shared.py
+tests/test_bioemu2_adapter.py
 tests/test_align.py
 tests/test_chai_adapter.py
 tests/test_config_paths.py
