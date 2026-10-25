@@ -73,9 +73,8 @@ protenix v1+v2 each share one adapter). The end-to-end guide for integrating a n
 Per-tool as-built integration write-ups live in `docs/<tool>.md` (one per tool); the shared
 config + selection-DSL surface is `docs/config.md`. `examples/` holds ready-to-run samples
 organized by restraint type and predictor:
-distance, angle, RMSD, custom, and MDM2-p53 ligand dissociation for nine predictors.
-The first four include `run.sh`; ligand dissociation provides native inputs and
-an ESMFold2 Python runner. Reuse those fixtures instead of authoring new ones.
+distance, angle, RMSD, custom, and MDM2-p53 ligand dissociation for nine predictors,
+each with a `run.sh`. Reuse those fixtures instead of authoring new ones.
 
 Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
 

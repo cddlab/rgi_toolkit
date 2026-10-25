@@ -153,11 +153,10 @@ in each parent directory:
 | ADK angle, 72.85° | [YAML](../examples/angle/bioemu2/adk_72.85.yaml) | `bash examples/angle/bioemu2/run.sh` |
 | QBP dual-reference RMSD, 2.65/2.65 Å | [YAML](../examples/rmsd/bioemu2/qbp_2.65.yaml) | `bash examples/rmsd/bioemu2/run.sh` |
 | DgoT distance difference, 0.8 Å | [YAML](../examples/custom/dist-diff/bioemu2/dgot_0.80.yaml) | `bash examples/custom/dist-diff/bioemu2/run.sh` |
-| MDM2–p53 dissociation, 30.0 Å | [YAML](../examples/ligand-dissociation/bioemu2/mdm2_p53_30.00.yaml) | Use the YAML with `bioemu2 predict-structure` |
+| MDM2–p53 dissociation, 30.0 Å | [YAML](../examples/ligand-dissociation/bioemu2/mdm2_p53_30.00.yaml) | `bash examples/ligand-dissociation/bioemu2/run.sh` |
 
-The four shell runners use BioEmu2's ColabFold MSA acquisition, structure
-conditioning, one sample, 200 EDM steps, and seed 0. Use the same
-`bioemu2 predict-structure` command with the dissociation YAML.
+All five examples use BioEmu2's ColabFold MSA acquisition, structure
+conditioning, one sample, 200 EDM steps, and seed 0.
 
 ## Python API and precomputed MSAs
 

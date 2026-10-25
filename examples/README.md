@@ -1,10 +1,9 @@
 # rgi_toolkit RGI examples
 
 Examples of distance, angle, RMSD, custom, and ligand-dissociation restraints.
-Inputs are organized as `<type>/<tool>/`. Distance, angle, RMSD, and custom
-examples include a `run.sh` for each model. Ligand dissociation provides native
-input files and an ESMFold2 Python runner. Each input includes its restraint
-settings inline, with one setting per model.
+Inputs are organized as `<type>/<tool>/`, with a `run.sh` for each model.
+Each input includes its restraint settings inline. Each example type
+contains one setting per model.
 
 | Directory | System | Representative restraint |
 |---|---|---|
@@ -12,7 +11,7 @@ settings inline, with one setting per model.
 | `angle/` | ADK, 214 residues | NMP–CORE–LID centroid angle of 72.85° |
 | `rmsd/` | QBP | Open/closed reference RMSD targets of 2.65/2.65 Å on 220 common Cα atoms |
 | `custom/dist-diff/` | DgoT, 419 residues | ΔD = D_in − D_out = 0.8 Å |
-| [`ligand-dissociation/`](ligand-dissociation/) | MDM2–p53 | Chain-centroid distance of 30.0 Å |
+| `ligand-dissociation/` | MDM2–p53 | Chain-centroid distance of 30.0 Å |
 
 The nine predictors covered here are `boltz-2`, `protenix-v2`, `alphafold3`,
 `openfold-3`, `chai`, `esmfold2`, `opendde`, `rf3`, and `bioemu2`.
@@ -34,8 +33,8 @@ uses its existing venv or Pixi environment. See [the integration guides](../docs
 for installation. Protenix-v2 is selected explicitly and requires a supported
 sm_89 GPU in this integration.
 
-The shell runners request one diffusion sample. OpenFold3 and Chai also request
-one model/trunk sample. The restraint minimizer is CG with the default strong-Wolfe
+All runners request one diffusion sample. OpenFold3 and Chai also request one
+model/trunk sample. The restraint minimizer is CG with the default strong-Wolfe
 line search and `gtol=1e-5`; `max_iter` is 1000 for RMSD and ligand
 dissociation, and 100 otherwise. RF3 uses 50 diffusion steps; BioEmu2 uses
 200 EDM steps with structure conditioning.
@@ -74,8 +73,7 @@ For comparisons across predictors, use the same full ColabFold A3M for each
 protein. Reproducing a prediction also requires the same model checkpoint and
 seed.
 
-The shell runners use an MSA server for Boltz-2, Protenix-v2, OpenFold3, Chai,
-and BioEmu2. Use the same predictor commands with the ligand-dissociation inputs.
+Boltz-2, Protenix-v2, OpenFold3, Chai, and BioEmu2 use an MSA server.
 RF3 uses the supplied sequence;
 add `msa_paths` to its input to provide alignments. AlphaFold3 uses its
 local data pipeline and requires `MODEL_DIR` and `DB_DIR`. ESMFold2 reads the full
@@ -97,15 +95,22 @@ To reuse a precomputed MSA, provide it through the predictor's native input:
 | RF3 | Job-level `msa_paths` mapping from chain IDs to A3M paths |
 | BioEmu2 | `get_msa(system, {chain_id: Path(...)})` passed to `EmuSession` |
 
-The OpenDDE runners disable external MSA and template searches; use the same
-options with its ligand-dissociation input.
+OpenDDE disables external MSA and template searches in all example types.
 
 The ligand-dissociation inputs set a 30.0 Å distance between the centroids of
-`chain A` (MDM2) and `chain B` (p53). They do not prescribe local MSA paths.
-For ESMFold2, run `examples/ligand-dissociation/esmfold2/run_dissociation.py` with
-`examples/ligand-dissociation/esmfold2/mdm2_p53_30.00.json` in the ESMFold2 environment,
-and set `MSA_A3M_A` and `MSA_A3M_B` to the full chain-specific A3Ms. File paths
-are relative to the calling directory, and each query must match its chain.
+`chain A` (MDM2) and `chain B` (p53). Run them like the other examples:
+
+```bash
+bash examples/ligand-dissociation/boltz-2/run.sh
+bash examples/ligand-dissociation/bioemu2/run.sh
+MSA_A3M_A=inputs/mdm2_p53.a3m MSA_A3M_B=inputs/p53.a3m \
+    bash examples/ligand-dissociation/esmfold2/run.sh
+```
+
+ESMFold2 requires a full A3M for each chain. MSA paths are resolved from the
+calling directory, and each query must match its chain. Each dissociation
+runner accepts an optional input path and defaults to its `mdm2_p53_30.00`
+configuration.
 
 ## Validation
 

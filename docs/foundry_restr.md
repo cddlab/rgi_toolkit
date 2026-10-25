@@ -207,10 +207,9 @@ The toolkit also provides the same individual settings used by the other models:
 | ADK angle, 72.85° | [JSON](../examples/angle/rf3/adk_72.85.json) | `bash examples/angle/rf3/run.sh` |
 | QBP dual-reference RMSD, 2.65/2.65 Å | [JSON](../examples/rmsd/rf3/qbp_2.65.json) | `bash examples/rmsd/rf3/run.sh` |
 | DgoT distance difference, 0.8 Å | [JSON](../examples/custom/dist-diff/rf3/dgot_0.80.json) | `bash examples/custom/dist-diff/rf3/run.sh` |
-| MDM2–p53 dissociation, 30.0 Å | [JSON](../examples/ligand-dissociation/rf3/mdm2_p53_30.00.json) | Use the JSON with `rf3 fold` |
+| MDM2–p53 dissociation, 30.0 Å | [JSON](../examples/ligand-dissociation/rf3/mdm2_p53_30.00.json) | `bash examples/ligand-dissociation/rf3/run.sh` |
 
-The four shell runners request one sample with 50 diffusion steps and seed 0.
-Use the same `rf3 fold` command with the dissociation JSON.
+All five runners request one sample with 50 diffusion steps and seed 0.
 All examples use sequences by default. Add a chain-keyed `msa_paths` mapping
 to provide precomputed alignments.
 
