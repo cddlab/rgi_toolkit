@@ -153,12 +153,11 @@ in each parent directory:
 | ADK angle, 72.85° | [YAML](../examples/angle/bioemu2/adk_72.85.yaml) | `bash examples/angle/bioemu2/run.sh` |
 | QBP dual-reference RMSD, 2.65/2.65 Å | [YAML](../examples/rmsd/bioemu2/qbp_2.65.yaml) | `bash examples/rmsd/bioemu2/run.sh` |
 | DgoT distance difference, 0.8 Å | [YAML](../examples/custom/dist-diff/bioemu2/dgot_0.80.yaml) | `bash examples/custom/dist-diff/bioemu2/run.sh` |
-| MDM2–p53 dissociation, 13.0 Å | [Input and MSA setup](../examples/ligand-dissociation/README.md) | `bash examples/ligand-dissociation/bioemu2/run.sh` |
+| MDM2–p53 dissociation, 30.0 Å | [YAML](../examples/ligand-dissociation/bioemu2/mdm2_p53_30.00.yaml) | Use the YAML with `bioemu2 predict-structure` |
 
-The first four examples use BioEmu2's ColabFold MSA acquisition. The dissociation
-runner loads the supplied chain-A and chain-B A3Ms through the Python API.
-All five runners use structure conditioning, one sample, 200 EDM steps,
-and seed 0.
+The four shell runners use BioEmu2's ColabFold MSA acquisition, structure
+conditioning, one sample, 200 EDM steps, and seed 0. Use the same
+`bioemu2 predict-structure` command with the dissociation YAML.
 
 ## Python API and precomputed MSAs
 
@@ -168,9 +167,9 @@ from pathlib import Path
 from bioemu2 import EmuSession, System, get_msa, load_model, save_frames
 
 system = System.from_yaml(
-    "../RGI-toolkit/examples/ligand-dissociation/bioemu2/mdm2_p53_13.00.yaml"
+    "../RGI-toolkit/examples/ligand-dissociation/bioemu2/mdm2_p53_30.00.yaml"
 )
-msa_dir = Path("../RGI-toolkit/examples/ligand-dissociation/msas")
+msa_dir = Path("inputs")
 msa = get_msa(
     system,
     {"A": msa_dir / "mdm2_p53.a3m", "B": msa_dir / "p53.a3m"},

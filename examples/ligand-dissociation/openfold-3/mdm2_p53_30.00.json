@@ -3,27 +3,21 @@
     0
   ],
   "queries": {
-    "mdm2_p53_13.00": {
+    "mdm2_p53_30.00": {
       "chains": [
         {
           "molecule_type": "protein",
           "chain_ids": [
             "A"
           ],
-          "sequence": "NHISTSDQEKLVQPTPLLLSLLKSAGAQKETFTMKEVIYHLGQYIMAKQLYDEKQQHIVHCSNDPLGELFGVQEFSVKEPRRLYAMISRNLVSANVKESSEDIFGNV",
-          "main_msa_file_paths": [
-            "../msas/a3m/mdm2_p53.a3m"
-          ]
+          "sequence": "NHISTSDQEKLVQPTPLLLSLLKSAGAQKETFTMKEVIYHLGQYIMAKQLYDEKQQHIVHCSNDPLGELFGVQEFSVKEPRRLYAMISRNLVSANVKESSEDIFGNV"
         },
         {
           "molecule_type": "protein",
           "chain_ids": [
             "B"
           ],
-          "sequence": "PLSQETFSDLWKLLPEN",
-          "main_msa_file_paths": [
-            "../msas/a3m/p53.a3m"
-          ]
+          "sequence": "PLSQETFSDLWKLLPEN"
         }
       ],
       "restraints_config": {
@@ -35,7 +29,7 @@
             "atom_selection1": "chain A",
             "atom_selection2": "chain B",
             "harmonic": {
-              "target_distance": 13.0
+              "target_distance": 30.0
             },
             "start_sigma": 99999999
           }

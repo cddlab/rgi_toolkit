@@ -13,6 +13,6 @@ restraints_config:
   - atom_selection1: chain A
     atom_selection2: chain B
     harmonic:
-      target_distance: 13.0
+      target_distance: 30.0
     start_sigma: 99999999
   gpu: true

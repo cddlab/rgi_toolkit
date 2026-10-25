@@ -1,7 +1,7 @@
 {
   "dialect": "alphafold3",
   "version": 4,
-  "name": "mdm2_p53_13.00",
+  "name": "mdm2_p53_30.00",
   "modelSeeds": [
     0
   ],
@@ -10,8 +10,6 @@
       "protein": {
         "id": "A",
         "sequence": "NHISTSDQEKLVQPTPLLLSLLKSAGAQKETFTMKEVIYHLGQYIMAKQLYDEKQQHIVHCSNDPLGELFGVQEFSVKEPRRLYAMISRNLVSANVKESSEDIFGNV",
-        "unpairedMsaPath": "../msas/a3m/mdm2_p53.a3m",
-        "pairedMsa": "",
         "templates": []
       }
     },
@@ -19,8 +17,6 @@
       "protein": {
         "id": "B",
         "sequence": "PLSQETFSDLWKLLPEN",
-        "unpairedMsaPath": "../msas/a3m/p53.a3m",
-        "pairedMsa": "",
         "templates": []
       }
     }
@@ -34,7 +30,7 @@
         "atom_selection1": "chain A",
         "atom_selection2": "chain B",
         "harmonic": {
-          "target_distance": 13.0
+          "target_distance": 30.0
         },
         "start_sigma": 99999999
       }

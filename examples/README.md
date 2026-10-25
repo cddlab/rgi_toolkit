@@ -1,9 +1,10 @@
 # rgi_toolkit RGI examples
 
 Examples of distance, angle, RMSD, custom, and ligand-dissociation restraints.
-Inputs are organized as `<type>/<tool>/`, with a `run.sh` for each model.
-Each input includes its restraint settings inline. Each example type
-contains one setting per model.
+Inputs are organized as `<type>/<tool>/`. Distance, angle, RMSD, and custom
+examples include a `run.sh` for each model. Ligand dissociation provides native
+input files and an ESMFold2 Python runner. Each input includes its restraint
+settings inline, with one setting per model.
 
 | Directory | System | Representative restraint |
 |---|---|---|
@@ -11,7 +12,7 @@ contains one setting per model.
 | `angle/` | ADK, 214 residues | NMP–CORE–LID centroid angle of 72.85° |
 | `rmsd/` | QBP | Open/closed reference RMSD targets of 2.65/2.65 Å on 220 common Cα atoms |
 | `custom/dist-diff/` | DgoT, 419 residues | ΔD = D_in − D_out = 0.8 Å |
-| [`ligand-dissociation/`](ligand-dissociation/README.md) | MDM2–p53 | Chain-centroid distance of 13.0 Å |
+| [`ligand-dissociation/`](ligand-dissociation/) | MDM2–p53 | Chain-centroid distance of 30.0 Å |
 
 The nine predictors covered here are `boltz-2`, `protenix-v2`, `alphafold3`,
 `openfold-3`, `chai`, `esmfold2`, `opendde`, `rf3`, and `bioemu2`.
@@ -33,8 +34,8 @@ uses its existing venv or Pixi environment. See [the integration guides](../docs
 for installation. Protenix-v2 is selected explicitly and requires a supported
 sm_89 GPU in this integration.
 
-All runners request one diffusion sample. OpenFold3 and Chai also request one
-model/trunk sample. The restraint minimizer is CG with the default strong-Wolfe
+The shell runners request one diffusion sample. OpenFold3 and Chai also request
+one model/trunk sample. The restraint minimizer is CG with the default strong-Wolfe
 line search and `gtol=1e-5`; `max_iter` is 1000 for RMSD and ligand
 dissociation, and 100 otherwise. RF3 uses 50 diffusion steps; BioEmu2 uses
 200 EDM steps with structure conditioning.
@@ -73,11 +74,13 @@ For comparisons across predictors, use the same full ColabFold A3M for each
 protein. Reproducing a prediction also requires the same model checkpoint and
 seed.
 
-In the distance, angle, RMSD, and custom examples, Boltz-2, Protenix-v2,
-OpenFold3, Chai, and BioEmu2 use an MSA server. RF3 uses the supplied sequence;
+The shell runners use an MSA server for Boltz-2, Protenix-v2, OpenFold3, Chai,
+and BioEmu2. Use the same predictor commands with the ligand-dissociation inputs.
+RF3 uses the supplied sequence;
 add `msa_paths` to its input to provide alignments. AlphaFold3 uses its
 local data pipeline and requires `MODEL_DIR` and `DB_DIR`. ESMFold2 reads the full
-A3M from `MSA_A3M`, checks its query against the example sequence, and uses
+A3M from `MSA_A3M` for single-chain examples, or `MSA_A3M_A` and `MSA_A3M_B`
+for ligand dissociation. It checks each query against the example sequence and uses
 `msa_max_depth=1024` and `msa_column_mask_rate=0.1`, with 20 recurrent
 loops and 200 diffusion steps. It does not fall back to a single-sequence input.
 
@@ -90,14 +93,19 @@ To reuse a precomputed MSA, provide it through the predictor's native input:
 | AlphaFold3 | Protein `unpairedMsaPath`, `pairedMsa: ""`, and `templates: []`; use `--run_data_pipeline=False` |
 | OpenFold3 | Chain `main_msa_file_paths`; use `--use-msa-server false` |
 | Chai | Aligned Parquet files through `--msa-directory`; omit `--use-msa-server` |
-| ESMFold2 | `MSA_A3M` |
+| ESMFold2 | `MSA_A3M`, or `MSA_A3M_A` / `MSA_A3M_B` for ligand dissociation |
 | RF3 | Job-level `msa_paths` mapping from chain IDs to A3M paths |
 | BioEmu2 | `get_msa(system, {chain_id: Path(...)})` passed to `EmuSession` |
 
-OpenDDE disables external MSA and template searches in the first four
-example types. The [ligand-dissociation examples](ligand-dissociation/README.md)
-use the same two supplied, unpaired A3Ms for all nine models, with no MSA
-search. Chai converts those files to its aligned-Parquet format.
+The OpenDDE runners disable external MSA and template searches; use the same
+options with its ligand-dissociation input.
+
+The ligand-dissociation inputs set a 30.0 Å distance between the centroids of
+`chain A` (MDM2) and `chain B` (p53). They do not prescribe local MSA paths.
+For ESMFold2, run `examples/ligand-dissociation/esmfold2/run_dissociation.py` with
+`examples/ligand-dissociation/esmfold2/mdm2_p53_30.00.json` in the ESMFold2 environment,
+and set `MSA_A3M_A` and `MSA_A3M_B` to the full chain-specific A3Ms. File paths
+are relative to the calling directory, and each query must match its chain.
 
 ## Validation
 

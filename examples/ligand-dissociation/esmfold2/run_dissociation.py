@@ -1,7 +1,8 @@
-"""Sample one MDM2-p53 structure from an inline JSON example and local A3Ms."""
+"""Sample MDM2-p53 using full A3Ms supplied through MSA_A3M_A and MSA_A3M_B."""
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from esm.models.esmfold2 import (
@@ -21,9 +22,13 @@ def main() -> None:
     data = json.loads(input_path.read_text())
     proteins = []
     for chain in data["sequences"]:
-        msa = MSA.from_a3m(
-            path=str(input_path.parent / chain["msa"]), remove_insertions=True
-        )
+        msa_variable = f"MSA_A3M_{chain['id']}"
+        msa_path = os.environ.get(msa_variable)
+        if not msa_path or not Path(msa_path).is_file():
+            raise ValueError(
+                f"Set {msa_variable} to the full ColabFold A3M for chain {chain['id']}."
+            )
+        msa = MSA.from_a3m(path=msa_path, remove_insertions=True)
         if msa.depth < 1 or msa.query != chain["sequence"]:
             raise ValueError(f"The MSA query does not match chain {chain['id']}.")
         proteins.append(

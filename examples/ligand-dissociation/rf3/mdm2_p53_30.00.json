@@ -1,5 +1,5 @@
 {
-  "name": "mdm2_p53_13.00",
+  "name": "mdm2_p53_30.00",
   "components": [
     {
       "seq": "NHISTSDQEKLVQPTPLLLSLLKSAGAQKETFTMKEVIYHLGQYIMAKQLYDEKQQHIVHCSNDPLGELFGVQEFSVKEPRRLYAMISRNLVSANVKESSEDIFGNV",
@@ -19,15 +19,11 @@
         "atom_selection1": "chain A",
         "atom_selection2": "chain B",
         "harmonic": {
-          "target_distance": 13.0
+          "target_distance": 30.0
         },
         "start_sigma": 99999999
       }
     ],
     "gpu": true
-  },
-  "msa_paths": {
-    "A": "../msas/a3m/mdm2_p53.a3m",
-    "B": "../msas/a3m/p53.a3m"
   }
 }
