@@ -12,7 +12,7 @@ Install the predictor fork on its RGI branch with Linux, Python 3.12 or later,
 and a supported NVIDIA GPU:
 
 ```bash
-git clone --branch rgi-integration https://github.com/cddlab/bioemu2_restr.git
+git clone https://github.com/cddlab/bioemu2_restr.git
 cd bioemu2_restr
 uv sync --extra cuda
 ```
