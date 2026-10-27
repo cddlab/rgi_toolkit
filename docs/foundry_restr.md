@@ -10,7 +10,7 @@ restraint-guided inference. This integration covers RF3 in Foundry. `restraints_
 Install the `cddlab/foundry_restr` fork on its `rgi-integration` branch:
 
 ```bash
-git clone --branch rgi-integration https://github.com/cddlab/foundry_restr.git
+git clone https://github.com/cddlab/foundry_restr.git
 cd foundry_restr
 uv venv --python 3.12
 uv pip install --python .venv/bin/python --torch-backend cu128 \
