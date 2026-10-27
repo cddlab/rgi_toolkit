@@ -30,7 +30,7 @@ the RGI sampling loop. Use a CUDA device compatible with the installed PyTorch
 build for production inference.
 
 ```bash
-git clone --branch rgi-integration https://github.com/cddlab/esm_restr.git
+git clone https://github.com/cddlab/esm_restr.git
 cd esm_restr
 pixi install
 ```
