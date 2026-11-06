@@ -1,0 +1,1 @@
+"""IntelliFold JAX integration adapters."""

@@ -1,3 +1,4 @@
+tests/test_mol1_intellifold_adapters.py
 tests/test_adapters_shared.py
 tests/test_bioemu2_adapter.py
 tests/test_align.py

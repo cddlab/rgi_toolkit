@@ -1,6 +1,6 @@
 [project]
 name = "rgi-toolkit"
-version = "0.4.7"
+version = "0.5.0"
 description = "Restraint-Guided Inference toolkit for PyTorch/JAX-based structure prediction models"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -21,7 +21,7 @@ torch = [
     "torch>=2.2",
     "cuda-bindings>=12.8,<14; sys_platform == 'linux'",
 ]
-# JAX backend (alphafold3). Pure JAX CG by default; jaxopt for optional L-BFGS.
+# JAX backend (AlphaFold 3 and IntelliFold). Pure JAX CG by default; jaxopt for optional L-BFGS.
 jax = [
     "jax",
     "jaxlib",

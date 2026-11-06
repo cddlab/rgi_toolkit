@@ -1,0 +1,35 @@
+[
+  {
+    "name": "mdm2_p53_30.00",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "NHISTSDQEKLVQPTPLLLSLLKSAGAQKETFTMKEVIYHLGQYIMAKQLYDEKQQHIVHCSNDPLGELFGVQEFSVKEPRRLYAMISRNLVSANVKESSEDIFGNV",
+          "count": 1
+        }
+      },
+      {
+        "proteinChain": {
+          "sequence": "PLSQETFSDLWKLLPEN",
+          "count": 1
+        }
+      }
+    ],
+    "restraints_config": {
+      "verbose": true,
+      "max_iter": 1000,
+      "method": "CG",
+      "distance_restraints_config": [
+        {
+          "atom_selection1": "chain A",
+          "atom_selection2": "chain B",
+          "harmonic": {
+            "target_distance": 30.0
+          },
+          "start_sigma": 99999999
+        }
+      ],
+      "gpu": true
+    }
+  }
+]

@@ -115,6 +115,8 @@ The backends below refer to the local predictor integrations.
 | **OpenDDE v1** | opendde | PyTorch | [OpenDDE](docs/opendde_restr.md) |
 | **RF3** | foundry | PyTorch | [RF3](docs/foundry_restr.md) |
 | **BioEmu2** | bioemu2 | PyTorch | [BioEmu2](docs/bioemu2_restr.md) |
+| **Mol-1** | mol1 | PyTorch | [Mol-1](docs/mol1_restr.md) |
+| **IntelliFold v2** | intellifold | JAX | [IntelliFold](docs/intellifold_restr.md) |
 
 Each guide covers installation, input configuration and the prediction command.
 The [documentation index](docs/README.md) also summarizes where each predictor
