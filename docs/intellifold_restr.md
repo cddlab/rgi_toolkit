@@ -95,6 +95,9 @@ batch runner can skip completed predictions.
 
 ## Verification
 
+The [small-case verification report](mol1_intellifold_verification.md) records
+bench-rgi inputs, measured distances, source-stereo checks, and tested revisions.
+
 Use `verbose: true` and check the `built spec:` counts before interpreting final
 energies. A zero energy with zero registered restraints does not demonstrate
 guidance. Measure the selected distance or other geometry in the written CIF,

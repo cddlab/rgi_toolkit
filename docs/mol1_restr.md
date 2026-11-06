@@ -78,10 +78,15 @@ bash examples/ligand-dissociation/mol1/run.sh
 
 Run from the toolkit checkout with the predictor installed as a sibling.
 The runners use Mol-1's MSA server. To supply existing alignments, set
-`unpairedMsaPath` and `pairedMsaPath` on the protein-chain objects. To run without
+`unpairedMsaPath` on each protein-chain object and optionally `pairedMsaPath`.
+Omit `pairedMsaPath` when no paired alignment is available: an empty string is
+treated as a missing file and triggers a new MSA search. To run without
 MSA search, invoke `mol pred` directly with `--use_msa false`.
 
 ## Verification
+
+The [small-case verification report](mol1_intellifold_verification.md) records
+bench-rgi inputs, measured distances, source-stereo checks, and tested revisions.
 
 Use `verbose: true` and check the `built spec:` counts before interpreting final
 energies. A zero energy with zero registered restraints does not demonstrate
