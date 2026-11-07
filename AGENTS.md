@@ -380,7 +380,7 @@ prior spec/optimizer up front so a reused instance is safe) →
 `minimize(coords, step, sigma)` → `finalize(coords, step)`. Always construct a fresh
 instance per structure (the old `get_instance()`/`reset()` singleton shim was removed). The
 backend is **inferred from invocation, NOT a config key**: `get_minimizer()` →
-jax (only AF3 calls it); `minimize(coords)` → jax if `coords` is a jax array, else
+jax (used by AF3 and IntelliFold); `minimize(coords)` → jax if `coords` is a jax array, else
 torch (numpy/torch coords both take the torch path). Resolution is lazy — `setup`
 leaves `self._backend = None` and builds the optimizer on the first
 `minimize`/`get_minimizer` (`_ensure_backend` raises if one instance is invoked under

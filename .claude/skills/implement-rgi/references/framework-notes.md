@@ -1,6 +1,9 @@
 # Framework notes
 
-## PyTorch (eager loop) — boltz, protenix, OpenDDE, chai-lab, openfold-3, esmfold2
+## PyTorch (eager loop)
+
+Boltz, Protenix, OpenDDE, Chai-1, OpenFold-3, ESMFold2, RF3, BioEmu2, and Mol-1
+use the PyTorch path.
 
 - **autograd under `inference_mode`**: predict loops often run inside
   `torch.inference_mode()`, where autograd backward fails with "element does not
@@ -17,13 +20,20 @@
   (a per-step radius search). `mode` defaults to **`both`** (run them together); both now run
   on **torch AND jax**, so a JAX tool gets the full VdW too.
 
-## JAX (JIT / `lax.scan`) — AlphaFold3
+ESMFold2's native implementation is under `esm_restr/esm/models/esmfold2/`:
+`processor.py` builds the restraint state, `model.py` and `experimental.py`
+forward it, and `layers.py` applies the sampling hook. The old `transformers_restr` model
+implementation and installed-package copy workaround are no longer needed.
+
+## JAX (JIT / `lax.scan`) — AlphaFold3 and IntelliFold v2
 
 - **adapter placement**: the framework-free adapter lives in rgi_toolkit
   (`rgi_toolkit/alphafold3/adapter.py`), like the torch tools; only a thin in-tool shim
   (`alphafold3_restr/.../restraints/adapter.py` `build_af3_adapter`) does the one
   alphafold3-coupled step — CCD/SMILES mol resolution + `fold_input` read — and feeds
   the rgi_toolkit adapter plain data.
+  IntelliFold uses the same arrangement through `intellifold.rgi.build_restraints`
+  and `rgi_toolkit/intellifold/adapter.py`.
 - **no Python callbacks in the scan**: build the spec outside the scan (numpy, at
   build time) and inject `get_minimizer()`'s pure closure inside. Never call the
   Python `minimize` per step in a compiled loop.
