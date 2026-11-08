@@ -8,8 +8,8 @@ chemistry extraction while following Mol-1's actual atom-to-token map.
 
 ## Installation
 
-Install the RGI fork and its engine dependency. This integration uses the
-toolkit's `add_mol1_intellifold` branch until that branch is merged.
+Install the RGI fork. Its engine dependency is installed from the default
+branch of `https://github.com/cddlab/rgi_toolkit.git`.
 
 ```bash
 git clone --branch rgi-integration https://github.com/cddlab/Mol-1_restr.git

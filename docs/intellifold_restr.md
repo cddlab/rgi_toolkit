@@ -24,8 +24,8 @@ uv pip install -e .
 ```
 
 The engine requires a C++ build toolchain. Build native components on a machine
-compatible with the inference node. The wrapper depends on the toolkit's
-`add_mol1_intellifold` branch until that branch is merged. For co-development,
+compatible with the inference node. The wrapper installs the toolkit from the
+default branch of `https://github.com/cddlab/rgi_toolkit.git`. For co-development,
 run `uv pip install -e ../RGI-toolkit` after installing the wrapper.
 
 IntelliFold v2 weights download on first use into `--model-dir`; no AlphaFold 3
