@@ -4,8 +4,7 @@ description: >-
   Integrate Restraint-Guided Inference (RGI) into a diffusion-based structure
   predictor using rgi_toolkit. Use when adding or porting guided sampling,
   distance, group-angle, group-dihedral, ligand-conformer, VdW, RMSD, or custom
-  restraints to boltz, protenix, OpenDDE, chai-lab, openfold-3, esmfold2, AlphaFold3, or
-  a similar sampler. Implement only the framework adapter, sampling-loop hooks,
+  restraints to a structure predictor. Implement only the framework adapter, sampling-loop hooks,
   and restraints_config pass-through; do not duplicate energy, optimization,
   config, or selection logic in the tool.
 ---
@@ -66,7 +65,7 @@ tools drift out of parity. If you find yourself writing a restraint dataclass,
 an energy term, or an atom-selection parser in the tool, stop and use the
 rgi_toolkit one instead.
 
-## Implementation — 3 steps
+## Implementation
 
 ### Step 1 — Install (the backend is inferred, not configured)
 
@@ -89,7 +88,7 @@ mechanism when available. It is a deliberate placement choice, and both options 
 identically at runtime because the rgi_toolkit adapter protocol is duck-typed (no base
 class, no registration):
 
-- **In rgi_toolkit** (`rgi_toolkit/<tool>/adapter.py`) — the convention all seven existing tools
+- **In rgi_toolkit** (`rgi_toolkit/<tool>/adapter.py`) — the convention all eleven existing integrations
   follow; centralizes parity-critical code in one repo (one place to review the `resid`
   convention / a protocol tweak). Needs the adapter to be framework-free (plain dict/array
   in), so any irreducibly framework-coupled step (CCD/SMILES mol resolution, atom-name
@@ -168,7 +167,8 @@ reference for "how small this should be."
 
 ## Framework selection
 
-- **PyTorch (eager loop)** — boltz, protenix, OpenDDE, chai-lab, openfold-3, esmfold2. The
+- **PyTorch (eager loop)** — boltz, protenix, OpenDDE, chai-lab, openfold-3, esmfold2,
+  RF3, BioEmu2, and Mol-1. The
   adapter lives in `rgi_toolkit/<tool>/adapter.py` (it receives a plain dict/array and
   imports no framework code — **except boltz**, whose feats arrive as native torch
   tensors so its adapter imports torch, read at batch 0). Call `minimize` each step.
@@ -177,12 +177,21 @@ reference for "how small this should be."
   (openfold-3 → take geometry from the reference-conformer feature), or real coords
   but no bonds (chai → perceive connectivity), or an over-broad ligand flag (use the
   entity type, not biotite `hetero`). See pitfalls 10–12.
-- **JAX (JIT / lax.scan)** — alphafold3. The framework-free adapter ALSO lives in
+- **JAX (JIT / lax.scan)** — AlphaFold3 and IntelliFold v2. The framework-free adapter ALSO lives in
   rgi_toolkit (`rgi_toolkit/alphafold3/adapter.py`), like the torch tools; only a thin
   **in-tool shim** (`alphafold3_restr/.../restraints/adapter.py` `build_af3_adapter`)
   does the one alphafold3-coupled step — resolve each ligand's CCD/SMILES RDKit mol +
   read `fold_input` — then constructs the rgi_toolkit adapter from plain data. Build the
   spec outside the scan; inject the pure `get_minimizer()` closure inside.
+  IntelliFold follows the same split through `intellifold.rgi.build_restraints`
+  and `rgi_toolkit/intellifold/adapter.py`.
+
+These are eleven integrations; Boltz-1/Boltz-2 and Protenix v1/v2 share adapters.
+ESMFold2's sampling hook lives in `esm_restr/esm/models/esmfold2/layers.py`.
+`processor.py` builds the restraint state; `model.py` and `experimental.py`
+forward it to the sampler in the same directory.
+The integration no longer requires `transformers_restr` or copying hooks into
+an installed `transformers` package.
 
 Details, code, and the non-obvious traps (torch `inference_mode`, jax line
 search collapsing atoms, coordinate reshape) are in

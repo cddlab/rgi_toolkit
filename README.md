@@ -65,7 +65,7 @@ The input file contains both the protein sequence and its `restraints_config`.
 The command fetches an MSA from the server and writes results under the selected
 output directory.
 
-The bundled examples cover four protocols across seven predictors:
+The bundled examples cover five categories across eleven predictor integrations:
 
 | Example | System | Restraint |
 | --- | --- | --- |
@@ -73,10 +73,13 @@ The bundled examples cover four protocols across seven predictors:
 | [Angle](examples/angle/) | ADK | NMP–CORE–LID centroid angle of 72.85° |
 | [RMSD](examples/rmsd/) | QBP | RMSD targets of 2.65 Å to both open and closed references |
 | [Custom energy](examples/custom/dist-diff/) | DgoT | Difference between two domain distances of 0.8 Å |
+| [Ligand dissociation](examples/ligand-dissociation/) | MDM2–p53 | Chain-centroid distance of 30 Å |
 
+Each category includes a `run.sh` for Boltz-2, Protenix v2, AlphaFold3, OpenFold-3,
+Chai-1, ESMFold2, OpenDDE, RF3, BioEmu2, Mol-1 and IntelliFold v2. RF3 examples
+are included here, such as [the RF3 distance example](examples/distance/rf3/).
 See the [example guide](examples/README.md) for predictor-specific environments,
-MSA inputs, reference structures and run commands. RF3 examples are maintained in
-the [Foundry integration](https://github.com/cddlab/foundry_restr/tree/rgi-integration/examples/rgi).
+MSA inputs, reference structures and run commands.
 
 ## Google Colab
 
@@ -115,6 +118,8 @@ The backends below refer to the local predictor integrations.
 | **OpenDDE v1** | opendde | PyTorch | [OpenDDE](docs/opendde_restr.md) |
 | **RF3** | foundry | PyTorch | [RF3](docs/foundry_restr.md) |
 | **BioEmu2** | bioemu2 | PyTorch | [BioEmu2](docs/bioemu2_restr.md) |
+| **Mol-1** | mol1 | PyTorch | [Mol-1](docs/mol1_restr.md) |
+| **IntelliFold v2** | intellifold | JAX | [IntelliFold](docs/intellifold_restr.md) |
 
 Each guide covers installation, input configuration and the prediction command.
 The [documentation index](docs/README.md) also summarizes where each predictor

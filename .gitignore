@@ -216,3 +216,7 @@ __marimo__/
 /examples/**/*.a3m
 /examples/**/*.aligned.pqt
 /examples/ligand-dissociation/msas/
+
+# Generated predictor inputs after MSA and template preprocessing
+/examples/**/*-update-msa.json
+/examples/**/*-final-updated.json

@@ -65,15 +65,16 @@ run cancels an older run for the same branch or pull request.
 
 **rgi_toolkit** — Restraint-Guided Inference (RGI): inject distance + ligand
 conformer + RMSD restraints into a structure-prediction diffusion loop via gradient
-optimization. Shared by **nine** integrations — boltz / protenix / chai-lab / openfold-3 /
-esmfold2 / opendde / rf3 / bioemu2 (torch) and alphafold3 (jax), covering 11 model variants (boltz1+boltz2 and
+optimization. Shared by **eleven** integrations — boltz / protenix / chai-lab / openfold-3 /
+esmfold2 / opendde / rf3 / bioemu2 / mol1 (torch) and alphafold3 / intellifold (jax),
+covering 13 model variants (boltz1+boltz2 and
 protenix v1+v2 each share one adapter). The end-to-end guide for integrating a new tool is the
 `implement-rgi` skill, shared from `.claude/skills/` to `.agents/skills/` (alongside
 `generate-rgi-config` for authoring a config, `sync-upstream`, `create-github-release`).
 Per-tool as-built integration write-ups live in `docs/<tool>.md` (one per tool); the shared
 config + selection-DSL surface is `docs/config.md`. `examples/` holds ready-to-run samples
 organized by restraint type and predictor:
-distance, angle, RMSD, custom, and MDM2-p53 ligand dissociation for nine predictors,
+distance, angle, RMSD, custom, and MDM2-p53 ligand dissociation for eleven predictors,
 each with a `run.sh`. Reuse those fixtures instead of authoring new ones.
 
 Design = **3 layers + autodiff + static shapes + GPU-complete optimization**:
@@ -379,7 +380,7 @@ prior spec/optimizer up front so a reused instance is safe) →
 `minimize(coords, step, sigma)` → `finalize(coords, step)`. Always construct a fresh
 instance per structure (the old `get_instance()`/`reset()` singleton shim was removed). The
 backend is **inferred from invocation, NOT a config key**: `get_minimizer()` →
-jax (only AF3 calls it); `minimize(coords)` → jax if `coords` is a jax array, else
+jax (used by AF3 and IntelliFold); `minimize(coords)` → jax if `coords` is a jax array, else
 torch (numpy/torch coords both take the torch path). Resolution is lazy — `setup`
 leaves `self._backend = None` and builds the optimizer on the first
 `minimize`/`get_minimizer` (`_ensure_backend` raises if one instance is invoked under
@@ -394,12 +395,12 @@ when `gpu:true`), NOT the backend, so `gpu:false` runs the torch optimizer on CP
 (moving GPU coords to CPU and back). There is no numpy optimizer (numpy is the energy
 reference only); a leftover `backend:` config key raises with a migration hint.
 torch/jax imported lazily. JAX tools inside `lax.scan` grab the pure minimizer via
-`get_minimizer()` instead of calling `minimize` per step (so for AF3 the `gpu` flag is
-inert — to run AF3 restraints on CPU, run the whole process on the JAX CPU platform).
+`get_minimizer()` instead of calling `minimize` per step. The `gpu` flag is inert
+for AF3 and IntelliFold; run the whole process on the JAX CPU platform to use CPU.
 
 #### Framework adapters
 
-(`{boltz,protenix,chai,openfold3,esmfold2,opendde,rf3,bioemu2,alphafold3}/adapter.py` —
+(`{boltz,protenix,chai,openfold3,esmfold2,opendde,rf3,bioemu2,mol1,alphafold3,intellifold}/adapter.py` —
 framework-free EXCEPT boltz, whose feats arrive as native torch tensors so its adapter
 imports torch (read at batch 0); the others import no framework. AF3's CCD/SMILES mol
 resolution lives in a thin in-tool shim
@@ -408,10 +409,15 @@ data): implement `iter_atoms()` (→
 `AtomRecord(chain, resid, index)` for distance selection) and optionally
 `num_atoms()`, `get_elements()`, `iter_ligand_confs()` (→
 `LigandConf(mol, conf_coords, global_indices, stereo_mol=...)` for conformer + VdW;
-`stereo_mol` is the optional source SMILES graph renumbered to coordinate order). The four tools whose
-features arrive as a **biotite `AtomArray`** (protenix / openfold3 / opendde / rf3) share
+`stereo_mol` is the optional source SMILES graph renumbered to coordinate order). The five tools whose
+features arrive as a **biotite `AtomArray`** (protenix / openfold3 / opendde / rf3 / mol1) share
 `_biotite_adapter.py` (`biotite_get_elements` / `biotite_ligand_confs`) rather than each
-re-deriving elements + ligand conformers — extend that module, not the four call sites.
+re-deriving elements + ligand conformers — extend that module, not the call sites.
+
+Mol-1 reuses the Protenix adapter chemistry and derives per-chain residue ordinals
+from its actual atom-to-token map. IntelliFold reuses the AF3 adapter and obtains
+CCD/SMILES molecules from `intellifold.rgi.build_restraints`. Its JAX loop takes
+the scan minimizer as a numeric pytree so targets remain dynamic across inputs.
 
 RF3 receives the final atom-to-token map, reference positions and reference-space IDs
 from the tool-side shim, which also normalizes AtomWorks entity types and resolves

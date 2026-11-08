@@ -45,16 +45,16 @@ spells out the trade-off and requires a structured question when the client supp
 one): in rgi_toolkit (the convention below) or in the tool's own codebase (rgi_toolkit left
 unedited, the tool owns the adapter and may import its framework freely — at the cost of
 having to track protocol drift). Both work — the protocol is duck-typed (no base class,
-no registration). The existing seven all chose rgi_toolkit:
+no registration). The existing eleven integrations all chose rgi_toolkit:
 
-**All seven adapters live in `rgi_toolkit/<tool>/adapter.py`** — the project keeps them
+**All eleven adapters live in `rgi_toolkit/<tool>/adapter.py`** — the project keeps them
 together so a cross-tool invariant (the `resid` convention, a protocol tweak) is
 reviewed in one place. They receive plain dict/array data and import no framework
 code, EXCEPT boltz, whose feats arrive as native torch tensors so its adapter imports
 torch (read at batch 0).
 
 - **PyTorch tool**: drop the adapter straight into `rgi_toolkit/<tool>/adapter.py`.
-- **JAX tool (AF3)**: the framework-free adapter ALSO lives in rgi_toolkit
+- **JAX tools (AF3 and IntelliFold)**: the framework-free adapter ALSO lives in rgi_toolkit
   (`rgi_toolkit/alphafold3/adapter.py`). Only the irreducibly framework-coupled step —
   resolving each ligand's CCD/SMILES RDKit mol and reading `fold_input` — stays in a
   thin **in-tool shim** (`alphafold3_restr/.../restraints/adapter.py`
@@ -63,6 +63,8 @@ torch (read at batch 0).
   mapping, atom-name decode, leaving-atom subset, `iter_atoms` / `iter_ligand_confs`)
   is the framework-free rgi_toolkit adapter. The split keeps the dependency direction
   clean (rgi_toolkit imports no alphafold3) while still centralizing the adapter logic.
+  IntelliFold uses `intellifold.rgi.build_restraints` for this shim and
+  `rgi_toolkit/intellifold/adapter.py` for its adapter.
 
 ## Worked example 1 — boltz (reads a feats dict, batch 0)
 
@@ -143,7 +145,7 @@ is rgi_toolkit.
 
 ## Full source
 
-The seven complete adapters are the ground truth:
+The eleven adapters are the ground truth:
 - `RGI-toolkit/src/rgi_toolkit/boltz/adapter.py` — feats dict + exposed `ligand_mols`
 - `RGI-toolkit/src/rgi_toolkit/protenix/adapter.py` — biotite AtomArray (real bonds + coords)
 - `RGI-toolkit/src/rgi_toolkit/chai/adapter.py` — reference conformer; prefers the source SMILES (`_mol_from_smiles`, real bond orders), falling back to `build_ligand_mol(perceive_bonds=True)` when none is supplied
@@ -151,6 +153,10 @@ The seven complete adapters are the ground truth:
 - `RGI-toolkit/src/rgi_toolkit/esmfold2/adapter.py` — one token/atom; intra-ligand bonds + orders from `token_bonds` / `ligand_bond_orders` (CCD or SMILES)
 - `RGI-toolkit/src/rgi_toolkit/alphafold3/adapter.py` — framework-free (JAX), fed by the in-tool shim `<af3>/src/alphafold3/model/restraints/adapter.py` (`build_af3_adapter` = CCD/SMILES mol resolution + `fold_input` read)
 - `RGI-toolkit/src/rgi_toolkit/opendde/adapter.py` — OpenDDE AtomArray metadata + pre-expansion token mapping + `ref_pos`; ligand identity from `mol_type`
+- `RGI-toolkit/src/rgi_toolkit/rf3/adapter.py` — AtomArray metadata, final atom-to-token mapping, reference positions, and source ligand chemistry
+- `RGI-toolkit/src/rgi_toolkit/bioemu2/adapter.py` — topology and reference coordinates supplied by the BioEmu2 shim
+- `RGI-toolkit/src/rgi_toolkit/mol1/adapter.py` — shared Protenix chemistry with Mol-1's per-chain atom-to-token mapping
+- `RGI-toolkit/src/rgi_toolkit/intellifold/adapter.py` — shared AF3 layout with CCD/SMILES molecules supplied by `intellifold.rgi.build_restraints`
 
 The chai and openfold3 adapters are worth reading specifically for the "tool exposes
 an incomplete ligand picture" cases (pitfalls 10–12).

@@ -20,6 +20,8 @@ Guides are available for the following predictor integrations.
 | OpenDDE v1 | PyTorch | `restraints_config` in each fold-input JSON object | [OpenDDE](opendde_restr.md) |
 | RF3 (Foundry) | PyTorch | `restraints_config` in each input JSON job | [RF3](foundry_restr.md) |
 | BioEmu2 | PyTorch | `restraints_config` in the system YAML or `System` | [BioEmu2](bioemu2_restr.md) |
+| Mol-1 | PyTorch | `restraints_config` in each fold-input JSON object | [Mol-1](mol1_restr.md) |
+| IntelliFold v2 | JAX | `restraints_config` in the fold-input JSON | [IntelliFold](intellifold_restr.md) |
 
 ## Recommended workflow
 
@@ -37,7 +39,7 @@ Guides are available for the following predictor integrations.
 - Conformer terms require both `conformer_restraints_config` and a per-ligand opt-in. The opt-in
   location differs by tool.
 - The backend is inferred from the predictor. `gpu` selects the PyTorch device and is inert for
-  AlphaFold 3's JAX path.
+  AlphaFold 3 and IntelliFold's JAX paths.
 - Config validation checks schema and selection syntax. Runtime `built spec:` counts confirm
   which restraints were built; verify the selected atom identities separately against the input
   structure to check that the selections match the intended atoms.

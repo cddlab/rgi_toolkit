@@ -13,8 +13,8 @@ contains one setting per model.
 | `custom/dist-diff/` | DgoT, 419 residues | ΔD = D_in − D_out = 0.8 Å |
 | `ligand-dissociation/` | MDM2–p53 | Chain-centroid distance of 30.0 Å |
 
-The nine predictors covered here are `boltz-2`, `protenix-v2`, `alphafold3`,
-`openfold-3`, `chai`, `esmfold2`, `opendde`, `rf3`, and `bioemu2`.
+The eleven predictors covered here are `boltz-2`, `protenix-v2`, `alphafold3`,
+`openfold-3`, `chai`, `esmfold2`, `opendde`, `rf3`, `bioemu2`, `mol1`, and `intellifold`.
 
 ## Run
 
@@ -73,10 +73,13 @@ For comparisons across predictors, use the same full ColabFold A3M for each
 protein. Reproducing a prediction also requires the same model checkpoint and
 seed.
 
-Boltz-2, Protenix-v2, OpenFold3, Chai, and BioEmu2 use an MSA server.
+Boltz-2, Protenix-v2, OpenFold3, Chai, BioEmu2, and Mol-1 use an MSA server.
 RF3 uses the supplied sequence;
 add `msa_paths` to its input to provide alignments. AlphaFold3 uses its
-local data pipeline and requires `MODEL_DIR` and `DB_DIR`. ESMFold2 reads the full
+local data pipeline and requires `MODEL_DIR` and `DB_DIR`. IntelliFold also uses
+the local pipeline and requires `DB_DIR`; its v2 weights download automatically
+into `MODEL_DIR`. Set `RUN_DATA_PIPELINE=false` for inputs carrying MSAs and
+templates. ESMFold2 reads the full
 A3M from `MSA_A3M` for single-chain examples, or `MSA_A3M_A` and `MSA_A3M_B`
 for ligand dissociation. It checks each query against the example sequence and uses
 `msa_max_depth=1024` and `msa_column_mask_rate=0.1`, with 20 recurrent
@@ -87,8 +90,9 @@ To reuse a precomputed MSA, provide it through the predictor's native input:
 | Predictor | Precomputed MSA input |
 |---|---|
 | Boltz-2 | Protein `msa` field; omit `--use_msa_server` |
-| Protenix-v2 | Protein-chain `unpairedMsaPath` |
+| Protenix-v2 / Mol-1 | Protein-chain `unpairedMsaPath` |
 | AlphaFold3 | Protein `unpairedMsaPath`, `pairedMsa: ""`, and `templates: []`; use `--run_data_pipeline=False` |
+| IntelliFold v2 | The same AF3 fields; set `RUN_DATA_PIPELINE=false` in the example runner |
 | OpenFold3 | Chain `main_msa_file_paths`; use `--use-msa-server false` |
 | Chai | Aligned Parquet files through `--msa-directory`; omit `--use-msa-server` |
 | ESMFold2 | `MSA_A3M`, or `MSA_A3M_A` / `MSA_A3M_B` for ligand dissociation |
