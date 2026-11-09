@@ -12,7 +12,7 @@ Install the RGI fork. Its engine dependency is installed from the default
 branch of `https://github.com/cddlab/rgi_toolkit.git`.
 
 ```bash
-git clone --branch rgi-integration https://github.com/cddlab/Mol-1_restr.git
+git clone https://github.com/cddlab/Mol-1_restr.git
 cd Mol-1_restr
 uv venv --python 3.12
 source .venv/bin/activate
