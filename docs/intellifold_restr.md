@@ -14,7 +14,7 @@ Install both the fork's vendored engine and its wrapper. A stock AlphaFold 3
 installation does not contain the RGI sampling hooks.
 
 ```bash
-git clone --branch rgi-integration https://github.com/cddlab/IntelliFold_restr.git
+git clone https://github.com/cddlab/IntelliFold_restr.git
 cd IntelliFold_restr
 uv venv --python 3.12
 source .venv/bin/activate
